@@ -131,6 +131,21 @@ async def test_rail_has_a_redo_plan_row_with_f9_only_when_something_is_marked():
         assert "↻" in row and row.rstrip().endswith("F9")
 
 
+async def test_clicking_the_redo_plan_row_opens_the_plan_and_the_row_needs_a_mark():
+    from hunches.screens.redo_plan import RedoPlanScreen
+
+    app = HunchesApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        assert not any("Redo plan" in ln for ln in rail_lines(app))
+        edit_prompt()
+        await pilot.pause(0.6)
+        y = next(i for i, ln in enumerate(rail_lines(app)) if "Redo plan" in ln)
+        await pilot.click(StatusHeader, offset=(6, y))
+        await pilot.pause()
+        assert isinstance(app.screen, RedoPlanScreen)
+
+
 async def test_rail_tooltip_lists_each_marked_stage_with_its_reason():
     edit_prompt()
     app = HunchesApp()

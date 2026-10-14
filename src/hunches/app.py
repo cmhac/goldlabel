@@ -122,10 +122,10 @@ def plan_hint() -> str:
 RAIL_WIDTH = 26
 RAIL_MIN = 100  # terminal columns from which the header becomes the left rail
 DESTINATIONS = [
-    ("Projects", "F4"),
-    ("Project settings", "F3"),
-    ("System settings", "F5"),
-    ("History", "F8"),
+    ("Projects", "F4", "projects"),
+    ("Project settings", "F3", "settings"),
+    ("System settings", "F5", "system_settings"),
+    ("History", "F8", "history"),
 ]
 # which destination the open screen is, by its stage_name
 DESTINATION_OF = {
@@ -260,7 +260,7 @@ class StatusHeader(Static):
         here = DESTINATION_OF.get(screen_name or "")
         current = 0 if screen_name else stage  # an overlay screen: no stage is current
 
-        def row(mark, mark_style, text, text_style, on=False, key=""):
+        def row(mark, mark_style, text, text_style, on=False, key="", act=""):
             bg = "on $panel" if on else ""
             room = RAIL_WIDTH - 5 - (len(key) + 1 if key else 0)
             if len(text) > room:
@@ -268,6 +268,7 @@ class StatusHeader(Static):
             tail = markup(f"$text-disabled {bg}", f" {key}") if key else ""
             return "".join(
                 (
+                    f"[@click=app.{act}]" if act else "",
                     markup(f"$primary {bg}", "▌" if on else " "),
                     markup(bg, " "),
                     markup(f"{mark_style} {bg}", mark),
@@ -275,6 +276,7 @@ class StatusHeader(Static):
                     markup(f"{text_style} {bg}", escape(text.ljust(room))),
                     tail,
                     markup(bg, " "),
+                    "[/]" if act else "",
                 )
             )
 
@@ -290,6 +292,7 @@ class StatusHeader(Static):
         for num, label, _ in STAGES:
             mark = RUNNING if num in running else MARKS.get(status[num][0])
             tone = "$accent" if num in running else "$warning"
+            act = f"stage({num})"
             if num == current:
                 lines.append(
                     row(
@@ -298,14 +301,17 @@ class StatusHeader(Static):
                         label,
                         "b #EEF1F5",
                         on=True,
+                        act=act,
                     )
                 )
             elif mark:
-                lines.append(row(mark, tone, label, tone))
+                lines.append(row(mark, tone, label, tone, act=act))
             elif num < stage:
-                lines.append(row("✓", "$success", label, "$text-muted"))
+                lines.append(row("✓", "$success", label, "$text-muted", act=act))
             else:
-                lines.append(row("·", "$text-disabled", label, "$text-disabled"))
+                lines.append(
+                    row("·", "$text-disabled", label, "$text-disabled", act=act)
+                )
         kinds = [k for k in MARKS if any(status[n][0] == k for n in status)]
         if kinds:
             lines.append(
@@ -314,9 +320,12 @@ class StatusHeader(Static):
         if running:
             lines.append(plain(f"{RUNNING} running", "$text-muted"))
         lines.append("")
-        for label, key in DESTINATIONS:
+        for label, key, action in DESTINATIONS:
+            act = f"rail('{action}')"
             if label == here:
-                lines.append(row("▸", "$primary", label, "b #EEF1F5", on=True, key=key))
+                lines.append(
+                    row("▸", "$primary", label, "b #EEF1F5", on=True, key=key, act=act)
+                )
             else:
                 # History is unavailable while an editor draft is open
                 tone = (
@@ -324,9 +333,18 @@ class StatusHeader(Static):
                     if label == "History" and getattr(self.screen, "editing", False)
                     else "$text-muted"
                 )
-                lines.append(row(" ", tone, label, tone, key=key))
+                lines.append(row(" ", tone, label, tone, key=key, act=act))
         if kinds:
-            lines.append(row(" ", "$warning", "↻ Redo plan", "$warning", key="F9"))
+            lines.append(
+                row(
+                    " ",
+                    "$warning",
+                    "↻ Redo plan",
+                    "$warning",
+                    key="F9",
+                    act="rail('redo_plan')",
+                )
+            )
         bottom = [
             plain("n/p stage · q quit", "$text-disabled"),
             "",
@@ -1231,6 +1249,31 @@ class HunchesApp(App):
         ):  # n/p mean nothing outside a project (Projects uses n for New)
             return self.stage > 0 and not isinstance(self.screen, ProjectsScreen)
         return True
+
+    def action_stage(self, number: int) -> None:
+        """A click on a stage row in the rail: from an overlay too, never on a modal, nothing for the stage already shown."""
+        if (
+            self.stage
+            and not isinstance(self.screen, ModalScreen)
+            and (self.screen is not self.stage_screen or number != self.stage)
+        ):
+            self.goto_stage(number)
+
+    def action_rail(self, name: str) -> None:
+        """A click on a destination row: what its key does; one overlay replaces another, the current one stays."""
+        if isinstance(self.screen, ModalScreen) or not self.stage:
+            return
+        overlay = getattr(self.screen, "stage_name", None)
+        if overlay and name != "history" and name != "redo_plan":
+            if any(
+                label == DESTINATION_OF.get(overlay)
+                for label, _, action in DESTINATIONS
+                if action == name
+            ):
+                return
+            while self.screen is not self.stage_screen:
+                self.pop_screen()
+        getattr(self, f"action_{name}")()
 
     def action_goto(self, step: int) -> None:
         if self.stage and not isinstance(self.screen, ModalScreen):

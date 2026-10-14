@@ -474,3 +474,23 @@ async def test_a_blocked_start_frees_itself_when_the_earlier_run_ends(
         await pilot.pause(0.6)
         assert screen.check_action("start", ()) is True
         assert "Search is running." not in str(screen.query_one("#run-status").render())
+
+
+async def test_clicking_another_stage_in_the_rail_keeps_a_search_running(
+    gate, stub_taxonomy_assistant
+):
+    app = HunchesApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        search_gate = asyncio.Event()
+        search = await start_search(app, pilot, search_gate)
+        label = files.STAGE_NAMES[2]
+        y = next(i for i, ln in enumerate(rail(app).split("\n")) if label in ln)
+        await pilot.click(StatusHeader, offset=(6, y))
+        await pilot.pause()
+        assert app.stage == 3 and app.screen is not search
+        assert search.searching and app.running_stages() == [2]
+        assert any("▶" in ln and "Search" in ln for ln in rail(app).split("\n"))
+        search_gate.set()
+        await pilot.pause(0.5)
+        assert app.running_stages() == []

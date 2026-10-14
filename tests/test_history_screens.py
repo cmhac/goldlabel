@@ -740,7 +740,9 @@ async def test_the_rail_row_for_history_is_dimmed_while_an_editor_is_open(
     def history_style(app) -> str:
         content = app.screen.query_one(StatusHeader).render()
         at = str(content).index("History")
-        return next(s.style for s in content.spans if s.start <= at < s.end)
+        return next(  # the row is wrapped in a click span; the last one covering it is the text's own
+            s.style for s in reversed(content.spans) if s.start <= at < s.end
+        )
 
     brief_setup(tmp_path, monkeypatch)
     write_seeds(["a"], summary="Seed added")
