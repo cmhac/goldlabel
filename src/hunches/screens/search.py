@@ -30,7 +30,7 @@ RERUN = (
     "Depending on the size of the corpus, this can take a long time. "
     "Are you sure you want to rerun searches?"
 )
-BAR_WIDTH = 30  # longest band bar, in cells
+BAND_BAR_MAX = 40  # longest band bar, in cells
 SEED_BAR_WIDTH = 12
 
 
@@ -41,9 +41,56 @@ def bar(n: int, biggest: int, width: int) -> str:
     return "█" * max(1, round(width * n / biggest))
 
 
+def band_rows(counts: list[int], width: int, primary: str = "") -> list[Text]:
+    """Header plus one row per band: label 11, bar (fills, at most 40 cells), count 11 right-aligned."""
+    room = max(0, width - 26)
+    header = Text(
+        "Similarity".ljust(11) + "  " + " " * room + "  " + "Candidates".rjust(11)
+    )
+    header.stylize("dim")
+    rows = [header]
+    edges = candidates.BANDS
+    for i, edge in enumerate(edges):
+        last = i == len(edges) - 1
+        name = f"{edge:g}+" if last else f"{edge:g}–{edges[i + 1]:g}"
+        row = Text(f"{name:<11}  ")
+        cells = bar(counts[i], max(counts), min(BAND_BAR_MAX, room))
+        row.append(cells, primary)
+        row.append(" " * (room - len(cells)) + "  ")
+        row.append(f"{counts[i]:,}".rjust(11), "bold" if counts[i] else "dim")
+        rows.append(row)
+    return rows
+
+
+def seed_rows(
+    top: list[tuple[str, int]], width: int, primary: str = "", accent: str = ""
+) -> list[Text]:
+    """Rank 3, count 7, bar 12 (first row accent), then the seed, truncated to the width."""
+    room = max(1, width - 27)
+    rows = []
+    for rank, (seed, n) in enumerate(top, 1):
+        row = Text()
+        row.append(f"{rank:>3} ", "dim")
+        row.append(f"{n:>7,} ", "bold")
+        cells = bar(n, top[0][1], SEED_BAR_WIDTH)
+        row.append(cells, accent if rank == 1 else primary)
+        row.append(" " * (SEED_BAR_WIDTH - len(cells) + 3))
+        row.append(seed if len(seed) <= room else seed[: room - 1] + "…")
+        rows.append(row)
+    return rows
+
+
+class Rows(Static):
+    """A grid of text lines built from the width it actually has."""
+
+    def on_resize(self) -> None:
+        self.screen.draw()  # ty: ignore[unresolved-attribute]
+
+
 class SearchScreen(Screen):
     BINDINGS: ClassVar = [("r", "run", "Run search"), ("x", "stop", "Stop")]
     DEFAULT_CSS = """
+    SearchScreen #main { height: 1fr; }
     SearchScreen #top { height: 1; margin-bottom: 1; }
     SearchScreen #top > Button { width: auto; }
     SearchScreen #stop { display: none; margin-left: 1; }
@@ -52,12 +99,20 @@ class SearchScreen(Screen):
     SearchScreen #warning, SearchScreen #error { width: 1fr; height: auto; }
     SearchScreen #results { height: 1fr; }
     SearchScreen #results.-inactive { opacity: 40%; }
-    SearchScreen #bands-panel { height: auto; }
-    SearchScreen #bands { height: auto; }
+    SearchScreen #bands-panel { height: auto; margin-bottom: 1; }
+    SearchScreen #bands { width: 1fr; height: auto; }
     SearchScreen #seeds-panel { height: 1fr; }
-    SearchScreen #seeds { height: auto; }
+    SearchScreen #seeds { width: 1fr; height: auto; }
     SearchScreen #threshold { width: 10; margin-left: 1; }
     SearchScreen #threshold > SelectCurrent { padding: 0; }
+    /* Before the first results only the run block shows, centred */
+    SearchScreen.-first #main { align: center middle; }
+    SearchScreen.-first #top { layout: vertical; height: auto; width: 100%; margin: 0; align-horizontal: center; }
+    SearchScreen.-first #top > * { width: 36; margin: 0; }  /* align centres the group, so one width */
+    SearchScreen.-first #top > #status { text-align: center; margin-top: 1; }
+    SearchScreen.-first #top > #progress, SearchScreen.-first #top > #stop { margin-top: 1; }
+    SearchScreen.-first #warning, SearchScreen.-first #error { text-align: center; margin-top: 1; }
+    SearchScreen.-first #results { display: none; }
     """
 
     def __init__(self) -> None:
@@ -75,26 +130,29 @@ class SearchScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield StatusHeader()
-        with Horizontal(id="top"):
-            yield key_button("Run search", "r", id="run", variant="primary")
-            yield key_button("Stop", "x", id="stop", variant="error")
-            yield Label("", id="status")
-            yield LabelBar(0, 0, "", align="left", id="progress")
-        yield Static("", id="pool", classes="banner -stale")
-        yield Static(
-            "", id="embedding-warning", classes="banner -warning", markup=False
-        )
-        yield Static("", id="approximate", classes="banner -warning", markup=False)
-        yield Static("", id="gold-orphans", classes="warn", markup=False)
-        yield Label("", id="warning", classes="warn")
-        yield Label("", id="error", classes="error")
-        with Vertical(id="results"):
-            with panel(Vertical(id="bands-panel"), "Candidates by similarity"):
-                yield Static("", id="bands")
-            with panel(
-                VerticalScroll(id="seeds-panel"), "Top seeds", "similarity at or above"
-            ):
-                yield Static("", id="seeds")
+        with Vertical(id="main"):
+            with Horizontal(id="top"):
+                yield key_button("Run search", "r", id="run", variant="primary")
+                yield key_button("Stop", "x", id="stop", variant="error")
+                yield Label("", id="status")
+                yield LabelBar(0, 0, "", align="left", id="progress")
+            yield Static("", id="pool", classes="banner -stale")
+            yield Static(
+                "", id="embedding-warning", classes="banner -warning", markup=False
+            )
+            yield Static("", id="approximate", classes="banner -warning", markup=False)
+            yield Static("", id="gold-orphans", classes="warn", markup=False)
+            yield Label("", id="warning", classes="warn")
+            yield Label("", id="error", classes="error")
+            with Vertical(id="results"):
+                with panel(Vertical(id="bands-panel"), "Candidates by similarity"):
+                    yield Rows("", id="bands")
+                with panel(
+                    VerticalScroll(id="seeds-panel"),
+                    "Top seeds",
+                    "similarity at or above",
+                ):
+                    yield Rows("", id="seeds")
         yield AppFooter()
 
     @staticmethod
@@ -154,7 +212,10 @@ class SearchScreen(Screen):
             self.query_one("#approximate", Static),
             APPROXIMATE if search.is_approximate(files.read_config()) else "",
         )
-        self.query_one("#results").set_class(not approved or not exists, "-inactive")
+        self.set_class(not exists, "-first")
+        self.query_one("#results").set_class(
+            exists and (self.searching or not approved), "-inactive"
+        )
         say(
             self.query_one("#embedding-warning", Static),
             f"WARNING: this project now uses the embedding model {model[0]}, but the current "
@@ -274,50 +335,31 @@ class SearchScreen(Screen):
 
     def on_select_changed(self, event: Select.Changed) -> None:
         self.threshold = float(event.value)  # ty: ignore[invalid-argument-type]
-        self.show_seeds()
+        self.draw()
 
     def color(self, name: str) -> str:
         return Color.parse(self.app.theme_variables[name]).hex6
 
     def show(self, rows: list[dict]) -> None:
         self.rows = rows
-        counts = candidates.band_counts(rows)
-        text = Text()
-        for i, edge in enumerate(candidates.BANDS):
-            last = i == len(candidates.BANDS) - 1
-            name = f"{edge:g}+" if last else f"{edge:g}-{candidates.BANDS[i + 1]:g}"
-            text.append(f"{name:<12}")
-            text.append(
-                f"{bar(counts[i], max(counts), BAR_WIDTH):<{BAR_WIDTH}}",
-                self.color("primary"),
-            )
-            text.append(f"{counts[i]:>8,}", "bold")
-            text.append("" if last else "\n")
-        self.query_one("#bands", Static).update(text)
         retitle(self.query_one("#bands-panel"), subtitle=f"{len(rows):,} candidates")
-        self.show_seeds()
+        self.draw()
 
-    def show_seeds(self) -> None:
-        top = candidates.top_seeds(self.rows, self.threshold)
+    def draw(self) -> None:
+        """Render both grids at the width they have now; hidden (width 0) ones draw when shown."""
+        primary = self.color("primary")
+        bands = self.query_one("#bands", Static)
+        if bands.size.width:
+            counts = candidates.band_counts(self.rows)
+            bands.update(Text("\n").join(band_rows(counts, bands.size.width, primary)))
         seeds = self.query_one("#seeds", Static)
-        if not top:
-            seeds.update(
-                Text(
-                    "No items at or above this similarity."
-                    if self.rows
-                    else "Run the search to see which seeds find the most items.",
-                    "dim",
-                )
-            )
+        if not seeds.size.width:
             return
-        text = Text()
-        for rank, (seed, n) in enumerate(top, 1):
-            text.append(f"{rank:>3}  ", "dim")
-            text.append(f"{n:>7,}  ", "bold")
-            text.append(
-                f"{bar(n, top[0][1], SEED_BAR_WIDTH):<{SEED_BAR_WIDTH}}",
-                self.color("accent" if rank == 1 else "primary"),
+        top = candidates.top_seeds(self.rows, self.threshold)
+        seeds.update(
+            Text("\n").join(
+                seed_rows(top, seeds.size.width, primary, self.color("accent"))
             )
-            text.append(f"  {seed}")
-            text.append("" if rank == len(top) else "\n")
-        seeds.update(text)
+            if top
+            else Text("No items at or above this similarity.", "dim")
+        )

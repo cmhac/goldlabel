@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import numpy as np
@@ -9,7 +10,7 @@ from pydantic_ai.usage import RequestUsage
 from textual.widgets import Button, Label, Select, Static
 
 from hunches import candidates, files, search
-from hunches.app import ConfirmScreen, HunchesApp
+from hunches.app import ConfirmScreen, HunchesApp, say
 from hunches.screens.progress import LabelBar
 from hunches.screens.search import SearchScreen
 
@@ -67,10 +68,19 @@ async def run(pilot, app, screen):
     await pilot.pause()
 
 
-def band_rows(screen):
-    """[(band name, count text)] from the bands Static: first and last word of each line."""
-    lines = str(screen.query_one("#bands", Static).content).splitlines()
+def band_pairs(screen):
+    """[(band name, count text)] from the bands Static: first and last word of each line, header skipped."""
+    lines = str(screen.query_one("#bands", Static).content).splitlines()[1:]
     return [(line.split()[0], line.split()[-1]) for line in lines]
+
+
+def centred(widget, area):
+    """Widget's middle is within one cell across and one row down of the area's middle."""
+    r, a = widget.region, area.region
+    return (
+        abs((r.x + r.width / 2) - (a.x + a.width / 2)) <= 1
+        and abs((r.y + r.height / 2) - (a.y + a.height / 2)) <= 1
+    )
 
 
 def label(screen):
@@ -98,19 +108,20 @@ async def test_band_bars_match_counts():
         screen.embedder = StubEmbedder({"alpha": [1, 0]})
         await run(pilot, app, screen)
         # similarities 1.0 (0.75+), 0.8 (0.75+), 0.7 (0.7-0.725), 0.62 (0.6-0.625)
-        assert band_rows(screen) == [
-            ("0.6-0.625", "1"),
-            ("0.625-0.65", "0"),
-            ("0.65-0.675", "0"),
-            ("0.675-0.7", "0"),
-            ("0.7-0.725", "1"),
-            ("0.725-0.75", "0"),
+        assert band_pairs(screen) == [
+            ("0.6–0.625", "1"),
+            ("0.625–0.65", "0"),
+            ("0.65–0.675", "0"),
+            ("0.675–0.7", "0"),
+            ("0.7–0.725", "1"),
+            ("0.725–0.75", "0"),
             ("0.75+", "2"),
         ]
         text = str(screen.query_one("#bands", Static).content)
         assert "At or above" not in text and "Total" not in text
+        assert text.splitlines()[0].split() == ["Similarity", "Candidates"]
         # the largest band (count 2) has the longest bar; empty bands have none
-        bars = [line.count("█") for line in text.splitlines()]
+        bars = [line.count("█") for line in text.splitlines()[1:]]
         assert bars[6] == max(bars) > bars[0] == bars[4] > 0 == bars[1]
         assert panel_title(screen.query_one("#bands-panel")) == (
             "Candidates by similarity",
@@ -180,11 +191,12 @@ async def test_embedding_model_mismatch_is_shown():
         assert "mismatch" in error and "embedding_model" in error
         assert screen.query_one("#error").has_class("error")
         assert "\nFix:" in error
-        assert screen.query_one("#results").has_class("-inactive")  # failed: dimmed
+        assert screen.has_class("-first") and not screen.query_one("#results").display
+        assert screen.query_one("#error").region.y > screen.query_one("#run").region.y
         assert app.is_running
 
 
-async def test_never_run_state():
+async def test_never_run_shows_only_the_centred_run_block():
     app = HunchesApp()
     async with app.run_test(size=(80, 24)) as pilot:
         screen = await open_search(pilot, app)
@@ -193,16 +205,11 @@ async def test_never_run_state():
         assert button.variant == "primary" and not button.disabled
         assert button.size.height == 1
         assert not status(screen)
-        assert screen.query_one("#results").has_class("-inactive")
+        assert screen.has_class("-first")
+        assert not screen.query_one("#results").display
+        assert centred(button, screen.query_one("#main"))
         assert not screen.query_one("#progress").display
         assert not screen.query_one("#pool").display
-        assert panel_title(screen.query_one("#bands-panel"))[0] == (
-            "Candidates by similarity"
-        )
-        assert panel_title(screen.query_one("#seeds-panel"))[0] == "Top seeds"
-        assert "Run the search to see which seeds find the most items." in str(
-            screen.query_one("#seeds", Static).content
-        )
         for id_ in ("#warning", "#error"):
             assert not screen.query_one(id_).display
         assert not app.screen.query("#done")
@@ -216,7 +223,16 @@ async def test_not_approved_disables_button_and_ignores_r():
         assert screen.query_one("#run", Button).disabled
         assert status(screen) == "Seeds are not approved yet."
         assert screen.query_one("#status").has_class("warn")
-        assert screen.query_one("#results").has_class("-inactive")
+        assert not screen.query_one("#results").display
+        run_button, note = screen.query_one("#run"), screen.query_one("#status")
+        assert note.region.y == run_button.region.y + run_button.region.height + 1
+        assert (
+            abs(
+                (note.region.x + note.region.width / 2)
+                - (run_button.region.x + run_button.region.width / 2)
+            )
+            <= 1
+        )
         await pilot.press("r")
         await pilot.pause()
         assert not screen.searching
@@ -251,6 +267,7 @@ async def test_running_shows_progress_bar_and_disables_button():
         assert seen == [(1, 1, "1/1  alpha", "Searching…")]
         assert not bar.display
         assert not button.disabled and label(screen) == "Rerun search  r"
+        assert not screen.has_class("-first") and screen.query_one("#results").display
         assert not screen.query_one("#results").has_class("-inactive")
 
 
@@ -315,18 +332,125 @@ async def test_old_project_without_meta_counts_as_unchanged():
 
 
 async def test_counts_use_thousands_separators():
+    write_candidates(1204)
     app = HunchesApp()
     async with app.run_test(size=(120, 40)) as pilot:
         screen = await open_search(pilot, app)
-        screen.show(
-            [
-                {"id": str(i), "text": "t", "max_similarity": 0.7, "best_seed": "s"}
-                for i in range(1204)
-            ]
-        )
-        assert band_rows(screen)[4] == ("0.7-0.725", "1,204")
+        assert band_pairs(screen)[4] == ("0.7–0.725", "1,204")
         assert panel_title(screen.query_one("#bands-panel"))[1] == "1,204 candidates"
         assert "1,204" in str(screen.query_one("#seeds", Static).content)
+
+
+async def test_grids_follow_the_panel_width():
+    write_candidates(10)
+    app = HunchesApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        screen = await open_search(pilot, app)
+        width = screen.query_one("#bands").size.width
+        lines = str(screen.query_one("#bands", Static).content).splitlines()
+        assert {len(line) for line in lines} == {width}
+        await pilot.resize_terminal(140, 36)
+        await pilot.pause()
+        wider = screen.query_one("#bands").size.width
+        assert wider > width
+        lines = str(screen.query_one("#bands", Static).content).splitlines()
+        assert {len(line) for line in lines} == {wider}
+        assert max(line.count("█") for line in lines) == 40
+
+
+async def test_blank_row_between_the_panels():
+    write_candidates(10)
+    app = HunchesApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        screen = await open_search(pilot, app)
+        bands, seeds = (
+            screen.query_one("#bands-panel"),
+            screen.query_one("#seeds-panel"),
+        )
+        assert seeds.region.y == bands.region.y + bands.region.height + 1
+
+
+async def test_first_run_shows_progress_centred_then_results():
+    gate = asyncio.Event()
+
+    class Slow(StubEmbedder):
+        async def embed_query(self, query, *, settings=None):
+            await gate.wait()
+            return await super().embed_query(query, settings=settings)
+
+    app = HunchesApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        screen = await open_search(pilot, app)
+        screen.embedder = Slow({"alpha": [1, 0]})
+        screen.action_run()
+        await pilot.pause()
+        assert screen.has_class("-first") and not screen.query_one("#results").display
+        bar = screen.query_one("#progress", LabelBar)
+        assert bar.display and bar.label == "0/1"
+        assert label(screen) == "Searching…" and screen.query_one("#run").disabled
+        assert centred(screen.query_one("#top"), screen.query_one("#main"))
+        gate.set()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert not screen.has_class("-first")
+        assert screen.query_one("#results").display
+        assert screen.query_one("#top").display and screen.query_one("#run").display
+        assert band_pairs(screen)[-1] == ("0.75+", "2")
+
+
+async def test_failed_and_stopped_first_runs_keep_the_centred_block():
+    app = HunchesApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        screen = await open_search(pilot, app)
+        screen.embedder = StubEmbedder({})  # no vector for the seed: the run fails
+        await run(pilot, app, screen)
+        error = screen.query_one("#error", Label)
+        assert error.display and "Search failed" in str(error.render())
+        assert screen.has_class("-first") and label(screen) == "Run search  r"
+        assert error.region.y > screen.query_one("#run").region.y
+        assert error.styles.text_align == "center"
+        assert not screen.query_one("#results").display
+        say(error, "")
+        say(screen.query_one("#warning", Label), "Search stopped.")
+        await pilot.pause()
+        warning = screen.query_one("#warning", Label)
+        assert warning.display and warning.styles.text_align == "center"
+        assert warning.region.y > screen.query_one("#run").region.y
+
+
+async def test_opening_a_project_with_candidates_goes_straight_to_results():
+    write_candidates(5)
+    app = HunchesApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        screen = await open_search(pilot, app)
+        assert not screen.has_class("-first") and screen.query_one("#results").display
+        assert screen.query_one("#run").display
+
+
+async def test_stale_seeds_still_show_results_and_the_note():
+    write_candidates(5)
+    files.write_text("candidates.meta.json", '{"seeds_digest": "x"}')
+    app = HunchesApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        screen = await open_search(pilot, app)
+        assert status(screen) == "Seeds changed, rerun needed"
+        assert screen.query_one("#results").display
+        assert not screen.has_class("-first")
+
+
+async def test_rerun_dims_the_results():
+    write_candidates(5)
+    files.write_text("candidates.meta.json", '{"seeds_digest": "x"}')
+    app = HunchesApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        screen = await open_search(pilot, app)
+        screen.embedder = StubEmbedder({"alpha": [1, 0]})
+        screen.start()
+        assert screen.query_one("#results").has_class("-inactive")
+        assert not screen.has_class("-first") and screen.query_one("#progress").display
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert not screen.query_one("#results").has_class("-inactive")
 
 
 async def test_top_seeds_threshold_select():

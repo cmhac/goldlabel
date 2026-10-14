@@ -573,3 +573,64 @@ async def test_search_pgvector_states(size, variant, monkeypatch):
         await check(app, pilot, size[0])
         gate.set()
         await app.workers.wait_for_complete()
+
+
+@pytest.mark.parametrize("size", SIZES, ids=lambda s: f"{s[0]}x{s[1]}")
+@pytest.mark.parametrize(
+    "variant", ["never-run", "not-approved", "searching", "failed", "results"]
+)
+async def test_search_first_run_states(size, variant, monkeypatch):
+    import asyncio
+
+    from textual.widgets import Label
+
+    from hunches import candidates
+    from hunches.screens.search import SearchScreen
+
+    gate = asyncio.Event()
+
+    async def build(embedder, progress, stop):
+        if variant == "failed":
+            raise RuntimeError("no network")
+        await gate.wait()
+        files.write_jsonl(
+            "candidates.jsonl",
+            [
+                {"id": str(i), "text": "t", "max_similarity": 0.7, "best_seed": "s"}
+                for i in range(3)
+            ],
+        )
+        return False
+
+    monkeypatch.setattr(candidates, "build_candidates", build)
+    if variant != "results":
+        for name in ("candidates.jsonl", "candidates.meta.json"):
+            Path(".hunches", name).unlink(missing_ok=True)
+    if variant == "not-approved":
+        files.write_state(files.State())
+    app = HunchesApp()
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        app.goto_stage(2)
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, SearchScreen)
+        assert screen.query_one("#results").display == (variant == "results")
+        if variant in ("searching", "failed"):
+            screen.start()
+            await pilot.pause(0.3)
+            if variant == "failed":
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+                assert "Search failed" in str(
+                    screen.query_one("#error", Label).render()
+                )
+            else:
+                assert screen.query_one("#progress").display
+        await check(app, pilot, size[0])
+        gate.set()
+        await app.workers.wait_for_complete()
+        if variant == "searching":
+            await pilot.pause()
+            assert screen.query_one("#results").display
+            await check(app, pilot, size[0])
