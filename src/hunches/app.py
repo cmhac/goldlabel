@@ -454,6 +454,33 @@ class ChatLine(Horizontal):
         self.display = bool(text)
 
 
+class ThinkingLine(Static):
+    """`⠋ thinking…` shown at the end of the chat while a turn waits on the model; not a turn, never saved."""
+
+    FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__("", **kwargs)
+        self.frame = 0
+        self.timer = None
+        self.display = False
+
+    def show(self, on: bool) -> None:
+        if on == self.display:
+            return
+        self.display = on
+        if on:
+            self.tick()
+            self.timer = self.set_interval(0.1, self.tick)
+        elif self.timer:
+            self.timer.stop()
+            self.timer = None
+
+    def tick(self) -> None:
+        self.update(f"{self.FRAMES[self.frame % len(self.FRAMES)]} thinking…")
+        self.frame += 1
+
+
 def body_content(body: str, rows: int | None = None) -> Content:
     """A message body as text: `# ` headings bold, long bodies cut to `rows` lines with a count."""
     lines = body.split("\n")
@@ -607,6 +634,8 @@ class ChatPanel(Vertical):
     ChatPanel #empty { height: 1fr; content-align: center middle; text-align: center; }
     ChatPanel .turn { height: auto; margin-top: 1; }
     ChatPanel .turn.first, ChatPanel .fold-tool { margin-top: 0; }
+    ChatPanel .fold-tool.-gap { margin-top: 1; }
+    ChatPanel #thinking { height: 1; margin-top: 1; padding: 0 2; color: $text-muted; }
     ChatPanel #chat-row { height: auto; }
     """
 
@@ -639,6 +668,7 @@ class ChatPanel(Vertical):
         with VerticalScroll(id="messages"):
             yield Static(self.empty, id="empty")
             yield ChatLine("assistant", id="live")  # the reply being streamed
+            yield ThinkingLine(id="thinking")  # stays the last child
         with Horizontal(id="chat-row"):
             yield ChatInput(id="chat-input")
             yield Button("↑", id="send", variant="primary", disabled=True)
@@ -662,6 +692,8 @@ class ChatPanel(Vertical):
         if not self.lines:
             line.add_class("first")
             self.query_one("#empty").display = False
+        elif "fold-tool" in line.classes and "fold-tool" not in self.lines[-1].classes:
+            line.add_class("-gap")  # consecutive tool lines stay tight
         await self.query_one("#messages").mount(line, before="#live")
 
     async def write_messages(self, messages: list, users: bool = True) -> None:
@@ -766,9 +798,16 @@ class ChatPanel(Vertical):
         live = self.query_one("#live", ChatLine)
         running: dict[str, FoldLine] = {}
 
+        def think(on: bool) -> None:
+            for line in self.query(
+                ThinkingLine
+            ):  # a turn can end after the panel is gone
+                line.show(on)
+
         async def on_events(_, events) -> None:
             async for event in events:
                 if isinstance(event, FunctionToolCallEvent):
+                    think(False)
                     line = tool_line(event.part, None)
                     running[event.part.tool_call_id] = line
                     await self.add(line)
@@ -778,7 +817,9 @@ class ChatPanel(Vertical):
                     call = running.get(event.part.tool_call_id)
                     if call:
                         call.set_result(str(event.part.content), "")
+                    think(True)
 
+        think(True)
         try:
             async with self.agent.run_stream(
                 text, message_history=self.history, event_stream_handler=on_events
@@ -786,6 +827,7 @@ class ChatPanel(Vertical):
                 reply = ""
                 async for delta in result.stream_text(delta=True):
                     reply += delta
+                    think(False)
                     live.set(reply)
                 usage, new = result.usage, result.new_messages()
                 # not all_messages(): it merges the consecutive edit lines before this turn and drops their metadata
@@ -799,6 +841,7 @@ class ChatPanel(Vertical):
             await self.add(ChatLine("error", f"Error: {e}"))
             return
         finally:
+            think(False)
             self.running = False
             box.disabled = False
             self.sync_send()
