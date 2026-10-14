@@ -1165,7 +1165,7 @@ def meta_now() -> dict:
 async def say(app, pilot, screen, text):
     box = screen.query_one("#chat-input")
     box.focus()
-    box.value = text
+    box.text = text
     await pilot.press("enter")
     await quiesce(app, pilot)
 
@@ -1292,7 +1292,7 @@ async def test_remove_gold_writes_nothing_until_confirmed_and_returns_the_answer
         await quiesce(app, pilot)
         box = screen.query_one("#chat-input")
         box.focus()
-        box.value = "remove"
+        box.text = "remove"
         await pilot.press("enter")
         await wait_for(pilot, lambda: isinstance(app.screen, RemoveGoldScreen))
         assert screen_title(app) == "The assistant wants to remove 2 dev rows"
@@ -1308,7 +1308,7 @@ async def test_remove_gold_writes_nothing_until_confirmed_and_returns_the_answer
         assert files.read_text("gold_removed.jsonl") is None
 
         box.focus()
-        box.value = "remove"
+        box.text = "remove"
         await pilot.press("enter")
         await wait_for(pilot, lambda: isinstance(app.screen, RemoveGoldScreen))
         await pilot.click("#remove")
@@ -1334,7 +1334,7 @@ async def test_remove_gold_names_the_split_in_the_question(assistant):
         await quiesce(app, pilot)
         box = screen.query_one("#chat-input")
         box.focus()
-        box.value = "remove"
+        box.text = "remove"
         await pilot.press("enter")
         await wait_for(pilot, lambda: isinstance(app.screen, RemoveGoldScreen))
         assert "1 test row" in question(app)
@@ -1381,6 +1381,9 @@ async def test_no_assistant_tool_sets_a_gold_label(assistant):
     app = HunchesApp()
     async with app.run_test(size=(120, 40)) as pilot:
         screen = await start(app, pilot)
+        await quiesce(
+            app, pilot
+        )  # the mount-time assistant turn must end before the app closes
         names = set(screen.agent._function_toolset.tools)
     assert names == {
         "get_disagreements",
@@ -1598,7 +1601,7 @@ async def test_removing_gold_through_the_assistant_makes_the_run_not_current(ass
         assert not done.disabled
         box = screen.query_one("#chat-input")
         box.focus()
-        box.value = "remove"
+        box.text = "remove"
         await pilot.press("enter")
         await wait_for(pilot, lambda: isinstance(app.screen, RemoveGoldScreen))
         await pilot.click("#remove")

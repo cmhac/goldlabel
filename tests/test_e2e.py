@@ -16,7 +16,7 @@ from pydantic_ai.usage import RequestUsage
 from textual.widgets import DataTable, Input, TextArea
 
 from hunches import classifier, cost, files, system
-from hunches.app import ConfirmScreen, HunchesApp
+from hunches.app import ChatInput, ConfirmScreen, HunchesApp
 from hunches.screens.brief import BriefScreen
 from hunches.screens.gold import GoldScreen
 from hunches.screens.new_project import NewProjectScreen
@@ -136,9 +136,9 @@ def project(tmp_path, monkeypatch):
 
 async def chat(app, pilot, stream, message):
     app.screen.agent.model = FunctionModel(stream_function=stream)
-    box = app.screen.query_one("#chat-input", Input)
+    box = app.screen.query_one("#chat-input", ChatInput)
     box.focus()
-    box.value = message
+    box.text = message
     await pilot.press("enter")
     await pilot.pause(0.5)
     await app.workers.wait_for_complete()

@@ -88,7 +88,11 @@ FoldLine .badge { margin-right: 1; }
 FoldLine .summary { width: 1fr; text-wrap: nowrap; text-overflow: ellipsis; }
 FoldLine .toggle { margin-left: 1; color: $text-disabled; }
 FoldLine .detail { margin-left: 2; padding: 0 1; background: $boost; color: $text-muted; height: auto; }
-ChatPanel #chat-input { width: 1fr; }
+ChatPanel #chat-input { width: 1fr; height: 1; border: none; border-left: outer $panel; background: $panel; padding: 0 1; }
+ChatPanel #chat-input:focus { border: none; border-left: outer $primary; background: $boost; }
+ChatPanel #chat-input > .text-area--cursor-line { background: transparent; }
+ChatPanel #chat-input > .text-area--placeholder { color: $text-disabled; }
+ChatPanel #chat-row { align: left top; }
 ChatPanel #send { width: 3; margin-left: 1; }
 
 ModalScreen { background: $background 70%; align: center middle; }

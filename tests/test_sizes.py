@@ -16,7 +16,7 @@ from textual.scroll_view import ScrollView
 from textual.widgets import DataTable
 
 from hunches import classifier, files, history, metrics, system
-from hunches.app import ConfirmScreen, HunchesApp, StatusHeader
+from hunches.app import ChatInput, ChatPanel, ConfirmScreen, HunchesApp, StatusHeader
 from hunches.screens.descriptions import DescriptionsScreen
 from hunches.screens.gold import GoldRowsScreen, GoldScreen, RemoveGoldScreen
 from hunches.screens.history import HistoryScreen, NeedsVersionScreen
@@ -634,3 +634,21 @@ async def test_search_first_run_states(size, variant, monkeypatch):
             await pilot.pause()
             assert screen.query_one("#results").display
             await check(app, pilot, size[0])
+
+
+@pytest.mark.parametrize("size", SIZES, ids=lambda s: f"{s[0]}x{s[1]}")
+@pytest.mark.parametrize("stage", range(1, 10), ids=STAGE_NAMES)
+async def test_chat_box_at_its_maximum_height(size, stage):
+    app = HunchesApp()
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        app.goto_stage(stage)
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        for panel in app.screen.query(ChatPanel):
+            box = panel.query_one("#chat-input", ChatInput)
+            box.text = "\n".join(f"line {i}" for i in range(20))
+            await pilot.pause()
+            assert box.size.height == min(6, panel.size.height // 3)
+            assert panel.query_one("#send").region.y == box.region.y
+        await check(app, pilot, size[0])
