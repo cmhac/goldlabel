@@ -23,11 +23,25 @@ from hunches.app import (
 )
 
 INSTRUCTIONS = """\
-You help the user define what to find in a corpus of text items. Ask short follow-up \
-questions until the brief is clear. Then call propose_seeds with seed phrases: statements \
-that would be true of a matching item (e.g. "The author describes being laid off"). \
-Proposals are appended to the user's seed table, which they review, so do not repeat \
-seeds already proposed.
+You help the user define what to find in a corpus of text items, by writing seed phrases. \
+Each seed is used as a search query against the embedded corpus.
+
+Write every seed the way someone would write it in this corpus: in that voice and register \
+(a short first-person line, reported speech, a headline, a case note, whatever the items \
+are), not as a description of the concept. Take the content and the register from the \
+user's brief and from the # Project and # Store blocks of your context; use them to choose \
+voice and vocabulary. Avoid meta-language such as "the item discusses" or "a post about". \
+Several phrasings of the same idea are good, since each is a different query, but never \
+duplicate a seed already in the list.
+
+When there are no seeds yet, first ask two to four short questions: what counts as a match \
+and what does not; where this text would appear and in whose voice; phrasings to avoid. Call \
+propose_seeds only after the user has answered, unless they say to go ahead. When seeds \
+exist you may act on a clear request directly.
+
+Tools: propose_seeds appends seeds. replace_seed(number, was, text) replaces seed number \
+(as numbered in # Current seeds); was must be its current text. delete_seeds(numbers) \
+removes seeds. The user reviews the list and can undo.
 """
 
 
@@ -116,6 +130,9 @@ class BriefScreen(Screen):
         self.seeds: list[str] = []
         self.cursor = 0
         self.editor: SeedInput | None = None  # the row being edited or added, if any
+        self.turn_group = (
+            uuid4().hex
+        )  # one undo step for everything an assistant turn does
         config = files.read_config()
         self.agent = Agent(
             config.assistant_model,
@@ -133,11 +150,41 @@ class BriefScreen(Screen):
                 + files.assistant_context()
             )
 
+        busy = "The user is editing a seed; try again after they save or discard."
+
         @self.agent.tool_plain
         async def propose_seeds(seeds: list[str]) -> str:
             """Append seed phrases to the user's seed table."""
-            self.add_seeds(seeds, "assistant", uuid4().hex)
+            self.add_seeds(seeds, "assistant", self.turn_group)
             return f"Added {len(seeds)} seeds."
+
+        @self.agent.tool_plain
+        async def replace_seed(number: int, was: str, text: str) -> str:
+            """Replace seed `number` (1-based, as in # Current seeds). `was` must be its current text."""
+            if self.editor is not None:
+                return busy
+            if not 1 <= number <= len(self.seeds):
+                return f"No seed {number}; there are {len(self.seeds)}."
+            if self.seeds[number - 1] != was:
+                return f"The list has changed: seed {number} is now: {self.seeds[number - 1]}"
+            self.seeds[number - 1] = text.strip()
+            self.save(f"Seed {number} replaced", "assistant", self.turn_group)
+            return f"Replaced seed {number}"
+
+        @self.agent.tool_plain
+        async def delete_seeds(numbers: list[int]) -> str:
+            """Delete seeds by number (1-based, as in # Current seeds, all relative to the list now)."""
+            if self.editor is not None:
+                return busy
+            for n in numbers:
+                if not 1 <= n <= len(self.seeds) or numbers.count(n) > 1:
+                    return (
+                        f"Seed number {n} is out of range or repeated; nothing deleted."
+                    )
+            for n in sorted(numbers, reverse=True):
+                del self.seeds[n - 1]
+            self.save(f"Seeds deleted: {len(numbers)}", "assistant", self.turn_group)
+            return f"Deleted seeds {', '.join(map(str, sorted(numbers)))}"
 
     def compose(self) -> ComposeResult:
         yield StatusHeader()
@@ -385,6 +432,10 @@ class BriefScreen(Screen):
         if event.input is self.editor:
             event.stop()
             self.action_commit()
+
+    def on_chat_panel_changed(self) -> None:
+        if self.query_one(ChatPanel).running:
+            self.turn_group = uuid4().hex
 
     def on_chat_panel_submitted(self, event: ChatPanel.Submitted) -> None:
         if files.read_text("brief.md") is None:
