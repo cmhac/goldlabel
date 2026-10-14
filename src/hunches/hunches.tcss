@@ -129,3 +129,7 @@ MarkdownBulletList { margin: 0; }
 
 /* Gold: the item sits on the page background, with the focus bar */
 GoldScreen #item { background: $background; }
+
+/* One level below a PanelTitle, with its lines indented two cells */
+.subhead { height: 1; text-style: bold; color: #EEF1F5; }
+.indent { padding-left: 2; }

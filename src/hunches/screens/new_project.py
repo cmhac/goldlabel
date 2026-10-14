@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.markup import escape
@@ -12,14 +13,13 @@ from textual.widgets import (
     Checkbox,
     Input,
     Label,
-    Rule,
     Select,
     Static,
     TextArea,
 )
 
 from hunches import files, keys, models, system
-from hunches.app import AppFooter, StatusHeader, panel
+from hunches.app import RAIL_MIN, AppFooter, StatusHeader, panel, wide
 from hunches.screens.model_picker import ModelPicker
 from hunches.screens.paths import PathInput, browse
 from hunches.screens.pg import (
@@ -125,7 +125,9 @@ class NewProjectScreen(Screen):
     NewProjectScreen #actions { height: 1; }
     NewProjectScreen #actions Button { margin-right: 1; }
     NewProjectScreen #actions #error { width: 1fr; height: 1; }
-    NewProjectScreen Rule { margin: 0; }
+    NewProjectScreen #title { height: 1; padding: 0 1; text-style: bold; color: $primary; }
+    NewProjectScreen .panel { margin-bottom: 1; }
+    NewProjectScreen .panel:last-child { margin-bottom: 0; }
     """
         + PG_CSS
     )
@@ -138,6 +140,7 @@ class NewProjectScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield StatusHeader()
+        yield Static("New project", id="title")  # beside the rail's "hunches" line
         with VerticalScroll():
             with panel(Vertical(), "about"):
                 yield from compose_about()
@@ -197,9 +200,13 @@ class NewProjectScreen(Screen):
                     yield Static("", id="embedding")
                     yield Button("Pick", id="pick-embedding", compact=True)
             with panel(Vertical(), "models"):
-                yield Static("", id="models")
-                yield Rule()
-                yield Static("", id="models-rest")
+                yield Static("assistant", classes="subhead")
+                yield Static("", id="models-assistant", classes="indent")
+                yield Static("classifier", classes="subhead")
+                yield Static("", id="models-classifier", classes="indent")
+                yield Static(
+                    "[$text-muted]pinned for this project; change later in Project settings[/]"
+                )
         # outside the scroll area so Create and its messages stay visible at 80x24
         yield Static("", id="keys", classes="warn")
         with Horizontal(id="actions"):
@@ -219,24 +226,26 @@ class NewProjectScreen(Screen):
         ]
 
     def on_mount(self) -> None:
+        self.query_one("#title").display = wide(self.app)
         self.query_one("#open-existing").display = False
         self.query_one("#s3").display = False
         self.query_one("#embedding-row").display = False
         pg_mount(self)
         self.refresh_summary()
 
+    def on_resize(self, event: events.Resize) -> None:
+        self.query_one("#title").display = event.size.width >= RAIL_MIN
+
     def refresh_summary(self) -> None:
         """Pinned models with prices, and the blocking message for missing keys."""
         current = system.read_system()
         assert current
-        lines = [
-            f"assistant: {escape(current.assistant_model)}  [$text-muted]{models.price_label(current.assistant_model)}[/]",
-            f"thinking: {current.assistant_thinking or 'provider default'}",
-        ]
-        self.query_one("#models", Static).update("\n".join(lines))
-        self.query_one("#models-rest", Static).update(
-            f"classifier: {escape(current.classifier_model)}  [$text-muted]{models.price_label(current.classifier_model)}[/]\n"
-            "[$text-muted]pinned for this project; change later in Project settings[/]"
+        self.query_one("#models-assistant", Static).update(
+            f"{escape(current.assistant_model)}  [$text-muted]{models.price_label(current.assistant_model)}[/]\n"
+            f"thinking: {current.assistant_thinking or 'provider default'}"
+        )
+        self.query_one("#models-classifier", Static).update(
+            f"{escape(current.classifier_model)}  [$text-muted]{models.price_label(current.classifier_model)}[/]"
         )
         needed = {
             keys.provider_var(m)
