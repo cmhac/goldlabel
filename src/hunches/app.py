@@ -21,6 +21,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.content import Content
+from textual.css.query import NoMatches
 from textual.markup import escape
 from textual.message import Message
 from textual.screen import ModalScreen, Screen
@@ -1024,7 +1025,12 @@ class HunchesApp(App):
             screen = self.stage_screen
             changed = getattr(screen, "runs_changed", None)
             if changed and screen is not None and screen.is_mounted:
-                changed()
+                try:
+                    changed()
+                except (
+                    NoMatches
+                ):  # still composing, or the not-ready notice: no banner yet
+                    self.running_seen = []  # so the next poll tries again
 
     def drop(self, number: int) -> None:
         """Let go of a kept screen that is not on the stack."""

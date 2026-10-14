@@ -382,7 +382,9 @@ async def test_chat_panel_restores_history_with_tool_calls(tmp_path, monkeypatch
             ("assistant", "Done."),
         ]
         user, tool, done = panel.lines
-        assert tool.region.y == user.region.bottom  # no blank row before a tool line
+        assert (
+            tool.region.y - user.region.bottom == 1
+        )  # one blank row after a user turn
         assert done.region.y - tool.region.bottom == 1
 
 
