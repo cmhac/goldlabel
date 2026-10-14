@@ -191,6 +191,8 @@ def setup(tmp_path, monkeypatch, seeds="seed\nx\ny\n", rows=True):
             classifier_model="anthropic:claude-haiku-4-5",
             corpus_dir="c",
             embedding_model="m",
+            project_description="find layoff posts",
+            store_description="short english tweets",
         )
     )
     files.write_text("seeds.csv", seeds)
@@ -415,6 +417,12 @@ async def test_instructions_carry_status_and_gold_coverage_and_the_embedding_cha
         pilot.app.goto_stage(3)  # startup resumes at the stale stage 2
         await start(pilot.app, pilot)
     text = calls.instructions[-1] or ""
+    assert (
+        text.count(
+            "# Project\nfind layoff posts\n\n# Store\nshort english tweets\n\n# Pipeline status"
+        )
+        == 1
+    )
     assert "# Pipeline status\n1 Brief and seeds:" in text
     assert "2 Search: STALE: embedding model changed (the project now uses" in text
     assert "the candidates were built with old-model)" in text

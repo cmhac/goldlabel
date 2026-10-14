@@ -97,6 +97,6 @@ def test_gold_coverage_text_for_one_split_has_no_heading_of_the_other():
 
 def test_assistant_context_is_both_sections():
     complete_project()
-    text = files.assistant_context()
+    text = files.status_context()
     assert text.startswith("# Pipeline status\n")
     assert "\n\n# Gold coverage\n" in text

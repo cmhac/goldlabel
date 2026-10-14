@@ -8,7 +8,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.markup import escape
 from textual.screen import Screen
-from textual.widgets import Button, Input, Label, Select, Static
+from textual.widgets import Button, Input, Label, Select, Static, TextArea
 
 from hunches import files, models, system
 from hunches.app import AppFooter, ConfirmScreen, StatusHeader, panel
@@ -17,6 +17,8 @@ from hunches.screens.new_project import (
     NewProjectScreen,
     check_corpus,
     check_index,
+    compose_about,
+    missing_about,
     stored_corpus,
 )
 from hunches.screens.paths import PathInput, browse
@@ -48,6 +50,7 @@ class ProjectSettingsScreen(Screen):
     ProjectSettingsScreen .row { height: auto; }
     ProjectSettingsScreen .row Static { width: 1fr; }
     ProjectSettingsScreen .row Label { width: 11; color: $text-muted; }
+    ProjectSettingsScreen .about-row Vertical { width: 1fr; height: auto; }
     ProjectSettingsScreen .row Input, ProjectSettingsScreen .row Select { width: 1fr; }
     ProjectSettingsScreen #actions { height: 1; }
     ProjectSettingsScreen #actions Button { margin-right: 1; }
@@ -76,6 +79,10 @@ class ProjectSettingsScreen(Screen):
         config = self.config
         yield StatusHeader()
         with VerticalScroll():
+            with panel(Vertical(), "about"):
+                yield from compose_about(
+                    config.project_description or "", config.store_description or ""
+                )
             with panel(Vertical(), "corpus"):
                 with Horizontal(classes="row"):
                     yield Label("backend")
@@ -260,6 +267,9 @@ class ProjectSettingsScreen(Screen):
             self.show_embedding()
             self.refresh_save()
 
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        self.refresh_save()  # clears a "Not saved" message
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button = event.button.id or ""
         if button == "save":
@@ -302,6 +312,11 @@ class ProjectSettingsScreen(Screen):
     def save(self) -> None:
         if self.corpus_problem:
             self.refresh_save()
+            return
+        if missing := missing_about(self):
+            self.query_one("#error", Static).update(
+                f"Not saved: {missing[0]} is required"
+            )
             return
         value = lambda i: self.query_one(f"#{i}", Input).value.strip()
         no_pg = {f: None for f in files.Config.model_fields if f.startswith("pg_")}
@@ -352,7 +367,18 @@ class ProjectSettingsScreen(Screen):
                 "s3_region": None,
             }
         new = self.config.model_copy(
-            update={**fields, "embedding_model": self.embedding}
+            update={
+                **fields,
+                "embedding_model": self.embedding,
+                "project_description": self.query_one(
+                    "#project-description", TextArea
+                ).text.strip()
+                or None,
+                "store_description": self.query_one(
+                    "#store-description", TextArea
+                ).text.strip()
+                or None,
+            }
         )
         if new == self.saved:
             self.app.pop_screen()

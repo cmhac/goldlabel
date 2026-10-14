@@ -5,7 +5,7 @@ import pytest
 from test_new_project import make_corpus
 from test_projects import Host as ProjectsHost
 from test_projects import make_project
-from textual.widgets import Button, Input, Label, OptionList, Select, Static
+from textual.widgets import Button, Input, Label, OptionList, Select, Static, TextArea
 
 from hunches import files, system
 from hunches.app import ConfirmScreen, HunchesApp
@@ -264,6 +264,8 @@ def s3_project(tmp_path, monkeypatch, **extra):
             embedding_model="openai:text-embedding-3-small",
             assistant_model=ASSISTANT,
             classifier_model=CLASSIFIER,
+            project_description="find x",
+            store_description="tweets",
             **extra,
         )
     )
@@ -597,6 +599,8 @@ def pg_project(tmp_path, monkeypatch, **extra):
             embedding_model=EMBEDDING,
             assistant_model=ASSISTANT,
             classifier_model=CLASSIFIER,
+            project_description="find x",
+            store_description="tweets",
             **fields,
         )
     )
@@ -789,6 +793,8 @@ async def test_s3_to_pgvector_and_back_nulls_the_other_backends_fields(
         f'classifier_model = "{CLASSIFIER}"\n'
         'target_metric = "accuracy"\n'
         "target_score = 0.9\n"
+        'project_description = "find x"\n'
+        'store_description = "tweets"\n'
     )
     app = Host()
     async with app.run_test(size=(80, 24)) as pilot:
@@ -808,6 +814,8 @@ async def test_s3_to_pgvector_and_back_nulls_the_other_backends_fields(
         f'classifier_model = "{CLASSIFIER}"\n'
         'target_metric = "accuracy"\n'
         "target_score = 0.9\n"
+        'project_description = "find x"\n'
+        'store_description = "tweets"\n'
     )
 
 
@@ -830,6 +838,8 @@ async def test_pgvector_to_local_nulls_the_pg_fields(tmp_path, monkeypatch):
         f'classifier_model = "{CLASSIFIER}"\n'
         'target_metric = "accuracy"\n'
         "target_score = 0.9\n"
+        'project_description = "find x"\n'
+        'store_description = "tweets"\n'
     )
 
 
@@ -911,3 +921,56 @@ async def test_pgvector_fits_80x24_with_save_cancel_and_error_visible(
         await pilot.click("#cancel")
         await pilot.pause()
         assert not isinstance(app.screen, ProjectSettingsScreen)
+
+
+async def test_descriptions_are_prefilled_edited_and_saved(tmp_path, monkeypatch):
+    project = project_in(
+        tmp_path,
+        monkeypatch,
+        **settings_config(project_description="find x", store_description="tweets"),
+    )
+    app = Host()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        about = screen.query_one("#project-description", TextArea)
+        assert about.text == "find x"
+        assert screen.query_one("#store-description", TextArea).text == "tweets"
+        about.text = "find y\nand z"
+        await pilot.pause()
+        await save_and_confirm(app, pilot)
+    config = files.read_config(project)
+    assert config.project_description == "find y\nand z"
+    assert config.store_description == "tweets"
+
+
+async def test_saving_with_an_empty_description_is_refused(tmp_path, monkeypatch):
+    project = project_in(
+        tmp_path,
+        monkeypatch,
+        **settings_config(project_description="find x", store_description="tweets"),
+    )
+    before = (project / ".hunches" / "config.toml").read_text()
+    app = Host()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.query_one("#project-description", TextArea).text = "  "
+        await pilot.pause()
+        screen.query_one("#save", Button).press()
+        await pilot.pause()
+        assert isinstance(app.screen, ProjectSettingsScreen)  # no confirm, no close
+        assert (
+            str(screen.query_one("#error", Static).render())
+            == "Not saved: project description is required"
+        )
+        screen.query_one("#project-description", TextArea).text = "ok"
+        screen.query_one("#store-description", TextArea).text = ""
+        await pilot.pause()
+        screen.query_one("#save", Button).press()
+        await pilot.pause()
+        assert (
+            str(screen.query_one("#error", Static).render())
+            == "Not saved: store description is required"
+        )
+    assert (project / ".hunches" / "config.toml").read_text() == before

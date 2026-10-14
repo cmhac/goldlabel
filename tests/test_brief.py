@@ -33,6 +33,8 @@ def setup(tmp_path, monkeypatch, seeds=None):
             classifier_model="anthropic:claude-haiku-4-5",
             corpus_dir="c",
             embedding_model="m",
+            project_description="find layoff posts",
+            store_description="short english tweets",
         )
     )
     if seeds:
@@ -481,6 +483,12 @@ async def test_instructions_carry_status_and_gold_coverage_and_the_embedding_cha
         await pilot.pause(0.5)
         await app.workers.wait_for_complete()
     text = seen[0] or ""
+    assert (
+        text.count(
+            "# Project\nfind layoff posts\n\n# Store\nshort english tweets\n\n# Pipeline status"
+        )
+        == 1
+    )
     assert "# Pipeline status\n1 Brief and seeds:" in text
     assert "2 Search: STALE: embedding model changed (the project now uses" in text
     assert "the candidates were built with old-model)" in text

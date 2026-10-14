@@ -60,6 +60,8 @@ def make_project(base, name="proj", corpus=True, **config):
         "embedding_model": "m",
         "assistant_model": "test",
         "classifier_model": "test",
+        "project_description": "p",
+        "store_description": "s",
         **config,
     }
     lines = "\n".join(f'{k} = "{v}"' for k, v in cfg.items())

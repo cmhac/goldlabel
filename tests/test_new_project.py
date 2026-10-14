@@ -5,7 +5,7 @@ from typing import ClassVar
 
 import pytest
 from test_projects import Host as ProjectsHost
-from textual.widgets import Button, Input, Static
+from textual.widgets import Button, Input, Static, TextArea
 
 from hunches import files, system
 from hunches.app import HunchesApp
@@ -20,11 +20,18 @@ CLASSIFIER = "anthropic:claude-haiku-4-5"
 class Host(HunchesApp):
     """HunchesApp that starts on the New project screen (the startup flow is task 09)."""
 
-    def on_mount(self, event):  # ty: ignore[invalid-method-override]
+    about = (
+        True  # fill both descriptions, which are required; the about tests turn it off
+    )
+
+    async def on_mount(self, event):  # ty: ignore[invalid-method-override]
         event.prevent_default()  # skip HunchesApp.on_mount
         self.register_theme(HUNCHES)
         self.theme = "hunches"
-        self.push_screen(NewProjectScreen())
+        await self.push_screen(NewProjectScreen())
+        if self.about:
+            self.screen.query_one("#project-description", TextArea).text = "find x"
+            self.screen.query_one("#store-description", TextArea).text = "tweets"
 
 
 Host.CSS_PATH = ProjectsHost.CSS_PATH
@@ -101,6 +108,9 @@ async def test_corpus_inside_the_project_is_stored_relative(tmp_path, monkeypatc
 
 
 async def submit(app, pilot, **values):
+    for id_ in ("project-description", "store-description"):
+        area = app.screen.query_one(f"#{id_}", TextArea)
+        area.text = area.text or "text"  # required; Host fills them already
     for id_, value in values.items():
         app.screen.query_one(f"#{id_}", Input).value = str(value)
     await pilot.pause()
@@ -606,6 +616,8 @@ async def test_create_writes_only_pgvector_fields_and_registers(tmp_path, monkey
         f'classifier_model = "{CLASSIFIER}"\n'
         'target_metric = "accuracy"\n'
         "target_score = 0.9\n"
+        'project_description = "find x"\n'
+        'store_description = "tweets"\n'
     )
     assert [p.path for p in system.projects_by_recent()] == [str(project.resolve())]
 
@@ -1007,3 +1019,76 @@ async def test_pgvector_fits_80x24_with_create_visible(tmp_path, monkeypatch):
         await pilot.pause()
         for id_ in ("create", "open-system", "keys", "error"):
             assert form.query_one(f"#{id_}").region.bottom <= 23, id_
+
+
+class BareHost(Host):
+    about = False
+
+
+async def test_create_needs_both_descriptions_and_the_hint_names_what_is_missing(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    corpus = make_corpus(tmp_path / "data")
+    app = BareHost()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.query_one("#corpus", Input).value = str(corpus)
+        await pilot.pause()
+        create = screen.query_one("#create", Button)
+        hint = screen.query_one("#error", Static)
+        assert create.disabled
+        assert str(hint.render()) == "Required: project description, store description"
+        screen.query_one("#project-description", TextArea).text = "  \n "
+        await pilot.pause()  # whitespace only is still empty
+        assert str(hint.render()) == "Required: project description, store description"
+        screen.query_one("#project-description", TextArea).text = "find x"
+        await pilot.pause()
+        assert str(hint.render()) == "Required: store description" and create.disabled
+        screen.create()  # ty: ignore[unresolved-attribute]
+        await pilot.pause()
+        assert "Required: store description" in str(hint.render())
+        assert not (tmp_path / ".hunches").exists()
+        screen.query_one("#store-description", TextArea).text = "tweets"
+        await pilot.pause()
+        assert not create.disabled and str(hint.render()) == ""
+
+
+async def test_created_config_contains_both_descriptions(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    corpus = make_corpus(tmp_path / "data")
+    project = tmp_path / "proj"
+    app = BareHost()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.query_one("#location", Input).value = str(project)
+        screen.query_one("#corpus", Input).value = str(corpus)
+        screen.query_one("#project-description", TextArea).text = "find x\nbecause 😀"
+        screen.query_one("#store-description", TextArea).text = " tweets in French "
+        await pilot.pause()
+        screen.query_one("#create", Button).press()
+        await pilot.pause()
+    config = files.read_config(project)
+    assert config.project_description == "find x\nbecause 😀"
+    assert config.store_description == "tweets in French"
+    os.chdir(tmp_path)
+
+
+async def test_about_panel_is_first_with_hints_and_four_rows(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    app = BareHost()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        project = screen.query_one("#project-description", TextArea)
+        store = screen.query_one("#store-description", TextArea)
+        location = screen.query_one("#location")
+        assert project.region.y < store.region.y < location.region.y
+        assert project.region.height == 4 and store.region.height == 4
+        shown = text_of(screen)
+        assert "what you want to find out, and why" in shown
+        assert "what the items are, where they came from, language and format" in shown

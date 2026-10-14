@@ -5,3 +5,5 @@ assistant_model = "anthropic:claude-sonnet-5-5"
 classifier_model = "anthropic:claude-haiku-4-5"
 target_metric = "accuracy"
 target_score = 0.9
+project_description = "Find posts where someone says they are affected by layoffs or burnout at work, to see how common each is."
+store_description = "Eight short English workplace posts and a few unrelated ones (recipes, promotions), hand-written for this sample; plain text, one sentence each."
