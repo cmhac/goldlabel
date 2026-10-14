@@ -701,15 +701,18 @@ class ChatPanel(Vertical):
             self.query_one("#empty").display = False
 
     def sync_send(self) -> None:
-        self.query_one("#send", Button).disabled = (
-            self.running or not self.query_one("#chat-input", ChatInput).text.strip()
-        )
+        boxes, sends = self.query(ChatInput), self.query("#send")
+        if boxes and sends:  # a turn can end after the panel is gone
+            sends.first(Button).disabled = (
+                self.running or not boxes.first().text.strip()
+            )
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         self.sync_send()
 
     def on_resize(self) -> None:
-        self.query_one("#chat-input", ChatInput).fit()  # a third of the panel's height
+        for box in self.query(ChatInput):  # not composed yet on the first resize
+            box.fit()  # a third of the panel's height
 
     def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
         event.stop()  # the screen hears ChatPanel.Submitted instead

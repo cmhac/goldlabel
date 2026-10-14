@@ -1373,6 +1373,9 @@ async def test_no_assistant_tool_sets_a_gold_label(assistant):
     app = HunchesApp()
     async with app.run_test(size=(120, 40)) as pilot:
         screen = await start(app, pilot)
+        await quiesce(
+            app, pilot
+        )  # the mount-time assistant turn must end before the app closes
         names = set(screen.agent._function_toolset.tools)
     assert names == {
         "get_disagreements",
