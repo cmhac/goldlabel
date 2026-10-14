@@ -108,14 +108,6 @@ def setup(monkeypatch, url=URL, psycopg_error=None, **fields):
     return fake
 
 
-def test_psycopg_missing(monkeypatch):
-    setup(monkeypatch)
-    monkeypatch.setitem(sys.modules, "psycopg", None)
-    with pytest.raises(ImportError) as e:
-        search.pg_connect(files.read_config())
-    assert str(e.value) == "The pgvector backend needs psycopg: pip install hunches[pg]"
-
-
 def test_url_unset(monkeypatch):
     setup(monkeypatch, url=None)
     with pytest.raises(ValueError) as e:
@@ -237,14 +229,6 @@ def test_iam_no_credentials(monkeypatch):
     with pytest.raises(ValueError) as e:
         search.pg_connect(files.read_config())
     assert str(e.value) == "AWS: Unable to locate credentials"
-
-
-def test_iam_boto3_missing(monkeypatch):
-    setup(monkeypatch, url=IAM_URL, pg_auth="rds_iam")
-    monkeypatch.setitem(sys.modules, "boto3", None)
-    with pytest.raises(ImportError) as e:
-        search.pg_connect(files.read_config())
-    assert str(e.value) == "IAM authentication needs boto3: pip install hunches[rds]"
 
 
 def test_connect_error_is_scrubbed(monkeypatch):

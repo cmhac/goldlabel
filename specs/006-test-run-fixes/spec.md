@@ -21,7 +21,7 @@ Same as 001–005: minimal implementation (no abstraction, base class, registry 
 | # | Question | Decision | Who / when |
 |---|----------|----------|------------|
 | Q1 | Item 1: "in the same coor as the 'hunches' text" | Same **row** (the content area cannot share a column with the left rail). | Chris, 2026-10-14 |
-| Q2 | Item 2: the `local` extra pulls in `sentence-transformers` (and with it PyTorch), a very large install that is skipped on Python 3.14 (`python_version < '3.14'` marker) | **Fold `local` in too.** No extras remain. The README says the install is large. | Chris, 2026-10-14 |
+| Q2 | Item 2: the `local` extra pulls in `sentence-transformers` (and with it PyTorch), a very large install that is skipped on Python 3.14 (`python_version < '3.14'` marker) | **Keep `local` as an extra** (reversed after measuring: folding it in grew `.venv` from 240 MB to 5.7 GB, 3.2 GB of it nvidia CUDA wheels, 1.1 GB torch, 894 MB triton). `boto3` and `psycopg[binary]` move into the base install; `s3`, `pg`, `rds` are removed. The README says `hunches[local]` is large. | Chris, 2026-10-14 |
 | Q3 | Item 5: what is "the store" for a local corpus folder? | The field is called "store description" everywhere; the form hint says "what the items are, where they came from, language and format", for all three backends. | Chris, 2026-10-14 |
 | Q4 | Item 5: existing projects have no descriptions | **Not a blocker** for opening or using the project, but a **popup requires the user to enter both descriptions** for any project that is missing one (see item 5). | Chris, 2026-10-14 |
 | Q5 | Item 6: newline in a growing chat box | Enter sends; `ctrl+j` inserts a newline (pasted newlines are kept as they are). | Chris, 2026-10-14 |
@@ -108,11 +108,11 @@ Q7: the layout follows the existing design handoff (`../004-history-and-redo/des
 
 ### 2. Provider extras (note "Provider extras")
 
-- Move `boto3` and `psycopg[binary]` into `[project] dependencies`, add `sentence-transformers` to the `pydantic-ai-slim` line (`pydantic-ai-slim[anthropic,openai,sentence-transformers]`; in `pydantic-ai-slim`'s metadata that extra is `python_version < '3.14'`, so Python 3.14 installs simply do not get local embeddings), and delete `[project.optional-dependencies]` entirely (Q2). The comment above the dependency list in `pyproject.toml` is updated. The README says the install is large (PyTorch comes with `sentence-transformers`) and that local embeddings are unavailable on Python 3.14.
+- Move `boto3` and `psycopg[binary]` into `[project] dependencies`, delete the `s3`, `pg` and `rds` extras and keep `local = ["pydantic-ai-slim[sentence-transformers]"]` (Q2; that extra is `python_version < '3.14'` in `pydantic-ai-slim`'s metadata, so Python 3.14 installs do not get local embeddings). The comment above the dependency list in `pyproject.toml` is updated. The README says `hunches[local]` is large (about 5.5 GB with CUDA wheels on Linux) and unavailable on Python 3.14.
 - Imports in `search.py` may stay lazy (cheap startup) but the "pip install hunches[…]" `ImportError` messages go (the package is always installed with them). The two tests that assert the old text change with them. If `psycopg` or `boto3` is somehow missing the plain `ImportError` surfaces.
-- README (Install section and the RDS/Aurora paragraph), `AGENTS.md` (Stack, Commands: `uv sync` replaces `uv sync --all-extras`), `.github/workflows/ci.yml`, `publish.yml` and the pgvector CI job follow. `specs/005-pgvector` text that names the extras is left as history; its "Clarifications" are not rewritten.
+- README (Install section and the RDS/Aurora paragraph), `AGENTS.md` (Stack, Commands: `uv sync --extra local` replaces `uv sync --all-extras`), `.github/workflows/ci.yml`, `publish.yml` and the pgvector CI job follow. `specs/005-pgvector` text that names the extras is left as history; its "Clarifications" are not rewritten.
 - `rds` existed to avoid forcing boto3 on pgvector-only users; that trade-off is the point of this change and needs no replacement.
-- Test: a fresh `uv sync` (no extras) can `import boto3, psycopg` (and `sentence_transformers` on Python < 3.14) and run `pytest -m "not ui"`. CI time and cache size will grow with PyTorch; the task checks the CI run time and notes it.
+- Test: a fresh `uv sync` (no extras) can `import boto3, psycopg` and run `pytest -m "not ui"`; CI uses `uv sync --extra local`.
 
 ## C. Assistant context
 
@@ -186,7 +186,7 @@ Q7: the layout follows the existing design handoff (`../004-history-and-redo/des
 - 003 (Search screen): the centred run block before the first search and for a failed first run; no results panels until a search has produced results (the handoff showed them dimmed); the results use the handoff grids.
 - 003/004 (navigation): the rail is clickable, `goto_stage` no longer cancels running work; new RUNNING mark and legend entry; stages are blocked while an upstream run is working.
 - 005 (pgvector Check store) and 002 (S3 Check store): the success output.
-- 001/005 (packaging): the `s3`, `pg` and `rds` extras are removed (and `local`); `ImportError` messages change.
+- 001/005 (packaging): the `s3`, `pg` and `rds` extras are removed (`local` stays); `ImportError` messages change.
 - 001 (Brief assistant): the seed phrasing rules and the two new tools; `# Current seeds` numbering is now part of the tools' contract.
 
 ## Out of scope

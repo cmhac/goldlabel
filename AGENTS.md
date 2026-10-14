@@ -25,12 +25,12 @@
 
 ## Stack
 
-Python 3.12+, `uv`, `pydantic-ai` (Agent, Embedder), `textual`, `numpy`, `genai-prices`, `pyyaml`, optional extras `s3` (`boto3`), `pg` (`psycopg[binary]`) and `rds` (`psycopg[binary]` + `boto3`, IAM database authentication). Lint/format `ruff`, types `ty`, tests `pytest` + `pytest-asyncio` (`asyncio_mode = "auto"`).
+Python 3.12+, `uv`, `pydantic-ai` (Agent, Embedder), `textual`, `numpy`, `genai-prices`, `pyyaml`, `boto3` and `psycopg[binary]` (S3 Vectors, pgvector, RDS/Aurora IAM), optional extra `local` (`sentence-transformers`, about 5.5 GB with CUDA wheels, Python < 3.14). Lint/format `ruff`, types `ty`, tests `pytest` + `pytest-asyncio` (`asyncio_mode = "auto"`).
 
 ## Commands (once task 01 has landed)
 
 ```
-uv sync --all-extras
+uv sync --extra local
 uv run ruff check
 uv run ruff format --check
 uv run ty check

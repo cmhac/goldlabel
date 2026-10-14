@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
-      - run: uv sync --all-extras
+      - run: uv sync --extra local
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run ty check
@@ -40,5 +40,5 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
-      - run: uv sync --all-extras
+      - run: uv sync --extra local
       - run: uv run pytest tests/test_pg_integration.py
