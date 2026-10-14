@@ -382,8 +382,10 @@ async def test_check_store_reports_dimension_and_metric(tmp_path, monkeypatch):
         await app.workers.wait_for_complete()
         await pilot.pause()
         status = str(app.screen.query_one("#store-status", Static).render())
-        assert "WARNING: distance metric is euclidean, not cosine" in status
-        assert "dimension 3" in status
+        assert status == (
+            "WARNING: distance metric is euclidean, not cosine\n"
+            "✓ Connected  dimension 3 · euclidean"
+        )
     assert made == [("s3vectors", {"region_name": "eu-west-1"})]
     assert StubS3Vectors.calls == [{"vectorBucketName": "b", "indexName": "i"}]
 
@@ -861,8 +863,7 @@ async def test_check_store_works_from_settings_with_the_stub(tmp_path, monkeypat
         await app.workers.wait_for_complete()
         await pilot.pause()
         text = str(app.screen.query_one("#pg-status", Static).render())
-        assert "pgvector 0.8.1 in schema extensions" in text
-        assert "column type vector, dimension 3" in text
+        assert text == "✓ Connected  pgvector 0.8.1 · vector(3) · ~120 rows"
     [config] = stub.configs
     assert (config.backend, config.pg_table, config.pg_text_column) == (
         "pgvector",

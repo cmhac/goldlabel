@@ -35,6 +35,8 @@ class PgSection(Vertical):
 
     url_id: str | None = None
     url_var: str | None = None  # a hand-written pg_url_var, kept until a URL is pasted
+    result: dict | None = None  # the last Check store result
+    expanded = False  # the details are shown under the summary
 
 
 def section(screen: Screen) -> PgSection:
@@ -107,11 +109,14 @@ def compose_pg() -> ComposeResult:
             yield Label("timeout")
             yield Input(placeholder="seconds, optional", id="pg-timeout", compact=True)
         yield Static("", id="pg-status")
-        yield Button("Check store", id="check-pg", compact=True)
+        with Horizontal(classes="row"):
+            yield Button("Check store", id="check-pg", compact=True)
+            yield Button("Details", id="pg-details", compact=True)
 
 
 def pg_mount(screen: Screen) -> None:
     screen.query_one("#pg").display = False
+    screen.query_one("#pg-details").display = False
     pg_refresh(screen)
 
 
@@ -181,9 +186,12 @@ def pg_select_changed(screen: Screen, event: Select.Changed) -> None:
 
 def pg_pressed(screen: Screen, button: str, embedding: str) -> bool:
     """Handle the section's buttons; False when the button is not ours."""
-    if button != "check-pg":
+    if button == "pg-details":
+        toggle_details(screen)
+    elif button == "check-pg":
+        check(screen, embedding)
+    else:
         return False
-    check(screen, embedding)
     return True
 
 
@@ -240,6 +248,8 @@ def check(screen: Screen, embedding: str) -> None:
     )
     button = screen.query_one("#check-pg", Button)
     button.disabled = True
+    section(screen).result = None
+    screen.query_one("#pg-details", Button).display = False
     show(screen, "checking…")
 
     def run() -> None:
@@ -250,17 +260,57 @@ def check(screen: Screen, embedding: str) -> None:
 
 
 def done(screen: Screen, result: dict) -> None:
-    show(screen, "\n".join(report(result)))
+    section(screen).result, section(screen).expanded = result, False
+    screen.query_one("#pg-details", Button).display = True
+    screen.query_one("#pg-details", Button).label = "Details"
+    show_result(screen)
     screen.query_one("#check-pg", Button).disabled = False
 
 
+def show_result(screen: Screen) -> None:
+    """The summary, plus the details while expanded."""
+    box = section(screen)
+    assert box.result is not None
+    lines = report(box.result) + (details(box.result) if box.expanded else [])
+    show(screen, "\n".join(lines))
+
+
+def toggle_details(screen: Screen) -> None:
+    box = section(screen)
+    if box.result is None:
+        return
+    box.expanded = not box.expanded
+    screen.query_one("#pg-details", Button).label = (
+        "Hide details" if box.expanded else "Details"
+    )
+    show_result(screen)
+
+
 def report(result: dict) -> list[str]:
-    """Markup lines for a check_store result. WARNING and ERROR are words, colour only adds."""
+    """The summary as markup lines: the first error, or the warnings and one Connected line.
+    ERROR, WARNING and Connected are words, colour only adds."""
     if result["errors"]:
         # a missing table repeats Postgres's text under several pieces: show it once
-        lines = [f"[$error]ERROR: {escape(next(iter(result['errors'].values())))}[/]"]
-    else:
-        lines = []
+        return [f"[$error]ERROR: {escape(next(iter(result['errors'].values())))}[/]"]
+    lines = [f"[$warning]WARNING: {escape(w)}[/]" for w in result["warnings"]]
+    facts = []
+    if result["version"]:
+        facts.append(f"pgvector {'.'.join(map(str, result['version']))}")
+    if result["type"]:
+        dimension = "?" if result["dimension"] is None else result["dimension"]
+        facts.append(f"{escape(result['type'])}({dimension})")
+    if result["rows"] is not None:
+        facts.append(f"~{result['rows']:,} rows")
+    lines.append(
+        "[$success]✓ Connected[/]"
+        + (f"  [$text-muted]{' · '.join(facts)}[/]" if facts else "")
+    )
+    return lines
+
+
+def details(result: dict) -> list[str]:
+    """What the summary leaves out: schema and encryption, each index, the sample, notes."""
+    lines = []
     if result["version"]:
         encrypted = {True: "encrypted", False: "not encrypted"}.get(
             result["encrypted"], "encryption unknown"
@@ -281,6 +331,5 @@ def report(result: dict) -> list[str]:
     if result["sample"]:
         row_id, row_text = result["sample"]
         lines.append(f"sample: {escape(str(row_id))} {escape(row_text)}")
-    lines += [f"[$warning]WARNING: {escape(w)}[/]" for w in result["warnings"]]
     lines += [escape(n) for n in result["notes"]]
     return lines

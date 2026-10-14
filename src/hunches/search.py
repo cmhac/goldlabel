@@ -584,7 +584,7 @@ def check_store(config: Config, seeds: int | None = None) -> dict:
     mode = pg_setting(config, "pg_search")
     parts = urlsplit(keys.resolve(_url_name(config)) or "")
     if parts.port == 6543 or "pooler." in (parts.hostname or ""):
-        out["notes"].append(POOLER_HINT)
+        out["warnings"].append(POOLER_HINT)  # acting on it avoids cut-off searches
 
     def version():
         out["version"], out["schema"] = extension_version(conn)

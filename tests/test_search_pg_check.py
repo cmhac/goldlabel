@@ -263,17 +263,17 @@ def test_exact_mode_on_old_pgvector_has_no_version_warning(check):
 def test_pooler_hint_for_port_6543(check, monkeypatch):
     monkeypatch.setenv("HUNCHES_PG_URL", "postgresql://u:p@db.example.com:6543/x")
     got = check(Conn())
-    assert got["notes"] == [search.POOLER_HINT]
+    assert got["warnings"] == [search.POOLER_HINT] and got["notes"] == []
     assert "direct or session-mode URL" in search.POOLER_HINT
 
 
 def test_pooler_hint_for_pooler_host(check, monkeypatch):
     monkeypatch.setenv("HUNCHES_PG_URL", "postgresql://u:p@aws-0.pooler.supabase.com/x")
-    assert check(Conn())["notes"] == [search.POOLER_HINT]
+    assert check(Conn())["warnings"] == [search.POOLER_HINT]
 
 
 def test_no_pooler_hint_for_a_plain_url(check):
-    assert search.POOLER_HINT not in check(Conn())["notes"]
+    assert search.POOLER_HINT not in check(Conn())["warnings"]
 
 
 def test_each_piece_reports_its_own_scrubbed_error(check):
