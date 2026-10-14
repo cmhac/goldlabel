@@ -1,8 +1,8 @@
 # 006 — Fixes and improvements from the first real test run
 
-Status: **ready to implement** (decisions Q1–Q7 resolved 2026-10-14; tasks 01–13 written in `tasks/`). Source: Chris's notes from a test run (`Hunches_notes_braindump.pdf`, 11 items with screenshots), checked against the code on branch `claude/funny-ritchie-args3k` (Textual 8.2.8 installed). Builds on `../001-initial-version/spec.md` to `../005-pgvector/spec.md`. Where this spec disagrees with them, this spec wins once it is implemented; the places are listed under "Behaviour that changes in 001–005".
+Status: **implemented (tasks 01–13)**; the human checks under "Needs a human" are open (decisions Q1–Q7 resolved 2026-10-14; tasks in `tasks/`). The "Verified in task NN" notes and "Clarifications from implementation" win over the draft text; "Where things stand today" describes the code before 006. Source: Chris's notes from a test run (`Hunches_notes_braindump.pdf`, 11 items with screenshots), checked against the code on branch `claude/funny-ritchie-args3k` (Textual 8.2.8 installed). Builds on `../001-initial-version/spec.md` to `../005-pgvector/spec.md`. Where this spec disagrees with them, this spec wins once it is implemented; the places are listed under "Behaviour that changes in 001–005".
 
-**Read order for an implementer:** this spec → your task file (`tasks/NN-….md`, to be written) → the code named in the section.
+**Read order for an implementer:** this spec → your task file (`tasks/NN-….md`) → the code named in the section.
 
 ## What this is, in one paragraph
 
@@ -28,7 +28,7 @@ Same as 001–005: minimal implementation (no abstraction, base class, registry 
 | Q6 | Item 11: switching to a different project | Opening the Projects list never stops anything; choosing another project keeps the existing "A run is in progress; stop it and switch?" confirm (the working directory is process-global and `switch_to` calls `workers.cancel_all()`). | Chris, 2026-10-14 |
 | Q7 | Item 10: the design of the Search results | **Follow the existing design handoff** (`../004-history-and-redo/design/design_handoff_hunches_tui/reference/ui_kits/tui-rail/Search.jsx`, 003 `README.md` §2 Search), with the two overrides in item 10. | Chris, 2026-10-14; read and applied by Claude |
 
-## Where things stand today (verified in code)
+## Where things stand today (verified in code, before 006)
 
 - `NewProjectScreen` (`screens/new_project.py`) composes three `panel(...)`s: location, corpus, models. The models panel is two `Static`s (`#models`, `#models-rest`) separated by a `Rule()`; the Rule is the line Chris wants gone. The first row of the content area is the `location` panel title; nothing in the content area names the screen. The one-row header (`StatusHeader`) names it below 100 columns.
 - `pyproject.toml` has extras `s3` (`boto3`), `pg` (`psycopg[binary]`), `rds` (`psycopg[binary]`, `boto3`) and `local` (`pydantic-ai-slim[sentence-transformers]`). The base dependencies already include `pydantic-ai-slim[anthropic,openai]`; `keys.provider_var` knows only those two LLM providers, so "providers" in Chris's note means the **backends** (S3, pgvector, RDS IAM, local embeddings). `search.py` imports `boto3`/`psycopg` lazily and raises `ImportError("… pip install hunches[pg]")` in four places (lines 75, 143, 185, 534); two tests assert that exact text (`tests/test_search_pg_connect.py:116,247`). README lines 10–14 and 127, `AGENTS.md` (Stack, Commands), `.github/workflows/{ci,publish}.yml` (`uv sync --all-extras`) mention the extras.
@@ -71,6 +71,8 @@ Applies to Check store for pgvector (`pg.report`) and S3 (`new_project.check_ind
 - Facts that are normal and only add noise are not shown by default: schema, "encrypted", each index line, the sample row, "No index: the search scans the whole table", the pooler hint. Where one of them is something the user should act on (not encrypted, no index while `pg_search = "index"`, a pooler URL), it is already a `warning` or becomes one; the task lists each `notes`/`warnings` entry in `search.check_store` and decides keep, demote or show-as-warning in a table in the task file. The sample row stays available (it proves the text column is right): shown only when the user presses a "Details" toggle on the result, which reveals the old multi-line report.
 - `search.check_store` and its return dict do not change; only `pg.report` and the S3 formatter do.
 
+*Clarification from implementation (task 08):* the pooler hint stays a `warning` although the list above names it as noise: acting on it avoids searches cut off mid-run. `details()` returns the old multi-line report. The Details toggle exists for PostgreSQL only; the S3 result is already one line, so it has none.
+
 ### 7. Typing/thinking indicator (note "Typing/thinking indicator")
 
 While the assistant is working, show it. In `ChatPanel`:
@@ -105,6 +107,8 @@ Q7: the layout follows the existing design handoff (`../004-history-and-redo/des
 - **Top seeds:** rows of rank (3 wide, right-aligned, faint), count (7 wide, right-aligned, bold, separators), bar (12 cells, primary colour; the first row's bar is `$accent`, the teal), then the seed text filling the rest and truncated with `…`. The select in the subtitle recomputes counts from `candidates.jsonl` as today (`candidates.top_seeds`).
 - Counts are right-aligned and bars start at a fixed column, so rows line up in both panels at 80×24 and at 120×36. One blank row between the two panels (item 1's gap).
 - Textual has no `grid` for `Static` text, so the task may use a `DataTable` per `AGENTS.md` ("DataTable has no flex column: give the Text column a fixed width and resize it after layout, `report.fit_text_column`"), per-row `Horizontal`s, or a `Static` that builds its padding from the panel's width on resize. Pick the smallest that keeps the widths above; the existing `bar()` helper in `screens/search.py` is reused.
+*Clarification from implementation (task 09):* the first-run block re-lays-out the existing top row (screen class `-first`: `#top` becomes a centred vertical block of 36-cell widgets, so the button is a 36-cell bar; notices centred beneath) instead of using `RunIndicator`, which would have meant a second progress widget. The grids are `Static` subclasses (`Rows`) that build their padding from the widget width on resize. Stop shows only for the pgvector one-query mode, as before.
+
 - `tests/test_sizes.py` gets the never-run state and the has-results state; the hidden-panels state is asserted (`display` is false), not just their absence on screen.
 
 
@@ -200,6 +204,18 @@ Q7: the layout follows the existing design handoff (`../004-history-and-redo/des
 
 **Tests (Pilot):** start a search with a stub embedder that waits on an `asyncio.Event`; click another stage in the rail; assert the search worker is still running, the rail shows the mark and Run on a downstream stage is disabled; release the event, click back, and assert the finished candidates are shown. The same for the full run (count `FunctionModel` calls: the run must not restart or duplicate). Clicking each destination opens the same screen its key opens. Switching project with a run going still asks first.
 
+## Clarifications from implementation
+
+Deviations from the draft text above, collected here (details under each item's "Verified" note):
+
+- **Pointer (3):** `SeedRow` has no click handler, so it is not styled; `not-allowed` is unused.
+- **Tool-line gap (8):** the blank row is set by a `-gap` class in `ChatPanel.add` and applies to a tool line after anything that is not a tool line (also a card or context line), slightly broader than "after a user or assistant text turn".
+- **Check store (4):** the pooler hint stays a warning; Details exists for PostgreSQL only.
+- **Search (10):** `RunIndicator` is not reused; the first-run block is the existing top row, centred.
+- **Navigation (11):** a start blocked by an earlier run is not queued; the first visit to Tuning, Test or Threshold during an earlier run shows "<Stage> is running." and starts nothing. Project settings opened from the rail has no unsaved-changes prompt (none on the key path either).
+- **Chat (6):** on Tuning, which has no undo of its own, F6 in the chat box falls back to the app's notice undo.
+- **Packaging (2):** `local` stays an extra (Q2); only `boto3` and `psycopg[binary]` became base dependencies.
+
 ## Behaviour that changes in 001–005
 
 - 002/003 (New project and Project settings): new "about" panel with two required fields on New project; models panel without a Rule and with assistant/classifier subheads; one gap between all panels. Opening a project with a missing description shows a required popup.
@@ -219,10 +235,12 @@ Q7: the layout follows the existing design handoff (`../004-history-and-redo/des
 
 ## Needs a human
 
-- Whether the mouse pointer actually changes in macOS Terminal.app and in the other terminals Chris uses (item 3). The spec records the support list above; it cannot be tested from the container.
-- The glyph for RUNNING in the rail (item 11) renders in those terminals.
+- Whether the mouse pointer actually changes in macOS Terminal.app (unknown) and in the other terminals Chris uses (item 3). The support list above cannot be tested from the container.
+- That the RUNNING glyph `▶` in the rail (item 11) and the thinking spinner glyphs `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` (item 7) render in those terminals.
+- That `ctrl+j` reaches the chat box as a newline in those terminals (item 6; Enter-sends is the fallback, a paste keeps its newlines), and that mouse clicks reach the app (the clickable rail, item 11).
 - A real-model pass on the seed assistant: it asks questions before proposing, writes corpus-voiced seeds from a description, and uses `replace_seed`/`delete_seeds` correctly (item 9). Tests cover the plumbing, not the model's judgement.
-- A look at the Search results at 80×24 and 120×36 once built, against the handoff mock (`search/done`); and at the descriptions popup.
+- A look at the Search first-run block (its button is a 36-cell wide bar) and the results grids at 80×24 and 120×36, against the handoff mock (`search/done`) (item 10); the descriptions popup (item 5); and the New project "New project" title row at 100 columns or more (item 1).
+- The install size of `hunches[local]` (about 5.5 GB on Linux with CUDA wheels) is acceptable, and that Python 3.14 users without local embeddings are fine (item 2).
 
 ## Tasks
 

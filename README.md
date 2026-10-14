@@ -47,6 +47,22 @@ backend (local corpus, S3 Vectors or PostgreSQL with pgvector), corpus and embed
 from the system defaults into the project, and later system changes never alter an existing project. **Project
 settings** edits them afterwards.
 
+New project starts with an **about** panel holding two required text boxes: **project** (what you are trying to
+find out, and why) and **store** (what is in the corpus: what an item is, where it came from, language, format,
+anything that affects how an item is worded). Create stays disabled until both are filled. They are saved as
+`project_description` and `store_description` in `.hunches/config.toml` (plain text, committed with the project,
+never put anything secret there) and every assistant (Brief, Taxonomy, Tuning) is given them, which is how it
+learns what the corpus sounds like. Editing them never triggers a model call. A project created before this
+(or whose config lacks either) opens normally, but a popup, **Describe this project**, appears once per open and
+asks for both; it can only be left by saving (`F2`) or quitting (`ctrl+q`). Project settings (`f3`) edits both
+and refuses to save them empty.
+
+**Check store** (PostgreSQL and S3, in New project and Project settings) answers in one line when all is well:
+`✓ Connected` followed by the facts you need, e.g. `pgvector 0.8.0 · vector(1536) · ~30,576,342 rows` or
+`dimension 1536 · cosine`. Warnings (not encrypted, a transaction-pooler URL, no index while `pg_search = "index"`,
+a non-cosine S3 metric) appear above it, errors replace it. For PostgreSQL a **Details** button shows the longer
+report (schema, indexes, one sample row to prove the text column is right).
+
 ## Layout and keys
 
 From 100 columns the left side is a rail with the stage list, project, models and cost; below that it is a one-row
@@ -70,11 +86,30 @@ Everything works at 80x24.
 | `o` | Edit the prompt by hand (Tuning) |
 | `c` | Switch between Chat and Results on a narrow Tuning screen |
 | `x` / `s` | Stop / start or resume a classifier run (Tuning, Test, Threshold, Full run) |
+| `ctrl+j` | Newline in the chat box (Enter sends) |
+| `ctrl+q` | Quit (also from a text box and from the descriptions popup) |
 
 The F-keys work from every screen, even with a text field focused, but not on top of a dialog. F6 and F7 act on
 the editor you are in (the seed list, the focused panel on Taxonomy, the prompt box on Tuning) and are off while
 a draft is open there. Some terminals and operating systems reserve function keys; every F-key action also has a
 button.
+
+## Moving around, and runs that keep going
+
+From 100 columns every row of the left rail is clickable and does what its key does: the nine stages, Projects,
+Project settings, System settings, History and (when shown) Redo plan. Below 100 columns use the keys.
+
+Navigation never stops work. A search, a Tuning run, the test run, the threshold sample, the full run and an
+assistant turn go on while you look at another stage; the rail marks a stage with a run in flight with `▶` (legend
+`▶ running`), and when you come back the screen shows the live progress, or the finished results if it ended
+meanwhile. **Stop** (`x`) is the only way to stop a run. While an earlier run is working, Start on a later stage that
+reads its output (Tuning, Test, Threshold, Full run) is disabled with "Search is running." or similar; it is not
+queued, so press it once the earlier run has ended. Brief, Taxonomy, Gold and Browse are never blocked. Choosing
+a different project from the list still asks "A run is in progress; stop it and switch?", because the working
+directory changes.
+
+On a terminal that supports the Kitty pointer-shapes protocol (Kitty 0.31+, Ghostty, Foot, recent iTerm2/xterm)
+clickable things show a pointing hand; other terminals show no change and everything still works.
 
 ## System state vs project state
 
@@ -136,8 +171,8 @@ refuses to search otherwise. It only embeds your seed phrases.
 
 ## Stages
 
-1. **Brief and seeds.** Describe what you want to find; the assistant asks questions and proposes seed phrases that you edit in a table and approve.
-2. **Search.** Seeds are embedded and searched; every item with cosine similarity of at least 0.60 becomes a candidate (score = best seed). Counts per similarity band are shown.
+1. **Brief and seeds.** Describe what you want to find. With no seeds yet the assistant first asks a few short questions (what counts as a match, where and in whose voice the text appears, phrasings to avoid), then proposes seed phrases written the way items in your corpus are written (it reads your project and store descriptions), not descriptions of the concept. It can also replace and delete seeds you already have (`replace_seed`, `delete_seeds`; one undo, `F6`, reverses everything a turn changed, and it will not touch a seed you are editing). You edit them in a table and approve. The chat box grows with what you type, up to six rows; Enter sends, `ctrl+j` adds a newline, and while the assistant works a `⠋ thinking…` line shows.
+2. **Search.** Seeds are embedded and searched; every item with cosine similarity of at least 0.60 becomes a candidate (score = best seed). Before the first search only a centred **Run search** block is shown (with the progress while it runs); after it, counts per similarity band and the top seeds are shown as aligned bars.
 3. **Taxonomy and prompt.** The assistant interviews you (one label or several per item) and writes `taxonomy.yaml` and `prompt.md`. `off_topic` is built in and always exclusive.
 4. **Gold dev set.** You label 50 random candidates by key. Labelling does not call the classifier (so it costs nothing and the classifier cache is not warmed): the first Tuning run classifies the whole dev set. Every row must be labelled to finish. If the corpus yields fewer than 50 candidates for a split, labelling is blocked with an error; add seeds or change the project's settings.
 5. **Tuning.** The dev set is classified (progress, then results). Metrics (accuracy, per-label P/R/F1, macro/micro-F1) and the disagreements, each with the classifier's reasoning. Chat with the assistant, who can look at the disagreements and propose a prompt you accept, edit or reject, or edit the prompt yourself (`o`), until the target metric reaches the target score.
