@@ -66,14 +66,10 @@ def pg_url_id(url: str) -> str:
 
     The password is left out, so the id (written to config.toml) reveals nothing secret and
     survives a password change; the same database and user always get the same id."""
-    try:
-        from psycopg.conninfo import conninfo_to_dict
+    from psycopg.conninfo import conninfo_to_dict
 
+    try:
         parts = conninfo_to_dict(url)
-    except ImportError as e:
-        raise ImportError(
-            "The pgvector backend needs psycopg: pip install hunches[pg]"
-        ) from e
     except Exception:  # noqa: BLE001  the driver's text could quote the password
         raise ValueError(
             "not a PostgreSQL URL (postgresql://user:password@host:port/database)"
@@ -136,12 +132,8 @@ def pg_message(e: Exception, config: Config, token: str | None = None) -> str:
 
 def pg_connect(config: Config):
     """Open a read-only connection; the caller owns it and the one transaction it starts."""
-    try:
-        import psycopg
-    except ImportError as e:
-        raise ImportError(
-            "The pgvector backend needs psycopg: pip install hunches[pg]"
-        ) from e
+    import psycopg
+
     if not config.pg_table:
         raise ValueError("config.toml: pg_table is required for pgvector")
     var = _url_name(config)
@@ -177,13 +169,9 @@ def pg_connect(config: Config):
 
 
 def _iam_token(config: Config, url: str) -> str:
-    try:
-        import boto3
-        from botocore.exceptions import BotoCoreError, ClientError
-    except ImportError as e:
-        raise ImportError(
-            "IAM authentication needs boto3: pip install hunches[rds]"
-        ) from e
+    import boto3
+    from botocore.exceptions import BotoCoreError, ClientError
+
     parts = urlsplit(url)
     if not (parts.hostname and parts.username):
         raise ValueError("config.toml: the rds_iam URL needs a host and a user")
@@ -528,10 +516,8 @@ def search(
             )
         return _search_pg_index(config, query_vector, floor)
 
-    try:
-        import boto3
-    except ImportError as e:
-        raise ImportError("The S3 backend needs boto3: pip install hunches[s3]") from e
+    import boto3
+
     if not (config.s3_bucket and config.s3_index):
         raise ValueError("config.toml: s3_bucket and s3_index are required for s3")
     client = boto3.client("s3vectors", region_name=config.s3_region)

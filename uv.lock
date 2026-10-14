@@ -632,10 +632,12 @@ name = "hunches"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "boto3" },
     { name = "genai-prices" },
     { name = "keyring" },
     { name = "numpy" },
     { name = "platformdirs" },
+    { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-ai-slim", extra = ["anthropic", "openai"] },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -645,16 +647,6 @@ dependencies = [
 [package.optional-dependencies]
 local = [
     { name = "pydantic-ai-slim", extra = ["sentence-transformers"] },
-]
-pg = [
-    { name = "psycopg", extra = ["binary"] },
-]
-rds = [
-    { name = "boto3" },
-    { name = "psycopg", extra = ["binary"] },
-]
-s3 = [
-    { name = "boto3" },
 ]
 
 [package.dev-dependencies]
@@ -671,21 +663,19 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "boto3", marker = "extra == 'rds'" },
-    { name = "boto3", marker = "extra == 's3'" },
+    { name = "boto3" },
     { name = "genai-prices" },
     { name = "keyring", specifier = ">=25.7.0" },
     { name = "numpy" },
     { name = "platformdirs", specifier = ">=4.12.2" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'pg'" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'rds'" },
+    { name = "psycopg", extras = ["binary"] },
     { name = "pydantic-ai-slim", extras = ["anthropic", "openai"] },
     { name = "pydantic-ai-slim", extras = ["sentence-transformers"], marker = "extra == 'local'" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "textual", extras = ["syntax"] },
 ]
-provides-extras = ["s3", "pg", "rds", "local"]
+provides-extras = ["local"]
 
 [package.metadata.requires-dev]
 dev = [

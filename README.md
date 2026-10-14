@@ -8,11 +8,12 @@ gold set, and classified output. An assistant model talks to you; a classifier m
 
 ```
 uv tool install hunches          # or: pipx install hunches
-uv tool install "hunches[s3]"    # adds boto3 for the S3 Vectors backend
-uv tool install "hunches[pg]"    # adds psycopg for the pgvector (PostgreSQL) backend
-uv tool install "hunches[rds]"   # pg plus boto3, for RDS / Aurora IAM database authentication
-uv tool install "hunches[local]" # adds Sentence Transformers for local query embeddings (Python < 3.14)
+uv tool install "hunches[local]" # adds Sentence Transformers for local query embeddings
 ```
+
+The S3 Vectors and pgvector backends (`boto3`, `psycopg`) are always installed. `hunches[local]` pulls in
+PyTorch and, on Linux, its CUDA wheels: about 5.5 GB on top of a 240 MB base install. It is unavailable on
+Python 3.14.
 
 ## First run
 
@@ -124,7 +125,7 @@ dimension, an estimated row count, the indexes and one sample row.
   `?sslmode=require` (or `verify-full`) to the URL as the host documents. Through a transaction-mode pooler (for
   example Supabase port 6543) Check store suggests the direct or session URL for long searches. Not tested by the
   project's authors against any managed service yet: see `specs/005-pgvector/manual-checklist.md`.
-- **RDS / Aurora IAM authentication**: install `hunches[rds]`, set `pg_auth = "rds_iam"` (optionally `pg_aws_region`
+- **RDS / Aurora IAM authentication**: set `pg_auth = "rds_iam"` (optionally `pg_aws_region`
   and `pg_aws_profile`; credentials come from the usual boto3 sources) and make the URL variable a URL without a
   password, with the instance endpoint as host, e.g. `postgresql://db_user@my-instance.abc123.us-east-1.rds.amazonaws.com:5432/mydb`.
   A fresh token is generated for every connection; `sslmode=require` is added if the URL has none. The database
@@ -221,7 +222,7 @@ with a warning, never as `$0`.
 ## Develop
 
 ```
-uv sync --all-extras
+uv sync --extra local
 uv run ruff check
 uv run ruff format --check
 uv run ty check

@@ -5,10 +5,10 @@ description = "Interactive TUI toolkit for content analysis over an already-embe
 readme = "README.md"
 authors = [{ name = "Chris Hacker", email = "c.m.hacker1997@gmail.com" }]
 requires-python = ">=3.12"
-# pydantic-ai: the slim package with provider extras (pydantic-ai-slim[anthropic,openai]) avoids
-# pulling every provider. Local Sentence Transformers embeddings come from the pydantic-ai-slim
-# extra "sentence-transformers" (needs Python < 3.14), exposed here as our optional extra "local".
-# The full `pydantic-ai` metapackage would also work but installs all providers.
+# pydantic-ai-slim with the providers we use. boto3 and psycopg serve the S3 Vectors and pgvector
+# backends (RDS/Aurora IAM needs both). Local Sentence Transformers embeddings stay an extra
+# ("local", pydantic-ai-slim gates it to Python < 3.14) because PyTorch with its CUDA wheels adds
+# about 5.5 GB on Linux. The full `pydantic-ai` metapackage would install every provider.
 dependencies = [
     "pydantic-ai-slim[anthropic,openai]",
     "textual[syntax]",
@@ -18,12 +18,11 @@ dependencies = [
     "python-dotenv",
     "platformdirs>=4.12.2",
     "keyring>=25.7.0",
+    "boto3",
+    "psycopg[binary]",
 ]
 
 [project.optional-dependencies]
-s3 = ["boto3"]
-pg = ["psycopg[binary]"]
-rds = ["psycopg[binary]", "boto3"]
 local = ["pydantic-ai-slim[sentence-transformers]"]
 
 [project.scripts]

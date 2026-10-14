@@ -16,7 +16,7 @@ Read `../spec.md` first (the source of truth; its "Resolved decisions" Q1–Q7 a
 
 | # | Task | Spec item | Depends on |
 |---|------|-----------|-----------|
-| 01 | Packaging: no extras, all backends in the base install | 2 | — |
+| 01 | Packaging: boto3/psycopg in the base install, `local` stays an extra | 2 | — |
 | 02 | Project and store descriptions: config, assistant context, New project and Project settings | 5 | — |
 | 03 | Missing-descriptions popup | 5 (Q4) | 02 |
 | 04 | Chat input: a box that grows | 6 | — |
