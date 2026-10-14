@@ -149,3 +149,17 @@ def fresh_status(monkeypatch):
     import hunches.app
 
     monkeypatch.setattr(hunches.app, "STATUS_AGE", 0, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def quiet_descriptions(request, monkeypatch):
+    """Most tests build configs without the two descriptions; only tests marked `descriptions`
+    (tests/test_descriptions_popup.py) want the popup that asks for them."""
+    if request.node.get_closest_marker("descriptions"):
+        return
+
+    from hunches.app import HunchesApp
+
+    monkeypatch.setattr(
+        HunchesApp, "check_descriptions", lambda self: None, raising=False
+    )

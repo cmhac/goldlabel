@@ -17,6 +17,7 @@ from textual.widgets import DataTable
 
 from hunches import classifier, files, history, metrics, system
 from hunches.app import ConfirmScreen, HunchesApp, StatusHeader
+from hunches.screens.descriptions import DescriptionsScreen
 from hunches.screens.gold import GoldRowsScreen, GoldScreen, RemoveGoldScreen
 from hunches.screens.history import HistoryScreen, NeedsVersionScreen
 from hunches.screens.model_picker import ModelPicker
@@ -171,6 +172,7 @@ MODALS = [
     "remove-gold-dev",
     "remove-gold-test",
     "remove-gold-assistant",
+    "descriptions",
 ]
 
 
@@ -180,6 +182,7 @@ def modals():
     labels = files.read_taxonomy()
     return {
         "confirm": lambda: ConfirmScreen(LONG),
+        "descriptions": lambda: DescriptionsScreen(),
         "recommendation": lambda: RecommendationModal(current),
         "remove": lambda: RemoveModal("a-project-name"),
         "model-picker": lambda: ModelPicker(),

@@ -753,6 +753,7 @@ class ChatPanel(Vertical):
 # Stage screens import ChatPanel/confirm_approve from this module, so they are imported here.
 from hunches.screens.brief import BriefScreen
 from hunches.screens.browse import BrowseScreen
+from hunches.screens.descriptions import DescriptionsScreen
 from hunches.screens.final import test_stage
 from hunches.screens.gold import GoldScreen
 from hunches.screens.history import ExternalNotice, HistoryScreen
@@ -879,6 +880,13 @@ class HunchesApp(App):
         system.touch_project(path)
         self.stage_shown = False
         self.goto_stage(files.first_incomplete_stage())
+        self.call_later(self.check_descriptions)
+
+    def check_descriptions(self) -> None:
+        """Once per project open: a project without both descriptions gets the popup that asks for them."""
+        config = files.read_config()
+        if not (config.project_description and config.store_description):
+            self.push_screen(DescriptionsScreen())
 
     def on_app_focus(self) -> None:
         """An editor or git may have changed the three files while the terminal was in the background."""
