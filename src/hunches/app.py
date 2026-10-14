@@ -230,6 +230,12 @@ class StatusHeader(Static):
     def on_resize(self) -> None:
         self.refresh_cost()
 
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        """The hand over a row that has an @click link in its markup (the row's own action), the arrow elsewhere."""
+        meta = self.get_style_at(event.x, event.y).meta
+        self.styles.pointer = "pointer" if "@click" in meta else "default"
+        self.screen.update_pointer_shape()
+
     def fit(self) -> None:
         self.set_class(wide(self.app), "-rail")
         self.refresh_cost()

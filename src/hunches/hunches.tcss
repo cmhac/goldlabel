@@ -137,3 +137,7 @@ GoldScreen #item { background: $background; }
 /* One level below a PanelTitle, with its lines indented two cells */
 .subhead { height: 1; text-style: bold; color: #EEF1F5; }
 .indent { padding-left: 2; }
+
+/* Mouse pointer (OSC 22; no effect in terminals without it). Button, Select, Input, TextArea, Tabs set their own. */
+FoldLine, Tab, OptionList, DirTree { pointer: pointer; }
+ProjectsScreen DataTable, DataTable#dis, DataTable#timeline, DataTable#bands, DataTable#rows, DataTable#table { pointer: pointer; }
