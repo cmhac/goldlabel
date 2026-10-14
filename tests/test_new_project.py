@@ -383,8 +383,14 @@ class StubS3Vectors:
 @pytest.mark.parametrize(
     ("metric", "expected"),
     [
-        ("cosine", "dimension 3, distance metric cosine"),
-        ("euclidean", "WARNING: distance metric is euclidean, not cosine"),
+        ("cosine", "✓ Connected  dimension 3 · cosine"),
+        (
+            "euclidean",
+            (
+                "WARNING: distance metric is euclidean, not cosine\n"
+                "✓ Connected  dimension 3 · euclidean"
+            ),
+        ),
     ],
 )
 async def test_check_store_reports_dimension_and_metric(
@@ -874,7 +880,7 @@ async def test_check_store_saves_a_pasted_url_first(tmp_path, monkeypatch):
         form = await open_pg(app, pilot)
         form.query_one("#pg-table", Input).value = "items"
         form.query_one("#pg-url", Input).value = URL
-        assert "sample: 7 hello world" in await run_check(app, pilot, form)
+        assert "✓ Connected" in await run_check(app, pilot, form)
         url_id = search.pg_url_id(URL)
         assert keys.resolve(search.pg_url_name(url_id, None)) == URL
         assert form.query_one("#pg-url", Input).value == ""
@@ -922,20 +928,51 @@ async def test_check_store_shows_the_report_and_the_opclass_warning(
         form.query_one("#pg-table", Input).value = "items"
         form.query_one("#pg-search", Select).value = "index"
         text = await run_check(app, pilot, form)
+        assert (
+            text
+            == f"WARNING: {warning}\n✓ Connected  pgvector 0.8.1 · vector(3) · ~120 rows"
+        )
+        details = form.query_one("#pg-details", Button)
+        assert details.display
+        details.press()
+        await pilot.pause()
+        text = shown(form, "pg-status")
+        assert text.startswith(f"WARNING: {warning}\n✓ Connected")
         assert "pgvector 0.8.1 in schema extensions, not encrypted" in text
         assert "column type vector, dimension 3" in text
-        assert "~120 rows" in text
+        assert "~120 rows (planner estimate)" in text
         assert "items_emb_idx (hnsw, vector_l2_ops)" in text
         assert "sample: 7 hello world" in text
-        assert f"WARNING: {warning}" in text
+        details.press()
+        await pilot.pause()
+        assert "sample:" not in shown(form, "pg-status")
+        details.press()  # expand again, then a second Check store collapses it
+        await pilot.pause()
+        assert "sample:" in shown(form, "pg-status")
+        text = await run_check(app, pilot, form)
+        assert "sample:" not in text
         assert not form.query_one("#check-pg", Button).disabled
-    [config] = stub.configs
+    config = stub.configs[0]
     assert (config.backend, config.pg_table, config.pg_search) == (
         "pgvector",
         "items",
         "index",
     )
     assert config.pg_id_column is None  # defaults stay unset
+
+
+async def test_details_button_is_hidden_until_a_result(tmp_path, monkeypatch):
+    from hunches import search
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(search, "check_store", StubCheck(canned()))
+    app = Host()
+    async with app.run_test(size=(80, 24)) as pilot:
+        form = await open_pg(app, pilot)
+        assert not form.query_one("#pg-details", Button).display
+        form.query_one("#pg-table", Input).value = "items"
+        await run_check(app, pilot, form)
+        assert form.query_one("#pg-details", Button).display
 
 
 async def test_check_store_no_index_note_and_no_warning(tmp_path, monkeypatch):
@@ -951,8 +988,11 @@ async def test_check_store_no_index_note_and_no_warning(tmp_path, monkeypatch):
         form = await open_pg(app, pilot)
         form.query_one("#pg-table", Input).value = "items"
         text = await run_check(app, pilot, form)
-        assert note in text
+        assert note not in text  # only in the details
         assert "WARNING" not in text
+        form.query_one("#pg-details", Button).press()
+        await pilot.pause()
+        assert note in shown(form, "pg-status")
 
 
 async def test_check_store_shows_only_the_first_distinct_error(tmp_path, monkeypatch):
@@ -978,6 +1018,7 @@ async def test_check_store_shows_only_the_first_distinct_error(tmp_path, monkeyp
         text = await run_check(app, pilot, form)
         assert text.count(missing) == 1
         assert f"ERROR: {missing}" in text
+        assert "✓" not in text and "Connected" not in text
 
 
 async def test_check_store_is_disabled_while_it_runs(tmp_path, monkeypatch):

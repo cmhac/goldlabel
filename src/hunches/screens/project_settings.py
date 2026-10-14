@@ -305,7 +305,7 @@ class ProjectSettingsScreen(Screen):
 
         def check() -> None:
             text = check_index(bucket, index, region or None)
-            self.app.call_from_thread(status.update, escape(text))
+            self.app.call_from_thread(status.update, text)
 
         self.run_worker(check, thread=True)
 

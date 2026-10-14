@@ -494,12 +494,12 @@ def test_check_store_reports_a_real_table(admin, schema, project):
     assert (plain["type"], plain["dimension"]) == ("vector", D)
     assert plain["sample"] == ("r00000", "text of r00000")
     assert plain["version"] == version_of(admin)
-    from hunches.screens.pg import report
+    from hunches.screens.pg import details, report
 
-    shown = report(
-        plain
-    )  # the screen renders the real result (it once expected a string)
-    assert f"pgvector {'.'.join(map(str, version_of(admin)))} in schema" in shown[0]
+    # the screen renders the real result (it once expected a string)
+    version = ".".join(map(str, version_of(admin)))
+    assert f"pgvector {version} · vector({D})" in report(plain)[-1]
+    assert f"pgvector {version} in schema" in details(plain)[0]
     indexed = search.check_store(project(pg_table=f"{schema}.indexed"))
     assert [i[1:] for i in indexed["indexes"]] == [("hnsw", "vector_cosine_ops")]
     assert not any(n.startswith("No index:") for n in indexed["notes"])

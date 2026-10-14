@@ -61,7 +61,8 @@ def stored_corpus(corpus: Path, project: Path) -> str:
 
 
 def check_index(bucket: str, index: str, region: str | None) -> str:
-    """get_index on a store: dimension and metric, or the error text."""
+    """get_index on a store as markup: ✓ Connected with dimension and metric (a non-cosine
+    metric adds a WARNING line above it), or an ERROR line."""
     try:
         import boto3
 
@@ -69,11 +70,17 @@ def check_index(bucket: str, index: str, region: str | None) -> str:
             vectorBucketName=bucket, indexName=index
         )["index"]
         metric = found["distanceMetric"]
-        text = f"dimension {found['dimension']}, distance metric {metric}"
+        text = (
+            "[$success]✓ Connected[/]  "
+            f"[$text-muted]dimension {found['dimension']} · {escape(metric)}[/]"
+        )
         if metric != "cosine":
-            text = f"WARNING: distance metric is {metric}, not cosine ({text})"
+            text = (
+                f"[$warning]WARNING: distance metric is {escape(metric)}, "
+                f"not cosine[/]\n{text}"
+            )
     except Exception as e:  # noqa: BLE001  credentials, network, missing index
-        text = f"ERROR: {e}"
+        text = f"[$error]ERROR: {escape(str(e))}[/]"
     return text
 
 
@@ -369,7 +376,7 @@ class NewProjectScreen(Screen):
         self.run_worker(check, thread=True)
 
     def show_store(self, text: str) -> None:
-        self.query_one("#store-status", Static).update(escape(text))
+        self.query_one("#store-status", Static).update(text)
 
     def open(self, location: Path) -> None:
         system.add_project(location)

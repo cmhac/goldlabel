@@ -280,7 +280,7 @@ async def test_new_project_pgvector(size, auth):
 
 
 @pytest.mark.parametrize("size", SIZES, ids=lambda s: f"{s[0]}x{s[1]}")
-@pytest.mark.parametrize("variant", ["report", "error"])
+@pytest.mark.parametrize("variant", ["report", "details", "error"])
 async def test_new_project_pgvector_check_store_result(size, variant):
     from textual.widgets import Select
 
@@ -317,6 +317,8 @@ async def test_new_project_pgvector_check_store_result(size, variant):
         app.screen.query_one("#backend", Select).value = "pgvector"
         await pilot.pause()
         pg.done(app.screen, result)
+        if variant == "details":
+            pg.toggle_details(app.screen)
         await pilot.pause()
         await check(app, pilot, size[0])
 
