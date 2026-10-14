@@ -54,6 +54,8 @@ DataTable > .datatable--even-row, DataTable > .datatable--odd-row { background: 
 /* One-row inputs and selects: tinted strip, a left bar that turns primary on focus */
 Input { border: none; border-left: outer $panel; background: $panel; height: 1; padding: 0 1; }
 Input:focus { border: none; border-left: outer $primary; background: $boost; }
+TextArea.about { height: 4; border: none; border-left: outer $panel; background: $panel; padding: 0 1; }
+TextArea.about:focus { border: none; border-left: outer $primary; background: $boost; }
 Select > SelectCurrent { border: none; background: $panel; height: 1; }
 Select:focus > SelectCurrent { border: none; background: $boost; }
 

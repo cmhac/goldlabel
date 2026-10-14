@@ -51,6 +51,14 @@ class Config(BaseModel):
         "accuracy"
     )
     target_score: float = 0.90
+    # what the user wants to find out / what the items are; given to every assistant
+    project_description: str | None = None
+    store_description: str | None = None
+
+    @field_validator("project_description", "store_description")
+    @classmethod
+    def _blank_is_absent(cls, value: str | None) -> str | None:
+        return (value or "").strip() or None
 
     @model_validator(mode="before")
     @classmethod
@@ -153,9 +161,10 @@ def read_config(project: Path | None = None) -> Config:
 
 
 def write_config(config: Config, project: Path | None = None) -> None:
-    # json.dumps output is a valid TOML basic string / number / bool for our value types
+    # json.dumps output is a valid TOML basic string / number / bool for our value types;
+    # ensure_ascii=False because JSON escapes an emoji as a surrogate pair, which TOML rejects
     lines = [
-        f"{k} = {json.dumps(v)}"
+        f"{k} = {json.dumps(v, ensure_ascii=False)}"
         for k, v in config.model_dump().items()
         if v is not None
     ]
@@ -765,8 +774,20 @@ def gold_coverage_text(split: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def assistant_context() -> str:
+def project_context() -> str:
+    config = read_config()
+    return (
+        f"# Project\n{config.project_description or 'not provided'}\n\n"
+        f"# Store\n{config.store_description or 'not provided'}"
+    )
+
+
+def status_context() -> str:
     return f"{pipeline_status_text()}\n\n{gold_coverage_text()}"
+
+
+def assistant_context() -> str:
+    return f"{project_context()}\n\n{status_context()}"
 
 
 def first_incomplete_stage() -> int:

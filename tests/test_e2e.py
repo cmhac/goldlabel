@@ -13,7 +13,7 @@ from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
 from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.usage import RequestUsage
-from textual.widgets import DataTable, Input
+from textual.widgets import DataTable, Input, TextArea
 
 from hunches import classifier, cost, files, system
 from hunches.app import ConfirmScreen, HunchesApp
@@ -70,6 +70,12 @@ async def taxonomy_stream(messages, info: AgentInfo):
 CALLS: list[
     str
 ] = []  # one entry per classifier model call: proves "no model call" while labelling
+
+
+def about(screen) -> None:
+    """The two required descriptions of the New project form."""
+    for id_ in ("project-description", "store-description"):
+        screen.query_one(f"#{id_}", TextArea).text = "text"
 
 
 def classify_fn(messages, info: AgentInfo):
@@ -177,6 +183,7 @@ async def run_all_stages():
         screen = app.screen
         assert isinstance(screen, NewProjectScreen)
         screen.query_one("#corpus", Input).value = "corpus"  # location: this folder
+        about(screen)
         await pilot.pause()
         await pilot.click("#create")
         await pilot.pause()
@@ -458,6 +465,7 @@ async def test_first_run_new_project_then_open_another_from_projects(
         await pilot.press("n")
         await pilot.pause()
         app.screen.query_one("#corpus", Input).value = "corpus"
+        about(app.screen)
         await pilot.pause()
         await pilot.click("#create")
         await pilot.pause()
@@ -479,6 +487,7 @@ async def reach_stage_4(app, pilot):
     await pilot.press("n")
     await pilot.pause()
     app.screen.query_one("#corpus", Input).value = "corpus"
+    about(app.screen)
     await pilot.pause()
     await pilot.click("#create")
     await pilot.pause()

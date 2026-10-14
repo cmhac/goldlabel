@@ -83,7 +83,7 @@ UPDATE_REPLY = (
 
 def status_digest() -> str:
     """What the assistant was last told about the pipeline: the two context sections."""
-    return hashlib.sha256(files.assistant_context().encode()).hexdigest()
+    return hashlib.sha256(files.status_context().encode()).hexdigest()
 
 
 def digest_of(prompt: str, model: str, rows: list, m: metrics.Metrics) -> str:

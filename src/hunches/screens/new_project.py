@@ -7,7 +7,16 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.markup import escape
 from textual.screen import Screen
-from textual.widgets import Button, Checkbox, Input, Label, Rule, Select, Static
+from textual.widgets import (
+    Button,
+    Checkbox,
+    Input,
+    Label,
+    Rule,
+    Select,
+    Static,
+    TextArea,
+)
 
 from hunches import files, keys, models, system
 from hunches.app import AppFooter, StatusHeader, panel
@@ -68,6 +77,31 @@ def check_index(bucket: str, index: str, region: str | None) -> str:
     return text
 
 
+def compose_about(project: str = "", store: str = "") -> ComposeResult:
+    """The two required description text areas, shared with Project settings."""
+    for name, text, hint in (
+        ("project", project, "what you want to find out, and why"),
+        (
+            "store",
+            store,
+            "what the items are, where they came from, language and format",
+        ),
+    ):
+        with Horizontal(classes="row about-row"):
+            yield Label(name)
+            with Vertical():
+                yield TextArea(text, id=f"{name}-description", classes="about")
+                yield Static(hint, classes="note")
+
+
+def missing_about(screen: Screen) -> list[str]:
+    return [
+        f"{name} description"
+        for name in ("project", "store")
+        if not screen.query_one(f"#{name}-description", TextArea).text.strip()
+    ]
+
+
 class NewProjectScreen(Screen):
     stage_name = "New project"
     DEFAULT_CSS = (
@@ -77,6 +111,7 @@ class NewProjectScreen(Screen):
     NewProjectScreen .row { height: auto; }
     NewProjectScreen .row Static { width: 1fr; }
     NewProjectScreen .row Label { width: 11; color: $text-muted; }
+    NewProjectScreen .about-row Vertical { width: 1fr; height: auto; }
     NewProjectScreen .row Input, NewProjectScreen .row Select { width: 1fr; }
     NewProjectScreen .row Button { margin-left: 1; width: auto; min-width: 8; }
     NewProjectScreen #local, NewProjectScreen #s3 { height: auto; }
@@ -97,6 +132,8 @@ class NewProjectScreen(Screen):
     def compose(self) -> ComposeResult:
         yield StatusHeader()
         with VerticalScroll():
+            with panel(Vertical(), "about"):
+                yield from compose_about()
             with panel(Vertical(), "location"), Horizontal(classes="row"):
                 yield Label("folder")
                 yield PathInput(str(Path.cwd()), id="location", compact=True)
@@ -217,7 +254,7 @@ class NewProjectScreen(Screen):
         backend = self.query_one("#backend", Select).value
         s3 = backend == "s3"
         pg = backend == "pgvector"
-        missing = [
+        missing = missing_about(self) + [
             n
             for n in ("location", *(("bucket", "index") if s3 else ()))
             if not value(n)
@@ -287,6 +324,9 @@ class NewProjectScreen(Screen):
         else:
             self.refresh_create()
 
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        self.refresh_create()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button = event.button.id
         if button == "open-existing":
@@ -351,7 +391,7 @@ class NewProjectScreen(Screen):
         needed = ["location", *(["bucket", "index"] if s3 else ["corpus"])]
         if pg:
             needed = ["location"]
-        missing = [name for name in needed if not value(name)]
+        missing = missing_about(self) + [name for name in needed if not value(name)]
         if pg:
             missing += pg_missing(self)
         if (s3 or pg) and not self.embedding:
@@ -403,6 +443,10 @@ class NewProjectScreen(Screen):
                 assistant_model=current.assistant_model,
                 assistant_thinking=current.assistant_thinking,  # ty: ignore[invalid-argument-type]
                 classifier_model=current.classifier_model,
+                project_description=self.query_one(
+                    "#project-description", TextArea
+                ).text,
+                store_description=self.query_one("#store-description", TextArea).text,
             ),
             location,
         )

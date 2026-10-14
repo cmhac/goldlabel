@@ -63,6 +63,8 @@ def project(tmp_path, monkeypatch):
             classifier_model="none:unset",  # fails at once on mount
             corpus_dir="c",
             embedding_model="m",
+            project_description="find layoff posts",
+            store_description="short english tweets",
         )
     )
     files.write_text("seeds.csv", "seed\nx\n")
@@ -1005,6 +1007,12 @@ async def test_instructions_carry_status_and_gold_coverage_and_the_embedding_cha
         await start(app, pilot)
         await quiesce(app, pilot)
     text = assistant.instructions[0] or ""
+    assert (
+        text.count(
+            "# Project\nfind layoff posts\n\n# Store\nshort english tweets\n\n# Pipeline status"
+        )
+        == 1
+    )
     assert "# Pipeline status\n1 Brief and seeds:" in text
     assert "2 Search: STALE: embedding model changed (the project now uses m;" in text
     assert "the candidates were built with old-model)" in text
