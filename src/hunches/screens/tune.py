@@ -23,6 +23,7 @@ from hunches.app import (
     ChatPanel,
     StageBanner,
     StatusHeader,
+    blocker,
     confirm_approve,
     current_status,
     key_button,
@@ -693,14 +694,23 @@ class TuneScreen(Screen):
         if action == "stop":
             return self.running
         if action == "start":
-            return self.stopped
+            return self.stopped and not self.waiting()
         return True
+
+    def waiting(self) -> str:
+        return blocker(self.app, 5)
+
+    def runs_changed(self) -> None:
+        self.show()
 
     def rerun(self) -> None:
         """Classify the dev set with the current prompt; cached items are free."""
+        if self.waiting():  # shown as the note until the earlier run ends
+            self.show()
+            return
         self.running, self.stopped = True, False
         self.note = ""
-        self.worker = self.run_worker(self.run_dev(), exclusive=True)
+        self.worker = self.run_worker(self.run_dev(), group="run", exclusive=True)
 
     def action_rerun(self) -> None:
         """r: classify the dev set again with the files as they are now (cached items are free)."""
@@ -838,7 +848,7 @@ class TuneScreen(Screen):
                 key=str(i),
             )
         note = self.query_one("#note", Static)
-        say(note, self.note)
+        say(note, self.note or self.waiting())
         note.set_classes("error" if "failed:" in self.note else "warn")
         self.show_detail()
 
@@ -850,7 +860,7 @@ class TuneScreen(Screen):
             idle and m and m.disagreements
         )
         self.query_one("#edit-prompt", Button).disabled = not (not busy and m)
-        self.query_one("#rerun", Button).disabled = busy
+        self.query_one("#rerun", Button).disabled = busy or bool(self.waiting())
         done = self.query_one("#done", Button)
         done.disabled = busy or m is None or not self.current
         done.variant = "success" if self.met() else "default"

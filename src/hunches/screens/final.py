@@ -14,6 +14,7 @@ from hunches.app import (
     AppFooter,
     StageBanner,
     StatusHeader,
+    blocker,
     current_status,
     key_button,
     panel,
@@ -137,12 +138,18 @@ class FinalScreen(Screen):
             + plan_hint()
         )
 
+    def waiting(self) -> str:
+        return blocker(self.app, 6)
+
+    def runs_changed(self) -> None:
+        self.show()
+
     def action_rerun(self) -> None:
-        if self.running:
+        if self.running or self.waiting():
             return
         self.running, self.stopped = True, False
         self.note = ""
-        self.worker = self.run_worker(self.run_test_set(), exclusive=True)
+        self.worker = self.run_worker(self.run_test_set(), group="run", exclusive=True)
 
     def action_start(self) -> None:
         if self.stopped:
@@ -242,6 +249,7 @@ class FinalScreen(Screen):
         self.query_one("#body").display = not busy
         self.query_one(RunIndicator).display = busy
         self.query_one("#accept", Button).disabled = busy or r is None or self.stale()
+        self.query_one("#rerun", Button).disabled = busy or bool(self.waiting())
         names = [lab.name for lab in self.taxonomy.labels]
         retitle(
             self.query_one("#metrics-panel"),
@@ -270,7 +278,7 @@ class FinalScreen(Screen):
                 key=str(i),
             )
         note = self.query_one("#note", Static)
-        say(note, self.note)
+        say(note, self.note or self.waiting())
         note.set_classes(
             "note"
             if self.note.startswith("Test run finished")

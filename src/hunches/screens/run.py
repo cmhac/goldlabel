@@ -8,7 +8,14 @@ from textual.screen import Screen
 from textual.widgets import Button, Static
 
 from hunches import cost, files
-from hunches.app import AppFooter, StageBanner, StatusHeader, current_status, plan_hint
+from hunches.app import (
+    AppFooter,
+    StageBanner,
+    StatusHeader,
+    blocker,
+    current_status,
+    plan_hint,
+)
 from hunches.classifier import classify_many
 from hunches.files import above_threshold, pending
 from hunches.screens.final import RESULT
@@ -132,7 +139,13 @@ class RunScreen(Screen):
             return False
         if action == "stop":
             return self.running
-        return not self.running and bool(pending())
+        return not self.running and bool(pending()) and not self.waiting()
+
+    def waiting(self) -> str:
+        return blocker(self.app, 8)
+
+    def runs_changed(self) -> None:
+        self.show()
 
     def show(self) -> None:
         self.query_one(StageBanner).refresh_text()
@@ -152,7 +165,8 @@ class RunScreen(Screen):
             and current_status(fresh=True)[8][0] == "stale"
         ):
             button = "rerun"
-        indicator.set_button(None if blocked else button)
+        wait = "" if self.running else self.waiting()
+        indicator.set_button(None if blocked or wait else button)
         if state == "idle":
             indicator.set_status(estimate(len(todo), self.model))
         elif state == "failed":
@@ -167,15 +181,19 @@ class RunScreen(Screen):
             )
         else:
             indicator.set_status("")
+        if wait:
+            indicator.set_status(wait, "warn")
         self.refresh_bindings()
 
     def action_start(self) -> None:
         if not self.ready or self.running or self.blocked() or not pending():
             return
+        if self.waiting():
+            return
         self.running = self.started = True
         self.failure = ""
         self.show()
-        self.worker = self.run_worker(self.run_all(), exclusive=True)
+        self.worker = self.run_worker(self.run_all(), group="run", exclusive=True)
 
     def action_stop(self) -> None:
         # cancelling only interrupts an await, never the synchronous one-line append below

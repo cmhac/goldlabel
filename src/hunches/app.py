@@ -146,6 +146,8 @@ MARKS = {
     "stale": "↻",
     "incomplete": "◐",
 }  # the stage statuses that get a mark; never colour alone
+RUNNING = "▶"  # a stage whose run is working (not a status: it comes from the workers)
+BLOCKED_STAGES = (5, 6, 7, 8)  # the runs that read what earlier runs write
 STATUS_AGE = (
     0.5  # seconds a stage_status result is reused: the rail and banners poll it
 )
@@ -175,6 +177,12 @@ def current_status(fresh: bool = False) -> StageStatus:
 def marked(status: StageStatus) -> list[int]:
     """The stages with a stale or incomplete mark, in order."""
     return [n for n, (kind, _) in status.items() if kind in MARKS]
+
+
+def blocker(app, stage: int) -> str:
+    """ "Search is running." while an earlier stage's run works, else "" (shown where a start is disabled)."""
+    name = app.upstream_running(stage)
+    return f"{name} is running." if name else ""
 
 
 def wide(app) -> bool:
@@ -228,8 +236,16 @@ class StatusHeader(Static):
     def follow(self, status: StageStatus) -> None:
         """Tooltip with the reasons, and the footer when the set of marked stages changed."""
         tip = "\n".join(
-            f"{n} {files.STAGE_NAMES[n - 1]} · {status[n][0].upper()}: {status[n][1]}"
-            for n in marked(status)
+            [
+                *(
+                    f"{n} {files.STAGE_NAMES[n - 1]} · {status[n][0].upper()}: {status[n][1]}"
+                    for n in marked(status)
+                ),
+                *(
+                    f"{n} {files.STAGE_NAMES[n - 1]} · RUNNING"
+                    for n in getattr(self.app, "running_stages", list)()
+                ),
+            ]
         )
         if tip != (self.tooltip or ""):
             self.tooltip = tip or None
@@ -269,20 +285,22 @@ class StatusHeader(Static):
             project = project[: RAIL_WIDTH - 4] + "…"
         lines = [plain("hunches", "b $primary"), plain(project, "$text-muted"), ""]
         status = current_status()
+        running = getattr(self.app, "running_stages", list)()
         for num, label, _ in STAGES:
-            mark = MARKS.get(status[num][0])
+            mark = RUNNING if num in running else MARKS.get(status[num][0])
+            tone = "$accent" if num in running else "$warning"
             if num == current:
                 lines.append(
                     row(
                         mark or "●",
-                        "$warning" if mark else "$primary",
+                        tone if mark else "$primary",
                         label,
                         "b #EEF1F5",
                         on=True,
                     )
                 )
             elif mark:
-                lines.append(row(mark, "$warning", label, "$warning"))
+                lines.append(row(mark, tone, label, tone))
             elif num < stage:
                 lines.append(row("✓", "$success", label, "$text-muted"))
             else:
@@ -292,6 +310,8 @@ class StatusHeader(Static):
             lines.append(
                 plain("  ".join(f"{MARKS[k]} {k}" for k in kinds), "$text-muted")
             )
+        if running:
+            lines.append(plain(f"{RUNNING} running", "$text-muted"))
         lines.append("")
         for label, key in DESTINATIONS:
             if label == here:
@@ -335,11 +355,14 @@ class StatusHeader(Static):
         self.follow(status)
         if self.has_class("-rail"):
             return self.refresh_rail(stage)
+        running = getattr(self.app, "running_stages", list)()
         project = Path.cwd().name
         if len(project) > 16:
             project = project[:15] + "…"
         stepper = "".join(
-            f"[$warning]{MARKS[status[num][0]]}[/]"
+            f"[$accent]{RUNNING}[/]"
+            if num in running
+            else f"[$warning]{MARKS[status[num][0]]}[/]"
             if status[num][0] in MARKS
             else "[$text-disabled]○[/]"
             if num > stage
@@ -349,7 +372,13 @@ class StatusHeader(Static):
             for num, _, _ in STAGES
         )
         kind = status[stage][0] if stage else ""
-        badge = f" [b reverse $warning] {kind.upper()} [/]" if kind in MARKS else ""
+        if stage in running:
+            kind = "running"
+        badge = (
+            f" [b reverse $warning] {kind.upper()} [/]"
+            if kind in MARKS or kind == "running"
+            else ""
+        )
 
         def left(with_name: bool, with_badge: bool = True) -> tuple[str, int]:
             """Markup and plain length of everything left of the cost."""
@@ -915,6 +944,14 @@ class HunchesApp(App):
     plan_done: tuple[int, ...] = ()  # of those, the ones approved again since
     seen = 0  # the highest history seq already checked for outside edits
 
+    def __init__(self) -> None:
+        super().__init__()
+        # stage screens kept installed (not removed on leaving) while a run or an assistant turn
+        # works in them, keyed by stage; Textual cancels the workers of a screen it removes
+        self.kept: dict[int, Screen] = {}
+        self.stage_screen: Screen | None = None
+        self.running_seen: list[int] = []
+
     @property
     def rail(self) -> bool:
         """True when the terminal is wide enough for the left rail."""
@@ -933,6 +970,7 @@ class HunchesApp(App):
     def on_mount(self) -> None:
         self.register_theme(HUNCHES)
         self.theme = "hunches"
+        self.set_interval(0.25, self.watch_runs)
         current = system.read_system()
         if current is None:  # first run
             self.push_screen(SystemSettingsScreen(), lambda _: self.start())
@@ -950,15 +988,76 @@ class HunchesApp(App):
                 return
         self.push_screen(ProjectsScreen())
 
+    def working(self, screen: Screen) -> bool:
+        """A run worker of this stage screen or an assistant turn in it is alive."""
+        return any(
+            w.group == "run" and w.node is screen and not w.is_finished
+            for w in self.workers
+        ) or any(chat.running for chat in screen.query(ChatPanel))
+
+    def running_stages(self) -> list[int]:
+        """The stages whose run worker is alive (an assistant turn is not a run)."""
+        screens = {**self.kept, self.stage: self.stage_screen}
+        return [
+            n
+            for n, screen in sorted(screens.items())
+            if screen is not None
+            and any(
+                w.group == "run" and w.node is screen and not w.is_finished
+                for w in self.workers
+            )
+        ]
+
+    def upstream_running(self, stage: int) -> str | None:
+        """The name of a running earlier stage whose output `stage` reads, for the stages that start runs."""
+        if stage in BLOCKED_STAGES:
+            for n in self.running_stages():
+                if n < stage:
+                    return files.STAGE_NAMES[n - 1]
+        return None
+
+    def watch_runs(self) -> None:
+        """When a run starts or ends, the screen shown re-checks whether its own start is blocked."""
+        now = self.running_stages()
+        if now != self.running_seen:
+            self.running_seen = now
+            screen = self.stage_screen
+            changed = getattr(screen, "runs_changed", None)
+            if changed and screen is not None and screen.is_mounted:
+                changed()
+
+    def drop(self, number: int) -> None:
+        """Let go of a kept screen that is not on the stack."""
+        screen = self.kept.pop(number)
+        self.uninstall_screen(screen)
+        screen.remove()
+
     def goto_stage(self, number: int) -> None:
         number = max(1, min(len(STAGES), number))
+        old, was = self.stage_screen, self.stage
+        if old is not None and number == was and self.working(old):
+            return  # already here, and rebuilding the screen would orphan its work
+        for n, kept in list(self.kept.items()):
+            if kept is not old and not self.working(kept):
+                self.drop(n)  # finished while hidden: a fresh screen reads the files
+        while old is not None and self.screen is not old and old in self.screen_stack:
+            self.pop_screen()  # an overlay was on top
+        if old is not None and was not in self.kept and self.working(old):
+            self.kept[was] = old
+            self.install_screen(old, f"stage-{was}")
         self.stage = number
-        screen = STAGES[number - 1][2]()
+        screen = self.kept.get(number)
+        if screen is None or screen is old:
+            screen = STAGES[number - 1][2]()
+        self.stage_screen = screen
         if self.stage_shown:
             self.switch_screen(screen)
         else:
             self.stage_shown = True
             self.push_screen(screen)
+        if old is not None and self.kept.get(was) is old and not self.working(old):
+            del self.kept[was]  # the screen we left is idle: let Textual remove it
+            self.uninstall_screen(old)
         self.call_later(self.check_history)
 
     def open_project(self, path: str | Path) -> None:
@@ -988,6 +1087,9 @@ class HunchesApp(App):
         while len(self.screen_stack) > 1:
             self.pop_screen()
         system.touch_project(path)
+        for n in list(self.kept):
+            self.drop(n)
+        self.stage_screen = None
         self.stage_shown = False
         self.goto_stage(files.first_incomplete_stage())
         self.call_later(self.check_descriptions)

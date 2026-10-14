@@ -15,6 +15,7 @@ from hunches.app import (
     AppFooter,
     StageBanner,
     StatusHeader,
+    blocker,
     current_status,
     key_button,
     panel,
@@ -221,16 +222,24 @@ class ThresholdScreen(Screen):
         cutoff.set_classes(mode)
         self.query_one("#save", Button).disabled = self.chosen is None
         note = self.query_one("#note", Static)
-        say(note, self.note)
+        say(note, self.note or self.waiting())
         note.set_classes("error" if "failed:" in self.note else "note")
+
+    def waiting(self) -> str:
+        return blocker(self.app, 7)
+
+    def runs_changed(self) -> None:
+        self.show()
 
     def action_start(self) -> None:
         todo = [x for band in self.ids for x in band if x not in self.predictions]
-        if not self.ready or self.running or not todo:
+        if not self.ready or self.running or not todo or self.waiting():
             return
         self.running, self.stopped = True, False
         self.note = ""
-        self.worker = self.run_worker(self.run_sample(todo), exclusive=True)
+        self.worker = self.run_worker(
+            self.run_sample(todo), group="run", exclusive=True
+        )
 
     def action_stop(self) -> None:
         if self.worker is not None and self.running:
