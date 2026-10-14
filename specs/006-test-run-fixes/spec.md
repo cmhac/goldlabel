@@ -1,6 +1,6 @@
 # 006 — Fixes and improvements from the first real test run
 
-Status: **draft** (initial spec only; no task files yet). Source: Chris's notes from a test run (`Hunches_notes_braindump.pdf`, 11 items with screenshots), checked against the code on branch `claude/funny-ritchie-args3k` (Textual 8.2.8 installed). Builds on `../001-initial-version/spec.md` to `../005-pgvector/spec.md`. Where this spec disagrees with them, this spec wins once it is implemented; the places are listed under "Behaviour that changes in 001–005".
+Status: **draft, decisions Q1–Q6 resolved 2026-10-14** (initial spec only; no task files yet). Source: Chris's notes from a test run (`Hunches_notes_braindump.pdf`, 11 items with screenshots), checked against the code on branch `claude/funny-ritchie-args3k` (Textual 8.2.8 installed). Builds on `../001-initial-version/spec.md` to `../005-pgvector/spec.md`. Where this spec disagrees with them, this spec wins once it is implemented; the places are listed under "Behaviour that changes in 001–005".
 
 **Read order for an implementer:** this spec → your task file (`tasks/NN-….md`, to be written) → the code named in the section.
 
@@ -16,16 +16,17 @@ Same as 001–005: minimal implementation (no abstraction, base class, registry 
 - **The assistant gets no ability a human lacks, and no more.** Item 9 gives it add, delete and replace on seeds, which the user already has (D7 in 004 still holds for gold: the assistant never sets a label).
 - **Nothing here may stop a run the user did not ask to stop.** See theme F.
 
-## Clarifications needed from Chris (defaults the spec assumes)
+## Resolved decisions
 
-| # | Question | Assumed default if not answered |
-|---|----------|--------------------------------|
-| Q1 | Item 1: "in the same coor as the 'hunches' text": same **row** (the content area cannot share a column with the left rail). Right? | Same row. |
-| Q2 | Item 2: the `local` extra pulls in `sentence-transformers` (and with it PyTorch), which is a very large install and is skipped on Python 3.14 (`python_version < '3.14'` marker). "Remove all extras" would put that in every install. Fold in `local` too, or keep only that one extra? | Fold in `s3`, `pg`, `rds` (small: `boto3`, `psycopg[binary]`); **keep `local` as the only extra** until Chris decides. |
-| Q3 | Item 5: what is "the store" for a local corpus folder? | The field is called "store description" everywhere and the form hint says "what the items are, where they came from, language and format", for all three backends. |
-| Q4 | Item 5: existing projects have no descriptions. Block them until filled in? | No. Not blocking; a one-line note on Brief points at Project settings (F3). Required only when creating a project. |
-| Q5 | Item 6: how does a user type a newline in a growing chat box? Enter sends today. `shift+enter` is not distinguishable from `enter` in most terminals. | Enter sends; `ctrl+j` inserts a newline (pasted newlines are kept as they are). |
-| Q6 | Item 11: switching to a **different project** cannot keep a run going (the working directory is process-global and `switch_to` calls `workers.cancel_all()`). Is it right to keep the existing "A run is in progress; stop it and switch?" confirm for that one case? | Yes: opening the Projects list never stops anything; choosing another project still asks first. |
+| # | Question | Decision | Who / when |
+|---|----------|----------|------------|
+| Q1 | Item 1: "in the same coor as the 'hunches' text" | Same **row** (the content area cannot share a column with the left rail). | Chris, 2026-10-14 |
+| Q2 | Item 2: the `local` extra pulls in `sentence-transformers` (and with it PyTorch), a very large install that is skipped on Python 3.14 (`python_version < '3.14'` marker) | **Fold `local` in too.** No extras remain. The README says the install is large. | Chris, 2026-10-14 |
+| Q3 | Item 5: what is "the store" for a local corpus folder? | The field is called "store description" everywhere; the form hint says "what the items are, where they came from, language and format", for all three backends. | Chris, 2026-10-14 |
+| Q4 | Item 5: existing projects have no descriptions | **Not a blocker** for opening or using the project, but a **popup requires the user to enter both descriptions** for any project that is missing one (see item 5). | Chris, 2026-10-14 |
+| Q5 | Item 6: newline in a growing chat box | Enter sends; `ctrl+j` inserts a newline (pasted newlines are kept as they are). | Chris, 2026-10-14 |
+| Q6 | Item 11: switching to a different project | Opening the Projects list never stops anything; choosing another project keeps the existing "A run is in progress; stop it and switch?" confirm (the working directory is process-global and `switch_to` calls `workers.cancel_all()`). | Chris, 2026-10-14 |
+| Q7 | Item 10: the design of the Search results | **Follow the existing design handoff** (`../004-history-and-redo/design/design_handoff_hunches_tui/reference/ui_kits/tui-rail/Search.jsx`, 003 `README.md` §2 Search), with the two overrides in item 10. | Chris, 2026-10-14; read and applied by Claude |
 
 ## Where things stand today (verified in code)
 
@@ -82,20 +83,36 @@ A tool line (`FoldLine`, e.g. `propose_seeds Added 10 seeds.`) directly after a 
 
 ### 10. Search run UI (note "Search run UI")
 
-- Before a search has run in this project (no `candidates.jsonl`), the page shows **only** the Run search button, **centred** horizontally and vertically in the content area, with the existing reason text beneath it when it is disabled ("Seeds are not approved yet."). The results panels are not mounted or are `display: none`; there is no table of zeros and no "Run the search to see…" placeholder.
-- While searching, the same centred block shows progress (reusing `LabelBar` and, for the pgvector exact one-query mode, the elapsed/rows line) and the Stop button where it exists today; this is the 003 `RunIndicator` pattern (centred run block) and should reuse it if it fits rather than adding a new widget.
-- After a search (or on opening a project with an existing `candidates.jsonl`) the existing top row returns (`Rerun search  r`, stop, status, the similarity selector) and the results appear.
-- **Results formatting**: the current two `Static`s of padded text read as rough. Requirement, not a layout: fixed-width label and count columns, counts right-aligned with thousands separators and a share of the total, bars directly beside the numbers (not pushed to the far edge), a visible one-row gap between the two panels (same gap as item 1), the top-seeds list as rank · count · bar · seed text with the seed truncated with an ellipsis. Both panels are readable at 80×24 and use the extra width at 120×36. The detailed design is a **design pass** (Chris, or the design agent as in 003/004) before the task is written; this spec does not fix the exact look. Whatever the design, use `Static`/`DataTable` per the notes in `AGENTS.md` (`report.fit_text_column`: DataTable has no flex column).
+Q7: the layout follows the existing design handoff (`../004-history-and-redo/design/design_handoff_hunches_tui/reference/ui_kits/tui-rail/Search.jsx` and the Search section of `../003-tui-redesign/design/README.md`), which already specifies the results panels; nothing new is invented. What the handoff already says and stays: the top row (primary `Run search  r` / `Rerun search  r` button, status text, per-seed progress bar to its right while searching), the two panels **Candidates by similarity** (subtitle: the total) and **Top seeds** (subtitle: the "similarity at or above ▼" select), the rerun confirm, the stale and gold-orphan notices. Two things change, both from Chris's note:
+
+1. **Before the first search, only the Run block is shown, centred** (the handoff showed dimmed empty panels; that goes). 2. **The results are laid out as the handoff's grids** (the current `Static` text pads the bars to a fixed 30 cells and puts the count right beside them, which is what reads as rough).
+
+| State | Page shows |
+|-------|-----------|
+| Never run (no `candidates.jsonl`), seeds not approved | Centred block: the disabled `Run search  r` button with "Seeds are not approved yet." beneath. No panels. |
+| Never run, seeds approved | Centred block: the `Run search  r` button. No panels. |
+| First run in progress | Centred block with the progress (the 003 `RunIndicator` pattern: title "Searching…", the `LabelBar` `4/12  <seed>` or, for the pgvector exact one-query mode, the elapsed/rows line, and Stop where it exists today). Reuse `RunIndicator` from `screens/progress.py` if its API fits; do not add a second progress widget. No panels. |
+| First run failed or stopped | The centred block again, with the error ("Search failed: …" and the "Fix:" line) or "Search stopped." beneath. |
+| Has results (also on opening a project that already has `candidates.jsonl`) | The handoff layout: top row, notices, both panels. Rerun in progress keeps the handoff's top-row progress bar and dimmed panels, as today. Stale results (seeds or embedding model changed) show normally with the existing banners. |
+
+**Panel contents (from the handoff, measured in cells):**
+
+- **Candidates by similarity:** a muted header row `Similarity · · · Candidates`, then one row per band: label column 11 wide (strong colour), a bar column that takes the remaining width (the bar is scaled to the largest band and capped at 40 cells so it never runs to the far edge on a wide terminal), and a count column 11 wide, right-aligned, bold, thousands separators, faint (not bold) when the count is 0. Columns are separated by 2 cells. The panel subtitle is `N candidates`.
+- **Top seeds:** rows of rank (3 wide, right-aligned, faint), count (7 wide, right-aligned, bold, separators), bar (12 cells, primary colour; the first row's bar is `$accent`, the teal), then the seed text filling the rest and truncated with `…`. The select in the subtitle recomputes counts from `candidates.jsonl` as today (`candidates.top_seeds`).
+- Counts are right-aligned and bars start at a fixed column, so rows line up in both panels at 80×24 and at 120×36. One blank row between the two panels (item 1's gap).
+- Textual has no `grid` for `Static` text, so the task may use a `DataTable` per `AGENTS.md` ("DataTable has no flex column: give the Text column a fixed width and resize it after layout, `report.fit_text_column`"), per-row `Horizontal`s, or a `Static` that builds its padding from the panel's width on resize. Pick the smallest that keeps the widths above; the existing `bar()` helper in `screens/search.py` is reused.
+- `tests/test_sizes.py` gets the never-run state and the has-results state; the hidden-panels state is asserted (`display` is false), not just their absence on screen.
+
 
 ## B. Packaging
 
 ### 2. Provider extras (note "Provider extras")
 
-- Move `boto3` and `psycopg[binary]` into `[project] dependencies`; delete the `s3`, `pg` and `rds` extras. Per Q2, `local` stays an extra unless Chris says otherwise; if it is folded in too, the dependency line is `pydantic-ai-slim[anthropic,openai,sentence-transformers]` (the extra is `python_version < '3.14'` in `pydantic-ai-slim`'s metadata, so Python 3.14 simply does not get it) and the README must say the install is large.
+- Move `boto3` and `psycopg[binary]` into `[project] dependencies`, add `sentence-transformers` to the `pydantic-ai-slim` line (`pydantic-ai-slim[anthropic,openai,sentence-transformers]`; in `pydantic-ai-slim`'s metadata that extra is `python_version < '3.14'`, so Python 3.14 installs simply do not get local embeddings), and delete `[project.optional-dependencies]` entirely (Q2). The comment above the dependency list in `pyproject.toml` is updated. The README says the install is large (PyTorch comes with `sentence-transformers`) and that local embeddings are unavailable on Python 3.14.
 - Imports in `search.py` may stay lazy (cheap startup) but the "pip install hunches[…]" `ImportError` messages go (the package is always installed with them). The two tests that assert the old text change with them. If `psycopg` or `boto3` is somehow missing the plain `ImportError` surfaces.
-- README (Install section and the RDS/Aurora paragraph), `AGENTS.md` (Stack, Commands: `uv sync` replaces `uv sync --all-extras` if no extra remains), `.github/workflows/ci.yml`, `publish.yml` and the pgvector CI job follow. `specs/005-pgvector` text that names the extras is left as history; its "Clarifications" are not rewritten.
+- README (Install section and the RDS/Aurora paragraph), `AGENTS.md` (Stack, Commands: `uv sync` replaces `uv sync --all-extras`), `.github/workflows/ci.yml`, `publish.yml` and the pgvector CI job follow. `specs/005-pgvector` text that names the extras is left as history; its "Clarifications" are not rewritten.
 - `rds` existed to avoid forcing boto3 on pgvector-only users; that trade-off is the point of this change and needs no replacement.
-- Test: a fresh `uv sync` (no extras) can `import boto3, psycopg` and run `pytest -m "not ui"`.
+- Test: a fresh `uv sync` (no extras) can `import boto3, psycopg` (and `sentence_transformers` on Python < 3.14) and run `pytest -m "not ui"`. CI time and cache size will grow with PyTorch; the task checks the CI run time and notes it.
 
 ## C. Assistant context
 
@@ -105,7 +122,9 @@ A tool line (`FoldLine`, e.g. `propose_seeds Added 10 seeds.`) directly after a 
 - **New project:** a new top panel **"about"** (before location) with two multi-line text areas, "project" (what this project is trying to find out, and why) and "store" (what is in the corpus: what an item is, where it came from, language, format, anything that affects how an item is worded). Both are **required**: Create stays disabled and the existing hint reads `Required: project description, store description` (the hint already lists missing fields). Whitespace-only counts as empty. There is no minimum length.
 - **Project settings (F3):** both are editable there, saved with the other settings.
 - **Assistants:** `files.assistant_context()` begins with a `# Project` block and a `# Store` block (the text as written, or "not provided" for an old project), so Brief, Taxonomy and Tuning all receive it (they already all call it). Editing a description must **not** trigger the Tuning UPDATED context reply (`tune.py:86` hashes `assistant_context()`; hash only the pipeline status and gold coverage text, i.e. what it hashes today).
-- Q4: an old project with empty descriptions is not blocked. Brief shows one muted line ("No project or store description yet. Add them in Project settings (F3) so the assistant has context.") and the assistant's context says "not provided".
+- **Missing descriptions popup (Q4).** Opening a project never fails because a description is missing, but as soon as the project's first stage screen is showing (after `goto_stage` in `switch_to`, so after any startup modal and the outside-edit check), if either description is empty or whitespace-only a modal `DescriptionsScreen` opens: title "Describe this project", the same two text areas and hints as New project, pre-filled with whichever one exists, and **Save  F2**, disabled until both are non-empty. It cannot be dismissed any other way (no Esc, no close): the user is required to fill it in. A **Quit  q** button is the only other exit (Textual's `ctrl+q` also quits; `q` as a plain key must not fire while a text area has focus, so the button and `ctrl+q` are what is tested). Save writes `config.toml` through `files.write_config` and the assistants see the text from then on. It is shown once per project open, not on every stage change. It is listed in `tests/test_sizes.py` at all three sizes.
+- Because the popup would block every Pilot test that opens a project, the shared fixture that writes a test project's `config.toml` (`tests/conftest.py` and the per-file helpers) writes both descriptions; only the popup's own tests and the old-config-loads test omit them. `examples/` gets descriptions too.
+- **Project settings** also refuse to save an empty description (the same guard), otherwise the popup would come straight back.
 - Optional, not required: saved S3 stores (`system.add_store`) remember a store description to pre-fill other projects on the same store. Left out of this spec unless Chris wants it.
 - Tests: Create disabled until both are filled; `config.toml` round-trips both; the text appears in the instructions the Brief agent is given (inspect `agent` instructions with a `FunctionModel`, no real model call); old `config.toml` without the fields loads.
 
@@ -161,12 +180,12 @@ A tool line (`FoldLine`, e.g. `propose_seeds Added 10 seeds.`) directly after a 
 
 ## Behaviour that changes in 001–005
 
-- 002/003 (New project and Project settings): new "about" panel with two required fields on New project; models panel without a Rule and with assistant/classifier subheads; one gap between all panels.
+- 002/003 (New project and Project settings): new "about" panel with two required fields on New project; models panel without a Rule and with assistant/classifier subheads; one gap between all panels. Opening a project with a missing description shows a required popup.
 - 003 (Chat): one-row `Input` becomes a growing `TextArea`; thinking indicator; tool-line spacing.
-- 003 (Search screen): the centred run block before the first search; the results panels appear only after a search.
+- 003 (Search screen): the centred run block before the first search and for a failed first run; no results panels until a search has produced results (the handoff showed them dimmed); the results use the handoff grids.
 - 003/004 (navigation): the rail is clickable, `goto_stage` no longer cancels running work; new RUNNING mark and legend entry; stages are blocked while an upstream run is working.
 - 005 (pgvector Check store) and 002 (S3 Check store): the success output.
-- 001/005 (packaging): the `s3`, `pg` and `rds` extras are removed (and `local` per Q2); `ImportError` messages change.
+- 001/005 (packaging): the `s3`, `pg` and `rds` extras are removed (and `local`); `ImportError` messages change.
 - 001 (Brief assistant): the seed phrasing rules and the two new tools; `# Current seeds` numbering is now part of the tools' contract.
 
 ## Out of scope
@@ -181,9 +200,8 @@ A tool line (`FoldLine`, e.g. `propose_seeds Added 10 seeds.`) directly after a 
 - Whether the mouse pointer actually changes in macOS Terminal.app and in the other terminals Chris uses (item 3). The spec records the support list above; it cannot be tested from the container.
 - The glyph for RUNNING in the rail (item 11) renders in those terminals.
 - A real-model pass on the seed assistant: it asks questions before proposing, writes corpus-voiced seeds from a description, and uses `replace_seed`/`delete_seeds` correctly (item 9). Tests cover the plumbing, not the model's judgement.
-- The visual design of the Search results (item 10) before its task is written.
-- The Q1–Q6 answers above.
+- A look at the Search results at 80×24 and 120×36 once built, against the handoff mock (`search/done`); and at the descriptions popup.
 
 ## Tasks
 
-To be written after the Q answers and the Search design pass (`tasks/README.md` with dependency order, then one file per task). Suggested split, in dependency order: (1) packaging, (2) config fields + about panel + context, (3) chat panel (growing input, indicator, spacing), (4) seed assistant, (5) New project layout, (6) Check store success, (7) Search run UI, (8) pointer styles, (9) rail clicks and keeping runs alive (last: largest and touches every run screen), (10) docs (README, AGENTS.md "Current state" and source-of-truth list).
+To be written next (`tasks/README.md` with dependency order, then one file per task). Suggested split, in dependency order: (1) packaging, (2) config fields, assistant context, about panel and the missing-descriptions popup (with the test-fixture change), (3) chat panel (growing input, indicator, spacing), (4) seed assistant, (5) New project layout, (6) Check store success, (7) Search run UI, (8) pointer styles, (9) rail clicks and keeping runs alive (last: largest and touches every run screen), (10) docs (README, AGENTS.md "Current state" and source-of-truth list).
