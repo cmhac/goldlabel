@@ -1,5 +1,6 @@
 import json
 import os
+from itertools import pairwise
 from pathlib import Path
 from typing import ClassVar
 
@@ -231,22 +232,81 @@ async def test_existing_project_is_refused_with_an_open_button(tmp_path, monkeyp
     os.chdir(tmp_path)
 
 
-async def test_models_are_summarised_with_prices(tmp_path, monkeypatch):
+async def test_models_panel_has_assistant_then_classifier_subheads(
+    tmp_path, monkeypatch
+):
+    from textual.widgets import Rule
+
     from hunches import models
 
     monkeypatch.chdir(tmp_path)
     app = Host()
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
-        text = str(app.screen.query_one("#models", Static).render()) + str(
-            app.screen.query_one("#models-rest", Static).render()
+        assert not app.screen.query(Rule)
+        assert not app.screen.query("#models-rest")
+        screen = app.screen
+        text = lambda i: str(screen.query_one(i, Static).render())
+        heads = [str(h.render()) for h in screen.query(".subhead").results(Static)]
+        assert heads == ["assistant", "classifier"]
+        assert text("#models-assistant").split("\n") == [
+            f"{ASSISTANT}  {models.price_label(ASSISTANT)}",
+            "thinking: medium",
+        ]
+        assert text("#models-classifier") == (
+            f"{CLASSIFIER}  {models.price_label(CLASSIFIER)}"
         )
-        assert f"assistant: {ASSISTANT}" in text
-        assert models.price_label(ASSISTANT) in text
-        assert "thinking: medium" in text
-        assert f"classifier: {CLASSIFIER}" in text
-        assert models.price_label(CLASSIFIER) in text
-        assert "pinned for this project" in text
+        order = [
+            w.id or "head"
+            for w in screen.query("#models-assistant, #models-classifier, .subhead")
+        ]
+        assert order == ["head", "models-assistant", "head", "models-classifier"]
+
+
+@pytest.mark.parametrize("size", [(100, 30), (120, 36)])
+async def test_title_row_sits_on_the_rails_hunches_row(tmp_path, monkeypatch, size):
+    monkeypatch.chdir(tmp_path)
+    app = Host()
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        title = app.screen.query_one("#title", Static)
+        rail = app.screen.query_one("StatusHeader")
+        assert title.display
+        assert str(title.render()) == "New project"
+        assert title.region.y == rail.region.y  # the rail's first line is "hunches"
+        assert title.region.x >= 26
+
+
+async def test_title_row_is_hidden_without_the_rail(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    app = Host()
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        assert not app.screen.query_one("#title", Static).display
+        await pilot.resize_terminal(120, 36)
+        await pilot.pause()
+        assert app.screen.query_one("#title", Static).display
+        await pilot.resize_terminal(80, 24)
+        await pilot.pause()
+        assert not app.screen.query_one("#title", Static).display
+
+
+@pytest.mark.parametrize("backend", ["local", "s3", "pgvector"])
+async def test_panels_are_one_blank_row_apart(tmp_path, monkeypatch, backend):
+    from textual.widgets import Select
+
+    monkeypatch.chdir(tmp_path)
+    app = Host()
+    async with app.run_test(size=(120, 60)) as pilot:
+        await pilot.pause()
+        app.screen.query_one("#backend", Select).value = backend
+        await pilot.pause()
+        panels = list(app.screen.query(".panel"))
+        assert len(panels) == 4  # about, location, corpus, models
+        for above, below in pairwise(panels):
+            assert below.region.y - above.region.bottom == 1
+        actions = app.screen.query_one("#actions")
+        assert actions.region.y >= panels[-1].region.bottom
 
 
 async def test_missing_key_blocks_create_and_system_settings_returns_intact(
