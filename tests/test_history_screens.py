@@ -10,10 +10,10 @@ from test_taxonomy_screen import edits as tax_edits
 from test_taxonomy_screen import setup as tax_setup
 from test_taxonomy_screen import start
 from textual import events
-from textual.widgets import Button, DataTable, Input, Select, Static, TextArea
+from textual.widgets import Button, DataTable, Select, Static, TextArea
 
 from hunches import candidates, files, history
-from hunches.app import HunchesApp
+from hunches.app import ChatInput, HunchesApp
 from hunches.screens.brief import BriefScreen, write_seeds
 from hunches.screens.history import ExternalNotice, HistoryScreen, NeedsVersionScreen
 from hunches.screens.project_settings import ProjectSettingsScreen
@@ -203,7 +203,7 @@ async def test_taxonomy_f6_acts_on_the_focused_panel(tmp_path, monkeypatch, call
     )
     async with HunchesApp().run_test(size=(120, 40)) as pilot:
         screen = await start(pilot.app, pilot)
-        screen.query_one("#chat-input", Input).focus()
+        screen.query_one("#chat-input", ChatInput).focus()
         await pilot.press("f6")
         await pilot.pause()
         assert (
@@ -753,3 +753,27 @@ async def test_the_rail_row_for_history_is_dimmed_while_an_editor_is_open(
         await pilot.pause()
         app.screen.query_one(StatusHeader).refresh_cost()
         assert "text-disabled" in history_style(app)
+
+
+async def test_brief_f6_f7_reach_undo_redo_with_the_chat_box_focused(
+    tmp_path, monkeypatch
+):
+    brief_setup(tmp_path, monkeypatch)
+    write_seeds(["a"], summary="Seed added")
+    write_seeds(["a", "b"], summary="Seed added")
+    app = HunchesApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, BriefScreen)
+        box = screen.query_one("#chat-input", ChatInput)
+        box.focus()
+        box.text = "draft"
+        await pilot.press("f6")
+        await pilot.pause()
+        assert candidates.read_seeds() == ["a"]
+        await pilot.press("f7")
+        await pilot.pause()
+        assert candidates.read_seeds() == ["a", "b"]
+        assert box.text == "draft" and box.has_focus  # not select-line / select-all
+        assert box.selected_text == ""

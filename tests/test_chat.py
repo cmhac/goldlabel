@@ -14,12 +14,13 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.models.test import TestModel
+from textual import events
 from textual.app import App, ComposeResult
-from textual.widgets import Button, Input
+from textual.widgets import Button
 
 import hunches
 from hunches import files
-from hunches.app import ChatPanel, FoldLine
+from hunches.app import ChatInput, ChatPanel, FoldLine
 
 
 class Host(App):
@@ -162,8 +163,8 @@ async def test_live_turns_build_the_same_structure_as_restored_history():
     host = Host(panel)
     async with host.run_test() as pilot:
         await pilot.pause()
-        panel.query_one("#chat-input", Input).focus()
-        panel.query_one("#chat-input", Input).value = "find layoffs"
+        panel.query_one("#chat-input", ChatInput).focus()
+        panel.query_one("#chat-input", ChatInput).text = "find layoffs"
         await pilot.press("enter")
         await pilot.pause(0.5)
         await host.workers.wait_for_complete()
@@ -200,8 +201,8 @@ async def test_running_tool_shows_ellipsis_then_the_result():
     host = Host(panel)
     async with host.run_test() as pilot:
         await pilot.pause()
-        panel.query_one("#chat-input", Input).focus()
-        panel.query_one("#chat-input", Input).value = "go"
+        panel.query_one("#chat-input", ChatInput).focus()
+        panel.query_one("#chat-input", ChatInput).text = "go"
         await pilot.press("enter")
         await pilot.pause(0.3)
         tool = panel.query_one(".fold-tool", FoldLine)
@@ -238,8 +239,8 @@ async def test_record_makes_no_model_call_persists_and_reaches_the_next_reply():
             "# Instructions\nNo reply needed. Treat this as the current state in your next turn."
         )
         assert structure(panel) == [("edit", "Seed 1 edited")]
-        panel.query_one("#chat-input", Input).focus()
-        panel.query_one("#chat-input", Input).value = "next"
+        panel.query_one("#chat-input", ChatInput).focus()
+        panel.query_one("#chat-input", ChatInput).text = "next"
         await pilot.press("enter")
         await pilot.pause(0.5)
         await host.workers.wait_for_complete()
@@ -317,8 +318,8 @@ async def test_instructions_are_evaluated_each_run_and_never_persisted():
     async with host.run_test() as pilot:
         await pilot.pause()
         for text in ("one", "two"):
-            panel.query_one("#chat-input", Input).focus()
-            panel.query_one("#chat-input", Input).value = text
+            panel.query_one("#chat-input", ChatInput).focus()
+            panel.query_one("#chat-input", ChatInput).text = text
             await pilot.press("enter")
             await pilot.pause(0.3)
             await host.workers.wait_for_complete()
@@ -342,26 +343,26 @@ async def test_send_button_and_enter_behave_the_same_and_disable_correctly():
     async with host.run_test() as pilot:
         await pilot.pause()
         send = panel.query_one("#send", Button)
-        box = panel.query_one("#chat-input", Input)
+        box = panel.query_one("#chat-input", ChatInput)
         assert send.disabled  # empty
         box.focus()
-        box.value = "via enter"
+        box.text = "via enter"
         await pilot.pause()
         assert not send.disabled
         await pilot.press("enter")  # focus is on the input after mount
         await pilot.pause(0.2)
-        assert host.submitted == ["via enter"] and box.value == ""
+        assert host.submitted == ["via enter"] and box.text == ""
         assert send.disabled and box.disabled  # streaming
         gate.set()
         await host.workers.wait_for_complete()
         await pilot.pause()
         assert not box.disabled
-        box.value = "via button"
+        box.text = "via button"
         await pilot.pause()
         await pilot.click("#send")
         await pilot.pause(0.3)
         await host.workers.wait_for_complete()
-        assert host.submitted == ["via enter", "via button"] and box.value == ""
+        assert host.submitted == ["via enter", "via button"] and box.text == ""
         assert [k for k, _ in structure(panel)] == [
             "user",
             "assistant",
@@ -377,8 +378,8 @@ async def test_empty_state_shows_until_the_first_turn():
         await pilot.pause()
         empty = panel.query_one("#empty")
         assert empty.display and str(empty.render()) == "Describe what to find"
-        panel.query_one("#chat-input", Input).focus()
-        panel.query_one("#chat-input", Input).value = "hi"
+        panel.query_one("#chat-input", ChatInput).focus()
+        panel.query_one("#chat-input", ChatInput).text = "hi"
         await pilot.press("enter")
         await pilot.pause(0.3)
         await host.workers.wait_for_complete()
@@ -396,9 +397,92 @@ async def test_error_line_and_no_record_of_failed_turn():
     host = Host(panel)
     async with host.run_test() as pilot:
         await pilot.pause()
-        panel.query_one("#chat-input", Input).focus()
-        panel.query_one("#chat-input", Input).value = "h"
+        panel.query_one("#chat-input", ChatInput).focus()
+        panel.query_one("#chat-input", ChatInput).text = "h"
         await pilot.press("enter")
         await pilot.pause(0.3)
         assert structure(panel)[-1] == ("error", "Error: no key")
-        assert not panel.query_one("#chat-input", Input).disabled
+        assert not panel.query_one("#chat-input", ChatInput).disabled
+
+
+def lines_text(n: int) -> str:
+    return "\n".join(f"line {i}" for i in range(n))
+
+
+async def test_chat_input_grows_to_six_rows_then_scrolls_and_shrinks_after_send():
+    panel = ChatPanel("brief", agent_with(say_hello))
+    host = Host(panel)
+    async with host.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        box = panel.query_one("#chat-input", ChatInput)
+        assert box.size.height == 1
+        for n, expected in [(2, 2), (3, 3), (6, 6), (7, 6), (20, 6)]:
+            box.text = lines_text(n)
+            await pilot.pause()
+            assert box.size.height == expected, n
+        assert panel.query_one("#send").region.y == box.region.y  # first row of the box
+        box.focus()
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+        await host.workers.wait_for_complete()
+        await pilot.pause()
+        assert box.size.height == 1
+
+
+async def test_chat_input_grows_with_wrapped_long_lines_and_never_over_a_third_of_the_panel():
+    panel = ChatPanel("brief", agent_with(say_hello))
+    host = Host(panel)
+    async with host.run_test(size=(40, 12)) as pilot:
+        await pilot.pause()
+        box = panel.query_one("#chat-input", ChatInput)
+        box.text = "word " * 40  # wraps to several rows at this width
+        await pilot.pause()
+        assert 2 <= box.size.height <= 4  # a third of 12 rows
+        assert box.size.height == panel.size.height // 3
+
+
+async def test_ctrl_j_inserts_a_newline_and_does_not_send():
+    panel = ChatPanel("brief", agent_with(say_hello))
+    host = Host(panel)
+    async with host.run_test() as pilot:
+        await pilot.pause()
+        box = panel.query_one("#chat-input", ChatInput)
+        box.focus()
+        await pilot.press("a", "ctrl+j", "b")
+        await pilot.pause()
+        assert box.text == "a\nb" and host.submitted == []
+        assert box.size.height == 2
+
+
+async def test_pasted_newlines_are_kept():
+    panel = ChatPanel("brief", agent_with(say_hello))
+    host = Host(panel)
+    async with host.run_test() as pilot:
+        await pilot.pause()
+        box = panel.query_one("#chat-input", ChatInput)
+        box.focus()
+        host.post_message(
+            events.Paste("one\ntwo\nthree")
+        )  # as the terminal delivers it
+        await pilot.pause()
+        assert box.text == "one\ntwo\nthree" and host.submitted == []
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+        await host.workers.wait_for_complete()
+        assert host.submitted == ["one\ntwo\nthree"]
+
+
+async def test_empty_or_whitespace_text_is_not_sent():
+    panel = ChatPanel("brief", agent_with(say_hello))
+    host = Host(panel)
+    async with host.run_test() as pilot:
+        await pilot.pause()
+        box = panel.query_one("#chat-input", ChatInput)
+        box.focus()
+        await pilot.press("enter")
+        box.text = "  \n \n"
+        await pilot.pause()
+        assert panel.query_one("#send", Button).disabled
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+        assert host.submitted == [] and panel.lines == []

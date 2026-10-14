@@ -6,10 +6,10 @@ from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 from textual.containers import Vertical
-from textual.widgets import Button, Input
+from textual.widgets import Button
 
 from hunches import cost, files, history
-from hunches.app import ChatPanel, HunchesApp, StatusHeader, confirm_approve
+from hunches.app import ChatInput, ChatPanel, HunchesApp, StatusHeader, confirm_approve
 
 
 def make_project(tmp_path, monkeypatch, first_run=False, **state):
@@ -218,7 +218,7 @@ async def test_chat_panel_streams_and_persists(tmp_path, monkeypatch):
         await pilot.pause()
         panel = ChatPanel("brief", agent)
         await app.screen.mount(panel)
-        panel.query_one("#chat-input", Input).focus()
+        panel.query_one("#chat-input", ChatInput).focus()
         await pilot.press("h", "i", "enter")
         await pilot.pause(0.5)
         assert len(files.load_chat("brief")) == 2
@@ -321,7 +321,7 @@ async def test_chat_panel_gutters_title_and_blank_rows(tmp_path, monkeypatch):
         await app.screen.mount(panel)
         assert panel_title(panel)[0] == "chat · brief"
         assert panel_title(panel)[1] == "test"  # the model name
-        panel.query_one("#chat-input", Input).focus()
+        panel.query_one("#chat-input", ChatInput).focus()
         await pilot.press("h", "i", "enter", "y", "o", "enter")
         await pilot.pause(0.5)
         assert turns(panel) == [
@@ -399,7 +399,7 @@ async def test_chat_panel_error_line(tmp_path, monkeypatch):
         await pilot.pause()
         panel = ChatPanel("brief", agent)
         await app.screen.mount(panel)
-        panel.query_one("#chat-input", Input).focus()
+        panel.query_one("#chat-input", ChatInput).focus()
         await pilot.press("h", "enter")
         await pilot.pause(0.3)
         assert turns(panel)[-1] == ("error", "Error: no key")
@@ -424,7 +424,6 @@ async def test_header_keeps_cost_warning_visible_at_80_columns(tmp_path, monkeyp
 async def test_projects_and_system_settings_keys_work_from_a_stage(
     tmp_path, monkeypatch
 ):
-    from textual.widgets import Input
 
     from hunches.screens.projects import ProjectsScreen
     from hunches.screens.system import SystemSettingsScreen
@@ -434,7 +433,7 @@ async def test_projects_and_system_settings_keys_work_from_a_stage(
     async with app.run_test() as pilot:
         await pilot.pause()
         app.screen.query_one(
-            "#chat-input", Input
+            "#chat-input", ChatInput
         ).focus()  # works with an Input focused
         await pilot.press("f4")
         await pilot.pause()

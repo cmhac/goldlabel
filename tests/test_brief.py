@@ -7,7 +7,7 @@ from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from textual.widgets import Button, Input, Static
 
 from hunches import candidates, files, history
-from hunches.app import ChatPanel, HunchesApp, StatusHeader
+from hunches.app import ChatInput, ChatPanel, HunchesApp, StatusHeader
 from hunches.screens.brief import BriefScreen, SeedInput
 
 pytestmark = pytest.mark.usefixtures("system_ready")
@@ -68,9 +68,9 @@ async def test_chat_proposes_seeds_and_brief_md_is_written(tmp_path, monkeypatch
         screen = app.screen
         assert isinstance(screen, BriefScreen)
         screen.agent.model = FunctionModel(stream_function=stream)
-        box = screen.query_one("#chat-input", Input)
+        box = screen.query_one("#chat-input", ChatInput)
         box.focus()
-        box.value = "Find posts about job loss"
+        box.text = "Find posts about job loss"
         await pilot.press("enter")
         await pilot.pause(0.5)
         await app.workers.wait_for_complete()
@@ -311,9 +311,9 @@ async def test_dynamic_instructions_carry_current_seeds(tmp_path, monkeypatch):
         screen.agent.model = FunctionModel(stream_function=spy)
         # a change made in the screen, not yet in a message the model has seen
         screen.seeds.append("gamma")
-        box = screen.query_one("#chat-input", Input)
+        box = screen.query_one("#chat-input", ChatInput)
         box.focus()
-        box.value = "hi"
+        box.text = "hi"
         await pilot.press("enter")
         await pilot.pause(0.5)
         await app.workers.wait_for_complete()
@@ -330,9 +330,9 @@ async def test_resume_restores_chat_and_seeds(tmp_path, monkeypatch):
         screen = app.screen
         assert isinstance(screen, BriefScreen)
         screen.agent.model = FunctionModel(stream_function=stream)
-        box = screen.query_one("#chat-input", Input)
+        box = screen.query_one("#chat-input", ChatInput)
         box.focus()
-        box.value = "hello"
+        box.text = "hello"
         await pilot.press("enter")
         await pilot.pause(0.5)
         await app.workers.wait_for_complete()
@@ -474,9 +474,9 @@ async def test_instructions_carry_status_and_gold_coverage_and_the_embedding_cha
         screen = app.screen
         assert isinstance(screen, BriefScreen)
         screen.agent.model = FunctionModel(stream_function=spy)
-        box = screen.query_one("#chat-input", Input)
+        box = screen.query_one("#chat-input", ChatInput)
         box.focus()
-        box.value = "hi"
+        box.text = "hi"
         await pilot.press("enter")
         await pilot.pause(0.5)
         await app.workers.wait_for_complete()

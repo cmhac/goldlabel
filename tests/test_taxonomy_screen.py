@@ -16,7 +16,7 @@ from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from textual.widgets import Button, Input, Select, TextArea
 
 from hunches import candidates, files, history
-from hunches.app import ChatPanel, ConfirmScreen, HunchesApp
+from hunches.app import ChatInput, ChatPanel, ConfirmScreen, HunchesApp
 from hunches.screens import taxonomy as tx
 from hunches.screens.taxonomy import TaxonomyScreen
 
@@ -384,9 +384,9 @@ async def test_instructions_carry_seeds_taxonomy_prompt_and_the_mode_sentence(
         assert "Find layoff posts" not in text  # brief.md moved to the context turn
         assert "I lost my job" not in text  # and so did the random samples
         assert not hasattr(tx, "build_instructions")
-        box = screen.query_one("#chat-input", Input)
+        box = screen.query_one("#chat-input", ChatInput)
         box.focus()
-        box.value = "hello"
+        box.text = "hello"
         await pilot.press("enter")
         await pilot.pause(0.3)
     assert calls.instructions[-1] == text
@@ -715,9 +715,9 @@ def app_screen(pilot):
 
 
 async def send(pilot, screen, text):
-    box = screen.query_one("#chat-input", Input)
+    box = screen.query_one("#chat-input", ChatInput)
     box.focus()
-    box.value = text
+    box.text = text
     await pilot.press("enter")
     await pilot.pause(0.5)
     await pilot.app.workers.wait_for_complete()
@@ -1135,9 +1135,9 @@ async def test_versions_modal_close_and_restore_blocked_while_editing(
 
 
 async def agent_write(pilot, screen, answer: str | None):
-    box = screen.query_one("#chat-input", Input)
+    box = screen.query_one("#chat-input", ChatInput)
     box.focus()
-    box.value = "write it"
+    box.text = "write it"
     await pilot.press("enter")
     await pilot.pause(0.5)
     if answer:

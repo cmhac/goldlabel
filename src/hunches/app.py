@@ -16,6 +16,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -24,7 +25,7 @@ from textual.markup import escape
 from textual.message import Message
 from textual.screen import ModalScreen, Screen
 from textual.widget import Widget
-from textual.widgets import Button, Footer, Input, Label, Static
+from textual.widgets import Button, Footer, Label, Static, TextArea
 
 from hunches import cost, files, history, keys, system
 from hunches.theme import HUNCHES
@@ -534,8 +535,68 @@ def tool_texts(call: ToolCallPart, result: ToolReturnPart | None) -> tuple[str, 
     return str(result.content), f"# Arguments\n{args}\n\n# Result\n{result.content}"
 
 
+class ChatInput(TextArea):
+    """The chat box: one row that grows with its (wrapped) content to `MAX_ROWS`, then scrolls.
+
+    Enter submits, ctrl+j inserts a newline. F6/F7 go to the screen's undo/redo: a focused TextArea
+    binds them itself (select line / all).
+    """
+
+    MAX_ROWS = 6
+    BINDINGS: ClassVar = [
+        Binding("f6", "undo", "Undo", show=False, priority=True),
+        Binding("f7", "redo", "Redo", show=False, priority=True),
+    ]
+
+    class Submitted(Message):
+        """Enter was pressed."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(
+            soft_wrap=True,
+            show_line_numbers=False,
+            compact=True,
+            placeholder="Message the assistant",
+            **kwargs,
+        )
+
+    def fit(self) -> None:
+        """Height = wrapped rows, at most MAX_ROWS and a third of the chat panel."""
+        panel = next((a for a in self.ancestors if isinstance(a, ChatPanel)), None)
+        limit = max(1, min(self.MAX_ROWS, panel.size.height // 3)) if panel else 1
+        self.styles.height = max(1, min(self.wrapped_document.height, limit))
+
+    def on_text_area_changed(self) -> None:
+        self.fit()
+
+    def on_resize(self) -> None:
+        self.call_after_refresh(self.fit)  # the wrapping follows the new width first
+
+    async def _on_key(self, event: events.Key) -> None:
+        if event.key == "enter":
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.Submitted())
+        elif event.key == "ctrl+j":
+            event.stop()
+            event.prevent_default()
+            self.insert("\n")
+
+    def action_undo(self) -> None:
+        action = getattr(self.screen, "action_undo", None)
+        if action:
+            action()
+        elif isinstance(self.app, HunchesApp) and self.app.notices():
+            self.app.action_undo_notice()  # the app's own F6 (Tuning has no undo of its own)
+
+    def action_redo(self) -> None:
+        action = getattr(self.screen, "action_redo", None)
+        if action:
+            action()
+
+
 class ChatPanel(Vertical):
-    """Scrolling turns (one widget each) + a one-row Input and send button; persists history to chat/<stage>.json.
+    """Scrolling turns (one widget each) + a growing ChatInput and send button; persists history to chat/<stage>.json.
 
     The agent should see the current files on every run: register `@agent.instructions` on it, returning
     the state read fresh (it is evaluated per run, and never persisted: `files.save_chat` clears it).
@@ -546,7 +607,7 @@ class ChatPanel(Vertical):
     ChatPanel #empty { height: 1fr; content-align: center middle; text-align: center; }
     ChatPanel .turn { height: auto; margin-top: 1; }
     ChatPanel .turn.first, ChatPanel .fold-tool { margin-top: 0; }
-    ChatPanel #chat-row { height: 1; }
+    ChatPanel #chat-row { height: auto; }
     """
 
     class Submitted(Message):
@@ -579,7 +640,7 @@ class ChatPanel(Vertical):
             yield Static(self.empty, id="empty")
             yield ChatLine("assistant", id="live")  # the reply being streamed
         with Horizontal(id="chat-row"):
-            yield Input(placeholder="Message the assistant", id="chat-input")
+            yield ChatInput(id="chat-input")
             yield Button("↑", id="send", variant="primary", disabled=True)
 
     async def on_mount(self) -> None:
@@ -641,13 +702,16 @@ class ChatPanel(Vertical):
 
     def sync_send(self) -> None:
         self.query_one("#send", Button).disabled = (
-            self.running or not self.query_one("#chat-input", Input).value.strip()
+            self.running or not self.query_one("#chat-input", ChatInput).text.strip()
         )
 
-    def on_input_changed(self, event: Input.Changed) -> None:
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
         self.sync_send()
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
+    def on_resize(self) -> None:
+        self.query_one("#chat-input", ChatInput).fit()  # a third of the panel's height
+
+    def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
         event.stop()  # the screen hears ChatPanel.Submitted instead
         self.submit()
 
@@ -657,10 +721,10 @@ class ChatPanel(Vertical):
             self.submit()
 
     def submit(self) -> None:
-        box = self.query_one("#chat-input", Input)
-        text = box.value.strip()
+        box = self.query_one("#chat-input", ChatInput)
+        text = box.text.strip()
         if text and not self.running:
-            box.value = ""
+            box.clear()
             self.send(text)
 
     def send(self, text: str) -> None:
@@ -690,7 +754,7 @@ class ChatPanel(Vertical):
         self.run_worker(self.write_messages([message]))
 
     async def run_turn(self, text: str, tag: dict | None = None) -> None:
-        box = self.query_one("#chat-input", Input)
+        box = self.query_one("#chat-input", ChatInput)
         had_focus = box.has_focus
         self.running = True
         box.disabled = True
