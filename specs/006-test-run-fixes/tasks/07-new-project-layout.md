@@ -1,0 +1,13 @@
+# 07 — New project layout
+
+Spec: item 1, Q1. Depends on 02 (the `about` panel exists).
+
+**Do** (`screens/new_project.py`, `hunches.tcss`)
+- **Title row.** A `Static` "New project" (bold, `$primary`, like the rail's `hunches` line) on the **same row** as the `hunches` text in the rail. Mount it outside the `VerticalScroll` so it does not scroll away, at the top of the content area (the rail is docked left from 100 columns; look at how `StatusHeader` and `wide(app)`/`app.rail` lay out). Show it only when the rail is shown; below 100 columns the one-row header already names the screen (check `StatusHeader.refresh_cost`, which uses `stage_name`) and no extra row is added. Update its visibility from `on_resize` the way other screens react to the rail (see `fit_rail`).
+- **Models panel.** Delete the `Rule()` and the `#models-rest` split. Compose: subhead **assistant** (a new `.subhead` class in `hunches.tcss`: bold, `#EEF1F5`, one row), its model line with the price label, and `thinking: …`; subhead **classifier**, its model line with price label; then once, muted, "pinned for this project; change later in Project settings". Indent the lines under a subhead by two cells. `refresh_summary` builds the text; keep the "no price" `?` handling unchanged (`models.price_label`).
+- **One gap between sections**: exactly one blank row between every panel on the screen (about, location, corpus, models). One CSS rule (`NewProjectScreen .panel { margin-bottom: 1 }` or the screen's equivalent), not per-panel values; check the gap is the same when the `s3` and `pg` sub-forms are shown and that the last panel does not add a stray row above the actions. The scroll area still ends above Create and its message at 80×24.
+- Project settings has no `Rule`/`#models` split (checked); leave it unless it shows the same panels with inconsistent gaps, in which case apply the same gap rule and say so.
+
+**Tests (red first)**: with the rail (100×30, 120×36) the title's `region.y` equals the rail's `hunches` line row and its text is "New project"; at 80×24 it is not displayed; no `Rule` in the screen; the models panel has `assistant` and `classifier` subheads in that order with the model lines under them (hand-written expected text for a known system config); the gap between each consecutive pair of panels is exactly 1 row for local, S3 and pgvector backends (assert from `region`s); nothing is clipped outside scroll areas at all three sizes (`tests/test_sizes.py`). Update the tests that query `#models` / `#models-rest`.
+
+**Not in this task**: the Search screen's panel gap (09), the descriptions themselves (02).

@@ -1,0 +1,19 @@
+# 02 — Project and store descriptions
+
+Spec: item 5 (everything except the popup), Q3.
+
+**Do**
+- `files.Config`: `project_description: str | None = None` and `store_description: str | None = None`. Strip whitespace; an empty or whitespace-only value is stored as `None`, so `write_config` omits it and every existing `config.toml` is byte-for-byte unchanged on re-write. **Verify TOML validity**: `write_config` writes `json.dumps(v)`; JSON escapes non-BMP characters (an emoji) as a surrogate pair `😀`, which TOML rejects. Round-trip a description with newlines, quotes, backslashes, accented letters and an emoji through `write_config` and `tomllib`. If the emoji fails, make the writer use `json.dumps(v, ensure_ascii=False)` for `str` values only after confirming no existing test or file depends on the escaped form, and report it.
+- `files.py`: add `project_context() -> str` returning `# Project\n<text or "not provided">\n\n# Store\n<text or "not provided">`, and `status_context()` returning what `assistant_context()` returns today (`pipeline_status_text()` and `gold_coverage_text()`). `assistant_context()` becomes `project_context()` + blank line + `status_context()`. Brief, Taxonomy and Tuning already call it, so they all receive the descriptions with no further change. `tune.py:86` (the hash that triggers the UPDATED context reply) must hash `files.status_context()`, so editing a description never makes the Tuning assistant reply unprompted.
+- **New project** (`screens/new_project.py`): a new first panel `about` (before `location`) with two labelled multi-line `TextArea`s, ids `project-description` and `store-description`, labels "project" and "store", hint text beneath each in muted style: "what you want to find out, and why" and "what the items are, where they came from, language and format". Each about 4 rows high, styled like the existing inputs (borderless, `$panel` background, primary left bar on focus; look at how `Input` is styled in `hunches.tcss` and the TextArea theme in `theme.py`). Both are required: add them to the `missing` list in `refresh_create` and in `create()` (names `project description`, `store description`, so the existing hint reads `Required: project description, store description`); add `on_text_area_changed` so typing re-runs `refresh_create` (today only `Input.Changed` does). Write both into the `Config`. Do not do the spacing or title work here (task 07).
+- **Project settings** (`screens/project_settings.py`): the same two text areas, pre-filled from the config, saved with the other settings in `save()`; saving with either empty is refused with the screen's existing error style ("Not saved: project description is required").
+- `examples/sample/.hunches/config.toml`: add both descriptions.
+
+**Tests (red first)**
+- Config: old config without the fields loads and re-writes unchanged (byte comparison); both fields round-trip including newlines and an emoji; whitespace-only becomes absent.
+- `assistant_context()` begins with `# Project` / `# Store` blocks with the text, and says `not provided` when absent; `status_context()` equals the old `assistant_context()` output (hand-written expected string); changing a description does not change the Tuning hash (`tune.py:86`), changing the pipeline status still does.
+- Brief, Taxonomy and Tuning agents' instructions contain the descriptions (call the registered `@agent.instructions` function, or run the agent with a `FunctionModel` that returns the instructions it was given; no real model).
+- New project: Create is disabled until both are non-empty, the hint lists exactly what is missing, whitespace-only counts as empty, the created `config.toml` contains both. Project settings: pre-filled, edits saved, empty refused.
+- Existing tests that compare `assistant_context()` text (`tests/test_assistant_context.py` and others) are updated.
+
+**Not in this task**: the popup for old projects (03), layout changes (07).

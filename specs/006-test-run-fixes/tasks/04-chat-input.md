@@ -1,0 +1,15 @@
+# 04 — Chat input that grows
+
+Spec: item 6, Q5.
+
+**Do**
+- In `app.py` `ChatPanel`, replace the one-row `Input#chat-input` with a `TextArea` subclass (`ChatInput`), same id. Verify against Textual 8.2.8 and its docs before writing: `TextArea` constructor options (soft wrap on, no line numbers, placeholder text "Message the assistant", any `compact`/`tab_behavior` option), how to read and clear the text (`.text`, `.clear()`), how to get the wrapped content height (the document's wrapped height, which changes with the widget width), and which key names the terminal delivers for Enter and `ctrl+j`. Report what you found.
+- Behaviour: starts at one row; grows with its content to at most six rows and never more than a third of the chat panel's height (at 80×24 that is the smaller limit), then scrolls inside itself. Recompute on `TextArea.Changed` and on resize (the wrapped height depends on width). The send button stays on the first row of the box (`#chat-row` height becomes `auto`; the button aligned to the top).
+- Keys: Enter submits (`ChatPanel.submit`, unchanged semantics: empty or whitespace-only text is not sent); `ctrl+j` inserts a newline; pasted newlines are kept. The box is cleared on send and disabled while a turn runs, and focus returns to it after the turn if it had focus (as `run_turn` does today).
+- **F6/F7 trap**: a focused `TextArea` binds F6 and F7 itself (select line, select all), and Brief, Taxonomy and the Tuning prompt use them for undo/redo (004). `ChatInput` must not consume them: declare them the way the Tuning prompt modal does (`screens/tune.py` near line 185: `Binding("f6", "undo", …, priority=True)`), but forwarding to the screen's undo/redo actions (or simply letting the screen's own bindings run, if that is simpler and works while the box is focused). Test it on Brief with the chat box focused.
+- Style in `hunches.tcss` to match `Input` (borderless, `$panel`, primary left bar when focused); the TextArea theme is in `theme.py`.
+- Update `sync_send`, `on_input_changed` (becomes a `TextArea.Changed` handler) and `on_input_submitted` (Enter now comes from `ChatInput`, e.g. a custom `Submitted` message the panel handles; keep `ChatPanel.Submitted` and the `send`/`submit`/`reply` names).
+
+**Tests (red first)**: grows from 1 to N rows as lines are added and stops at the cap; shrinks back after send; Enter sends and clears; `ctrl+j` adds a newline and does not send; a pasted multi-line text keeps its newlines; empty/whitespace not sent; disabled during a turn; F6/F7 reach Brief's undo/redo with the chat box focused; at the cap the panel still fits at 80×24, 100×30, 120×36 (add the box at six rows to `tests/test_sizes.py`). Update the tests that set `#chat-input` `.value` (`test_chat.py`, `test_brief.py`, `test_app.py`, `test_taxonomy_screen.py`, `test_tune_screen.py`, `test_e2e.py`, `test_history_screens.py`); a tiny helper in `tests/conftest.py` that sets the chat text is fine.
+
+**Not in this task**: the thinking indicator and spacing (05).
