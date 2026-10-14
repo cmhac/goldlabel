@@ -384,6 +384,7 @@ async def test_prompt_edit_after_a_full_run_plan_matches_the_rerun_and_undo_rest
         # redoing each stage calls the model exactly as often as the plan said
         got = {}
         app.goto_stage(5)
+        await pilot.pause()  # the screen mounts and starts its worker first
         await app.workers.wait_for_complete()
         await pilot.pause()
         got[5] = len(CALLS)

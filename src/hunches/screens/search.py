@@ -289,7 +289,7 @@ class SearchScreen(Screen):
         else:
             bar.update_bar(total, 0, f"0/{total}")
         self.refresh_state()
-        self.run_worker(self.run_search(), exclusive=True)
+        self.run_worker(self.run_search(), group="run", exclusive=True)
 
     def rows_text(self) -> str:
         elapsed = seconds_text(time.monotonic() - self.started)
