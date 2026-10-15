@@ -733,6 +733,8 @@ class ChatPanel(Vertical):
         ).anchor()  # stay at the bottom unless the user scrolls up
         self.query_one("#live").display = False
         await self.write_messages(self.history)  # restore a resumed conversation
+        if draft := files.load_draft(self.stage):  # typed but never sent
+            self.query_one("#chat-input", ChatInput).text = draft
 
     @property
     def lines(self) -> list:
@@ -794,6 +796,9 @@ class ChatPanel(Vertical):
             )
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        files.save_draft(
+            self.stage, event.text_area.text
+        )  # on every change, until it is sent
         self.sync_send()
 
     def on_resize(self) -> None:
@@ -949,7 +954,7 @@ class HunchesApp(App):
     TITLE = "hunches"
     CSS_PATH = "hunches.tcss"
     BINDINGS: ClassVar = [
-        ("q", "quit", "Quit"),
+        Binding("ctrl+q", "quit", "Quit", priority=True),
         ("n", "goto(1)", "Next stage"),
         ("p", "goto(-1)", "Previous stage"),
         ("f3", "settings", "Project settings"),

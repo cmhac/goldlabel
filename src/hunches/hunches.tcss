@@ -10,6 +10,8 @@ StatusHeader.-cost-unknown { background: $warning 20%; }
 /* From 100 columns the header is a left rail: it docks left and the content column sits beside it */
 StatusHeader.-rail { dock: left; width: 26; height: 100%; padding: 0; background: $surface; }
 StatusHeader.-rail.-cost-unknown { background: $surface; }
+/* the rail rows are click targets, but Textual's link look (underlines, a bright hover block) is not wanted */
+StatusHeader { link-style: none; link-style-hover: none; link-background-hover: $boost; }
 
 /* Panels: no border, tinted, a one-row title (PanelTitle) first. Focus is a left bar. */
 .panel { background: $surface; padding: 0 1; }

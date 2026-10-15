@@ -134,3 +134,18 @@ async def test_rail_actions_do_nothing_under_a_modal(project):
             assert app.screen is modal and app.stage == 1
         await app.run_action("history")
         assert app.screen is modal
+
+
+async def test_rail_rows_keep_the_plain_look_that_clicks_do_not_underline(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    write_project(tmp_path)
+    app = HunchesApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        styles = app.screen.query_one(StatusHeader).styles
+        assert (
+            not styles.link_style.underline
+        )  # the click spans must not draw lines under rows
+        assert not styles.link_style_hover.underline

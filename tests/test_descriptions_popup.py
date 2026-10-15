@@ -168,3 +168,17 @@ async def test_explains_why_it_appeared(tmp_path, monkeypatch):
             "This project has no project or store description. The assistant needs both."
             in text
         )
+
+
+async def test_popup_fields_have_a_blank_row_between_them(tmp_path, monkeypatch):
+    make_project(tmp_path, monkeypatch)
+    app = HunchesApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        why = screen.query_one("#why")
+        rows = list(screen.query(".about-row"))
+        buttons = screen.query_one(".buttons")
+        assert rows[0].region.y - why.region.bottom == 1
+        assert rows[1].region.y - rows[0].region.bottom == 1
+        assert buttons.region.y - rows[1].region.bottom == 1

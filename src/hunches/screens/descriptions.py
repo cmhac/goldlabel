@@ -22,6 +22,8 @@ class DescriptionsScreen(ModalScreen[None]):
     DescriptionsScreen .row { height: auto; }
     DescriptionsScreen .row Label { width: 9; color: $text-muted; }
     DescriptionsScreen .about-row Vertical { width: 1fr; height: auto; }
+    DescriptionsScreen #why { margin-bottom: 1; }
+    DescriptionsScreen .about-row { margin-bottom: 1; }
     DescriptionsScreen .buttons Button { margin-left: 1; }
     """
 

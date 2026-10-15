@@ -9,7 +9,7 @@ from hunches.screens.project_settings import ProjectSettingsScreen
 from hunches.screens.projects import ProjectsScreen
 from hunches.screens.system import SystemSettingsScreen
 
-RAIL_KEYS = {"q", "n", "p", "f3", "f4", "f5"}
+RAIL_KEYS = {"ctrl+q", "n", "p", "f3", "f4", "f5"}
 
 
 def footer_keys(app) -> set[str]:
@@ -95,7 +95,7 @@ async def test_rail_keys_still_work_at_both_widths(tmp_path, monkeypatch):
             await pilot.press("escape")
             await pilot.pause()
             assert app.stage == 1 and not isinstance(app.screen, ProjectsScreen)
-            await pilot.press("q")
+            await pilot.press("ctrl+q")
             await pilot.pause()
         assert app.return_code == 0
         app = HunchesApp()

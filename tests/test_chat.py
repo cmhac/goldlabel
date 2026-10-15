@@ -486,3 +486,47 @@ async def test_empty_or_whitespace_text_is_not_sent():
         await pilot.press("enter")
         await pilot.pause(0.2)
         assert host.submitted == [] and panel.lines == []
+
+
+async def test_draft_is_saved_on_every_change_restored_per_stage_and_dropped_on_send():
+    async def stream(messages, info):
+        yield "ok"
+
+    draft = Path(".hunches/chat/brief.draft")
+    panel = ChatPanel("brief", agent_with(stream))
+    async with Host(panel).run_test() as pilot:
+        await pilot.pause()
+        box = panel.query_one("#chat-input", ChatInput)
+        box.focus()
+        await pilot.press("h", "i")
+        await pilot.pause()
+        assert draft.read_text() == "hi"  # saved by the key press, not on leaving
+        box.text = "hi there\nsecond line"
+        await pilot.pause()
+        assert draft.read_text() == "hi there\nsecond line"
+        box.clear()
+        await pilot.pause()
+        assert not draft.exists()  # an empty box leaves no file
+        box.text = "half a thought"
+        await pilot.pause()
+
+    # navigating away and back mounts a new panel: the draft is there, and the send button follows it
+    again = ChatPanel("brief", agent_with(stream))
+    host = Host(again)
+    async with host.run_test() as pilot:
+        await pilot.pause()
+        box = again.query_one("#chat-input", ChatInput)
+        assert box.text == "half a thought"
+        assert not again.query_one("#send", Button).disabled
+        other = ChatPanel("taxonomy", agent_with(stream))
+        await host.mount(other)
+        await pilot.pause()
+        assert (
+            other.query_one("#chat-input", ChatInput).text == ""
+        )  # drafts are per stage
+        box.focus()
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+        await host.workers.wait_for_complete()
+        assert host.submitted == ["half a thought"]
+        assert not draft.exists()  # sent: the draft is gone

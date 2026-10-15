@@ -253,7 +253,10 @@ async def test_quit(tmp_path, monkeypatch):
     app = HunchesApp()
     async with app.run_test() as pilot:
         await pilot.pause()
-        await pilot.press("q")
+        await pilot.press("q")  # plain q does nothing: it is typed into text boxes
+        await pilot.pause()
+        assert not app._exit
+        await pilot.press("ctrl+q")
         await pilot.pause()
     assert app.return_code == 0
 

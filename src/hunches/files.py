@@ -601,6 +601,23 @@ def load_chat(stage: str) -> list[ModelMessage]:
     )
 
 
+def load_draft(stage: str) -> str:
+    """What was typed in this stage's chat box and not sent."""
+    path = root() / "chat" / f"{stage}.draft"
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def save_draft(stage: str, text: str) -> None:
+    """Keep the unsent text (written on every change); an empty box leaves no file."""
+    name = f"{stage}.draft"
+    if not text:
+        (root() / "chat" / name).unlink(missing_ok=True)
+        return
+    ensure_root()
+    (root() / "chat").mkdir(exist_ok=True)
+    (root() / "chat" / name).write_text(text, encoding="utf-8")
+
+
 def _union(*lists: list[str]) -> list[str]:
     return [c for c in COMPONENTS if any(c in x for x in lists)]
 

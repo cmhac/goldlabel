@@ -80,7 +80,7 @@ Everything works at 80x24.
 | `f8` | History: every change to seeds, labels and prompt, and every approval |
 | `f9` | Redo plan: what is out of date and what redoing it costs |
 | `n` / `p` | Next / previous stage (not on Projects, where `n` is New) |
-| `q` | Quit |
+| `ctrl+q` | Quit (a plain `q` is typed into text boxes) |
 | `ctrl+s` | Save the label or prompt being edited (Taxonomy) |
 | `e` | Edit (labels, a seed, or propose a prompt change on Tuning) |
 | `o` | Edit the prompt by hand (Tuning) |
@@ -171,7 +171,7 @@ refuses to search otherwise. It only embeds your seed phrases.
 
 ## Stages
 
-1. **Brief and seeds.** Describe what you want to find. With no seeds yet the assistant first asks a few short questions (what counts as a match, where and in whose voice the text appears, phrasings to avoid), then proposes seed phrases written the way items in your corpus are written (it reads your project and store descriptions), not descriptions of the concept. It can also replace and delete seeds you already have (`replace_seed`, `delete_seeds`; one undo, `F6`, reverses everything a turn changed, and it will not touch a seed you are editing). You edit them in a table and approve. The chat box grows with what you type, up to six rows; Enter sends, `ctrl+j` adds a newline, and while the assistant works a `⠋ thinking…` line shows.
+1. **Brief and seeds.** Describe what you want to find. With no seeds yet the assistant first asks a few short questions (what counts as a match, where and in whose voice the text appears, phrasings to avoid), then proposes seed phrases written the way items in your corpus are written (it reads your project and store descriptions), not descriptions of the concept. It can also replace and delete seeds you already have (`replace_seed`, `delete_seeds`; one undo, `F6`, reverses everything a turn changed, and it will not touch a seed you are editing). You edit them in a table and approve. The chat box grows with what you type, up to six rows; Enter sends, `ctrl+j` adds a newline, and while the assistant works a `⠋ thinking…` line shows. What you have typed but not sent is kept (in `.hunches/chat/`) as you type, so leaving the screen or quitting does not lose it.
 2. **Search.** Seeds are embedded and searched; every item with cosine similarity of at least 0.60 becomes a candidate (score = best seed). Before the first search only a centred **Run search** block is shown (with the progress while it runs); after it, counts per similarity band and the top seeds are shown as aligned bars.
 3. **Taxonomy and prompt.** The assistant interviews you (one label or several per item) and writes `taxonomy.yaml` and `prompt.md`. `off_topic` is built in and always exclusive.
 4. **Gold dev set.** You label 50 random candidates by key. Labelling does not call the classifier (so it costs nothing and the classifier cache is not warmed): the first Tuning run classifies the whole dev set. Every row must be labelled to finish. If the corpus yields fewer than 50 candidates for a split, labelling is blocked with an error; add seeds or change the project's settings.
