@@ -35,6 +35,8 @@ dev = [
     "ty",
     "pre-commit",
     "types-pyyaml",
+    "polars",
+    "pandas",
 ]
 
 [tool.pytest.ini_options]

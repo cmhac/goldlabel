@@ -4,6 +4,8 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from hunches import _html
+
 OFF_TOPIC = "off_topic"
 
 
@@ -37,6 +39,13 @@ class Taxonomy(BaseModel):
     @property
     def names(self) -> list[str]:
         return all_labels(self)
+
+    def _repr_html_(self) -> str:
+        rows = [(label.name, label.description) for label in self.labels]
+        rows.append((OFF_TOPIC, "the item matches none of the labels above"))
+        return _html.line(f"Taxonomy ({self.mode}-label)") + _html.table(
+            ["label", "description"], rows
+        )
 
     @classmethod
     def read(cls, path) -> "Taxonomy":

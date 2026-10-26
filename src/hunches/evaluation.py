@@ -5,9 +5,9 @@ from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from hunches import _sync
+from hunches import _frame, _html, _sync
 from hunches.candidates import BANDS, band_of
-from hunches.classifier import Classifier, _dollars, _model_name
+from hunches.classifier import UNKNOWN_COST, Classifier, _dollars, _model_name
 from hunches.metrics import (
     Metrics,
     compute_metrics,
@@ -68,19 +68,70 @@ class Evaluation:
         }
         path.write_text(json.dumps(data, indent=2) + "\n")
 
-    def __repr__(self) -> str:
+    def disagreements_to_polars(self):
+        return _frame.to_polars(self.disagreements)
+
+    def disagreements_to_pandas(self):
+        return _frame.to_pandas(self.disagreements)
+
+    def _head(self) -> list[str]:
         m = self.metrics
         line = f"{self.metric} {self.score():.4f}"
         if self.target is not None:
             line += f" {'PASS' if self.passed else 'FAIL'} (target {self.target:.4f})"
-        width = max([len(x) for x in self.labels] + [5])
-        lines = [
+        return [
             (
                 f"Evaluation: {self.n} rows, {self.skipped_pending} pending rows skipped, "
                 f"{len(self.disagreements)} disagreements"
             ),
             line,
             f"macro_f1 {m.macro_f1:.4f}, micro_f1 {m.micro_f1:.4f}",
+        ]
+
+    def _sources(self) -> str:
+        return "sources: " + ", ".join(f"{k} {v}" for k, v in self.sources.items())
+
+    def _repr_html_(self) -> str:
+        per_label = [
+            (
+                name,
+                f"{lm.precision:.2f}",
+                f"{lm.recall:.2f}",
+                f"{lm.f1:.2f}",
+                lm.gold_count,
+                lm.predicted_count,
+            )
+            for name, lm in self.metrics.per_label.items()
+        ]
+        rows = [
+            (
+                d["id"],
+                d["text"],
+                d["gold"],
+                "ERROR" if d["predicted"] is None else d["predicted"],
+                d["reasoning"],
+            )
+            for d in self.disagreements
+        ]
+        return (
+            "".join(_html.line(x) for x in self._head())
+            + _html.table(
+                ["label", "precision", "recall", "f1", "gold", "predicted"], per_label
+            )
+            + _html.line(self._sources())
+            + _html.details(
+                f"{len(rows)} disagreements",
+                _html.table(
+                    ["id", "text", "gold", "predicted", "reasoning"], rows, cap=20
+                ),
+                open=True,
+            )
+        )
+
+    def __repr__(self) -> str:
+        m = self.metrics
+        width = max([len(x) for x in self.labels] + [5])
+        lines = self._head() + [
             f"{'label'.ljust(width)}  precision  recall  f1    gold  predicted",
         ]
         for name, lm in m.per_label.items():
@@ -88,8 +139,7 @@ class Evaluation:
                 f"{name.ljust(width)}  {lm.precision:9.2f}  {lm.recall:6.2f}  "
                 f"{lm.f1:.2f}  {lm.gold_count:4}  {lm.predicted_count:9}"
             )
-        by = ", ".join(f"{k} {v}" for k, v in self.sources.items())
-        lines.append(f"sources: {by}")
+        lines.append(self._sources())
         return "\n".join(lines)
 
 
@@ -182,6 +232,37 @@ async def aevaluate(
 class EvalLog:
     rows: list[dict]
 
+    def to_polars(self):
+        return _frame.to_polars(self.rows)
+
+    def to_pandas(self):
+        return _frame.to_pandas(self.rows)
+
+    def _test_line(self) -> str:
+        test = [r for r in self.rows if r["split"] == "test"]
+        return (
+            f"test split evaluated {len(test)} times "
+            f"({len({r['digest'] for r in test})} distinct prompts)"
+        )
+
+    def _repr_html_(self) -> str:
+        if not self.rows:
+            return _html.line("no evaluations logged yet")
+        rows = [
+            (
+                r["time"][:16],
+                r["split"],
+                r["n"],
+                f"{r['score']:.4f}",
+                r["digest"][:8],
+                r["model"],
+            )
+            for r in self.rows
+        ]
+        return _html.table(
+            ["time", "split", "n", "score", "digest", "model"], rows
+        ) + _html.line(self._test_line())
+
     def __repr__(self) -> str:
         lines = ["time              split  n     score   digest    model"]
         for r in self.rows:
@@ -189,11 +270,7 @@ class EvalLog:
                 f"{r['time'][:16]}  {r['split']:5}  {r['n']:<4}  {r['score']:.4f}  "
                 f"{r['digest'][:8]}  {r['model']}"
             )
-        test = [r for r in self.rows if r["split"] == "test"]
-        lines.append(
-            f"test split evaluated {len(test)} times "
-            f"({len({r['digest'] for r in test})} distinct prompts)"
-        )
+        lines.append(self._test_line())
         return "\n".join(lines)
 
 
@@ -213,6 +290,20 @@ class BandReport:
     cost: float | None  # None: a price is unknown (never 0)
     errors: int = 0
 
+    def to_polars(self):
+        return _frame.to_polars(self.rows)
+
+    def to_pandas(self):
+        return _frame.to_pandas(self.rows)
+
+    def _repr_html_(self) -> str:
+        rows = [
+            (r["band"], r["n"], r["off_topic"], f"{r['rate']:.0%}") for r in self.rows
+        ]
+        out = _html.table(["band", "n", "off_topic", "rate"], rows)
+        out += _html.line(f"cost {_dollars(self.cost)}, {self.errors} errors")
+        return out + (_html.warning(UNKNOWN_COST) if self.cost is None else "")
+
     def __repr__(self) -> str:
         lines = ["band          n    off_topic  rate"]
         for r in self.rows:
@@ -221,9 +312,7 @@ class BandReport:
             )
         lines.append(f"cost {_dollars(self.cost)}, {self.errors} errors")
         if self.cost is None:
-            lines.append(
-                "WARNING: the price is unknown, so the cost is unknown, not zero"
-            )
+            lines.append(f"WARNING: {UNKNOWN_COST}")
         return "\n".join(lines)
 
 

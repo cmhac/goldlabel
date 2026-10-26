@@ -10,6 +10,7 @@ from pydantic_ai.embeddings import EmbeddingResult
 from pydantic_ai.messages import ModelMessage, ModelResponse
 from pydantic_ai.usage import RequestUsage, RunUsage
 
+from hunches import _html
 from hunches.settings import resolve
 
 # `cache` below is a directory (str or Path), None for the default `<settings.root>/cache`,
@@ -163,6 +164,33 @@ class Cost:
             None if self.unknown else sum(m["dollars"] for m in by_model.values())
         )
 
+    def _repr_html_(self) -> str:
+        rows = [
+            (
+                name,
+                _dollars(m["dollars"]),
+                m["calls"],
+                m["input_tokens"],
+                m["output_tokens"],
+            )
+            for name, m in self.by_model.items()
+        ]
+        out = _html.line(f"cost {_dollars(self.total)}")
+        out += _html.table(["model", "cost", "calls", "tokens in", "tokens out"], rows)
+        if self.unknown:
+            out += _html.warning(self._unknown_text())
+        return out
+
+    def _unknown_text(self) -> str:
+        unknown = [n for n, m in self.by_model.items() if m["dollars"] is None]
+        known = sum(
+            m["dollars"] for m in self.by_model.values() if m["dollars"] is not None
+        )
+        return (
+            f"the price of {', '.join(unknown)} is unknown, so the total "
+            f"is unknown (at least ${known:.4f} is known)"
+        )
+
     def __repr__(self) -> str:
         lines = [f"cost {_dollars(self.total)}"]
         for name, m in self.by_model.items():
@@ -171,14 +199,7 @@ class Cost:
                 f"{m['input_tokens']} in / {m['output_tokens']} out"
             )
         if self.unknown:
-            unknown = [n for n, m in self.by_model.items() if m["dollars"] is None]
-            known = sum(
-                m["dollars"] for m in self.by_model.values() if m["dollars"] is not None
-            )
-            lines.append(
-                f"WARNING: the price of {', '.join(unknown)} is unknown, so the total "
-                f"is unknown (at least ${known:.4f} is known)"
-            )
+            lines.append(f"WARNING: {self._unknown_text()}")
         return "\n".join(lines)
 
 

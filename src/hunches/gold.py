@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from hunches import _frame, _html
 from hunches.settings import resolve
 from hunches.taxonomy import Taxonomy
 
@@ -55,7 +56,13 @@ class GoldSet:
                     counts[label] += 1
         return counts
 
-    def __repr__(self) -> str:
+    def to_polars(self):
+        return _frame.to_polars([r.model_dump() for r in self.rows])
+
+    def to_pandas(self):
+        return _frame.to_pandas([r.model_dump() for r in self.rows])
+
+    def _summary(self) -> str:
         labelled = [r for r in self.rows if r.labels]
         sources = {"hunches-ui": 0, "imported": 0, "unstamped": 0}
         for r in labelled:
@@ -67,12 +74,35 @@ class GoldSet:
             f"({len(labelled)} labelled, {len(self.rows) - len(labelled)} pending); {by}"
         )
 
+    def _repr_html_(self) -> str:
+        rows = [
+            (r.id, r.text, r.labels if r.labels else "pending", r.split, r.labelled_by)
+            for r in self.rows
+        ]
+        return _html.line(self._summary()) + _html.table(
+            ["id", "text", "labels", "split", "labelled by"], rows
+        )
+
+    def __repr__(self) -> str:
+        return self._summary()
+
 
 class Gold:
     """The gold file. Every property reads the file again, so it never shows stale rows."""
 
     def __init__(self, path=None):
         self.path = resolve(path, "gold.jsonl")
+
+    def _repr_html_(self) -> str:
+        rows = []
+        for view in (self.dev, self.test, self.pending, self.all):
+            labelled = sum(1 for r in view.rows if r.labels)
+            rows.append(
+                (view.name, len(view.rows), labelled, len(view.rows) - labelled)
+            )
+        return _html.line(f"Gold: {self.path}") + _html.table(
+            ["view", "rows", "labelled", "pending"], rows
+        )
 
     def _read(self) -> list[GoldRow]:
         if not self.path.exists():

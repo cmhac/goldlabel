@@ -76,7 +76,7 @@ def test_import_loads_no_tui_keyring_dotenv_or_optional_backends(tmp_path):
     code = (
         "import sys, hunches\n"
         "hunches.Classifier; hunches.PgCorpus; hunches.S3Corpus\n"
-        "bad = {'textual','keyring','platformdirs','dotenv','boto3','psycopg'}\n"
+        "bad = {'textual','keyring','platformdirs','dotenv','boto3','psycopg','polars','pandas'}\n"
         "found = sorted(bad & {m.split('.')[0] for m in sys.modules})\n"
         "assert not found, found\n"
     )

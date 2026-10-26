@@ -19,7 +19,7 @@ from pydantic_ai.exceptions import (
 )
 from pydantic_ai.models import Model
 
-from hunches import _sync
+from hunches import _frame, _html, _sync
 from hunches.cost import (
     cache_get,
     cache_key,
@@ -92,6 +92,14 @@ def _rows(items) -> list[dict]:
     ]
 
 
+UNKNOWN_COST = "the price is unknown, so the cost is unknown, not zero"
+PREVIEW_LINES = 12
+PRICE_UNKNOWN = (
+    "the price is unknown (no priced call recorded for this model), "
+    "so the cost is unknown, not zero"
+)
+
+
 @dataclass(frozen=True)
 class Estimate:
     n: int
@@ -100,18 +108,22 @@ class Estimate:
     dollars: float | None  # None: the price is unknown (never 0)
     seconds: float | None  # None: no timing recorded yet
 
-    def __repr__(self) -> str:
+    def _lines(self) -> list[str]:
         cost = "?" if self.dollars is None else f"~${self.dollars:.4f}"
         time = "?" if self.seconds is None else f"~{self.seconds:.0f}s"
-        lines = [
+        return [
             f"Estimate: {self.n} items, {self.cached} cached, {self.live} live calls",
             f"cost {cost}, time {time}",
         ]
+
+    def _repr_html_(self) -> str:
+        out = "".join(_html.line(x) for x in self._lines())
+        return out + (_html.warning(PRICE_UNKNOWN) if self.dollars is None else "")
+
+    def __repr__(self) -> str:
+        lines = self._lines()
         if self.dollars is None:
-            lines.append(
-                "WARNING: the price is unknown (no priced call recorded for this model), "
-                "so the cost is unknown, not zero"
-            )
+            lines.append(f"WARNING: {PRICE_UNKNOWN}")
         return "\n".join(lines)
 
 
@@ -135,16 +147,38 @@ class Predictions:
     def labels(self) -> list[list[str] | None]:
         return [r["labels"] for r in self.rows]
 
-    def __repr__(self) -> str:
+    def to_polars(self):
+        return _frame.to_polars(self.rows)
+
+    def to_pandas(self):
+        return _frame.to_pandas(self.rows)
+
+    def _lines(self) -> list[str]:
         counts = (
             f"{len(self.rows)} items, {self.live} live, {self.cached} cached, "
             f"{self.resumed} resumed from out, {len(self.errors)} errors"
         )
-        lines = [f"Predictions: {counts}", f"cost {_dollars(self.cost)}"]
-        if self.cost is None:
-            lines.append(
-                "WARNING: the price is unknown, so the cost is unknown, not zero"
+        return [f"Predictions: {counts}", f"cost {_dollars(self.cost)}"]
+
+    def _repr_html_(self) -> str:
+        rows = [
+            (
+                r["id"],
+                r["text"],
+                f"ERROR: {r['error']}" if r.get("error") else r["labels"],
+                r.get("reasoning"),
             )
+            for r in self.rows
+        ]
+        out = "".join(_html.line(x) for x in self._lines())
+        if self.cost is None:
+            out += _html.warning(UNKNOWN_COST)
+        return out + _html.table(["id", "text", "labels", "reasoning"], rows)
+
+    def __repr__(self) -> str:
+        lines = self._lines()
+        if self.cost is None:
+            lines.append(f"WARNING: {UNKNOWN_COST}")
         return "\n".join(lines)
 
 
@@ -226,6 +260,33 @@ class Classifier:
             )
         object.__setattr__(clf, "evaluation", evaluation)
         return clf
+
+    def _repr_html_(self) -> str:
+        names = ", ".join(self.taxonomy.names)
+        lines = self.prompt.strip().splitlines()
+        preview = "\n".join(lines[:PREVIEW_LINES])
+        out = [
+            _html.line(
+                f"Classifier: model {_model_name(self.model)}, digest {self.digest[:12]}"
+            ),
+            _html.line(f"{self.taxonomy.mode}-label: {names}"),
+            f"<pre>{_html.esc(preview)}</pre>",
+        ]
+        if len(lines) > PREVIEW_LINES:
+            out.append(
+                _html.line(f"{len(lines) - PREVIEW_LINES} more lines in the prompt")
+            )
+        ev = self.evaluation
+        if ev is None:
+            out.append(_html.line("no evaluation recorded"))
+        else:
+            out.append(
+                _html.line(
+                    f"evaluation: {ev['metric']} {ev['score']:.4f} on {ev['split']} "
+                    f"({ev['n']} rows, {ev['date'][:10]})"
+                )
+            )
+        return "".join(out)
 
     def with_prompt(self, text: str) -> "Classifier":
         return replace(self, prompt=text)

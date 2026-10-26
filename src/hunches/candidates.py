@@ -12,6 +12,7 @@ from pathlib import Path
 
 from pydantic_ai import Embedder
 
+from hunches import _frame, _html
 from hunches._sync import run
 from hunches.cost import cache_get, cache_key, cache_put, embedding_dollars, record
 from hunches.search import (
@@ -42,6 +43,17 @@ def seeds_digest(seeds: list[str]) -> str:
 def band_of(similarity: float) -> int:
     """Index into BANDS of the band containing `similarity` (lower-inclusive); -1 below the floor."""
     return max((i for i, edge in enumerate(BANDS) if similarity >= edge), default=-1)
+
+
+def _band_name(i: int) -> str:
+    return (
+        f"{BANDS[i]:.3f}-{BANDS[i + 1]:.3f}"
+        if i + 1 < len(BANDS)
+        else f"{BANDS[i]:.3f}+"
+    )
+
+
+CAPPED_WARNING = "results were capped, so some items above the floor may be missing"
 
 
 def band_counts(candidates: list[dict]) -> list[int]:
@@ -109,19 +121,32 @@ class Candidates:
         }
         path.with_suffix(".meta.json").write_text(json.dumps(meta))
 
+    def to_polars(self):
+        return _frame.to_polars(self.rows)
+
+    def to_pandas(self):
+        return _frame.to_pandas(self.rows)
+
+    def _repr_html_(self) -> str:
+        rows = [
+            (r["id"], r["text"], f"{r['max_similarity']:.3f}", r["best_seed"])
+            for r in self.rows
+        ]
+        out = [
+            _html.line(f"{len(self.rows)} candidates (floor {self.floor:.2f})"),
+            _html.bars([(_band_name(i), n) for i, n in enumerate(self.bands())]),
+        ]
+        if self.capped:
+            out.append(_html.warning(CAPPED_WARNING))
+        out.append(_html.table(["id", "text", "similarity", "best seed"], rows))
+        return "".join(out)
+
     def __repr__(self) -> str:
         lines = [f"{len(self.rows)} candidates (floor {self.floor:.2f})"]
         for i, count in enumerate(self.bands()):
-            label = (
-                f"{BANDS[i]:.3f}-{BANDS[i + 1]:.3f}"
-                if i + 1 < len(BANDS)
-                else f"{BANDS[i]:.3f}+"
-            )
-            lines.append(f"  {label}  {count}")
+            lines.append(f"  {_band_name(i)}  {count}")
         if self.capped:
-            lines.append(
-                "WARNING: results were capped, so some items above the floor may be missing"
-            )
+            lines.append(f"WARNING: {CAPPED_WARNING}")
         return "\n".join(lines)
 
 

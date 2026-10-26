@@ -382,6 +382,8 @@ def test_only_import_rows_can_set_a_label():
         "name",
         "path",
         "counts",
+        "to_polars",  # read-only exports (006/12)
+        "to_pandas",
     }
 
 
