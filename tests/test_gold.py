@@ -258,10 +258,11 @@ def test_goldset_repr_is_plain_text_with_sources(tmp_path):
         row("4", ["b"]),
         row("5", None),
     )
-    assert repr(Gold(path).dev) == (
+    # the last line is the Short gold rule (006/15), tested in test_gold_rule.py
+    assert repr(Gold(path).dev).splitlines()[0] == (
         "GoldSet dev: 4 rows (4 labelled, 0 pending); hunches-ui 1, imported 2, unstamped 1"
     )
-    assert repr(Gold(path).all) == (
+    assert repr(Gold(path).all).splitlines()[0] == (
         "GoldSet all: 5 rows (4 labelled, 1 pending); hunches-ui 1, imported 2, unstamped 1"
     )
 

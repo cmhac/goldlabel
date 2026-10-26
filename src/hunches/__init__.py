@@ -7,6 +7,7 @@ import by name, `from hunches.cost import cache_key`, `from hunches.settings imp
 
 from importlib.metadata import PackageNotFoundError, version
 
+from hunches._gold_rule import GOLD_RULE_FULL, GOLD_RULE_SHORT, GoldError
 from hunches._label import label
 from hunches.candidates import Candidates, asearch, read_seeds, search
 from hunches.classifier import Classifier, CostLimit, Estimate, Predictions
@@ -31,6 +32,8 @@ except PackageNotFoundError:  # running from a source tree that was never instal
     __version__ = "0+unknown"
 
 __all__ = [
+    "GOLD_RULE_FULL",
+    "GOLD_RULE_SHORT",
     "BandReport",
     "Candidates",
     "Classifier",
@@ -40,6 +43,7 @@ __all__ = [
     "EvalLog",
     "Evaluation",
     "Gold",
+    "GoldError",
     "GoldSet",
     "LocalCorpus",
     "PgCorpus",

@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from hunches import _frame, _html
+from hunches._gold_rule import GOLD_RULE_SHORT, GoldError, GoldTypeError
 from hunches.settings import resolve
 from hunches.taxonomy import Taxonomy
 
@@ -84,7 +85,7 @@ class GoldSet:
         )
 
     def __repr__(self) -> str:
-        return self._summary()
+        return f"{self._summary()}\n{GOLD_RULE_SHORT}"
 
 
 class Gold:
@@ -92,6 +93,14 @@ class Gold:
 
     def __init__(self, path=None):
         self.path = resolve(path, "gold.jsonl")
+
+    def __repr__(self) -> str:
+        views = [self.dev, self.test, self.pending]
+        sources = GoldSet(self._read())._summary().partition("; ")[2]
+        return (
+            f"Gold {self.path}: dev {len(views[0])}, test {len(views[1])}, "
+            f"pending {len(views[2])}; {sources}\n{GOLD_RULE_SHORT}"
+        )
 
     def _repr_html_(self) -> str:
         rows = []
@@ -114,7 +123,7 @@ class Gold:
             try:
                 rows.append(GoldRow.model_validate(json.loads(line)))
             except (json.JSONDecodeError, ValidationError) as e:
-                raise ValueError(f"{self.path}:{n}: not a gold row ({e})") from e
+                raise GoldError(f"{self.path}:{n}: not a gold row ({e})") from e
         return rows
 
     def _write(self, rows: list[GoldRow]) -> None:
@@ -154,11 +163,11 @@ class Gold:
     def draw(self, candidates, n: int = 50, split: str = "dev", seed=None) -> GoldSet:
         """Append `n` pending rows (`labels=None`) not already anywhere in the file."""
         if split not in SPLITS:
-            raise ValueError(f"split must be 'dev' or 'test', not {split!r}")
+            raise GoldError(f"split must be 'dev' or 'test', not {split!r}")
         rows = self._read()
         picked = candidates.sample(n, seed, exclude={r.id for r in rows}).rows
         if len(picked) < n:
-            raise ValueError(
+            raise GoldError(
                 f"only {len(picked)} candidates are not already in {self.path}; asked for {n}"
             )
         new = [
@@ -174,7 +183,7 @@ class Gold:
         Labels are not checked against a taxonomy here; `evaluate` does that.
         """
         if split not in SPLITS:
-            raise ValueError(f"split must be 'dev' or 'test', not {split!r}")
+            raise GoldError(f"split must be 'dev' or 'test', not {split!r}")
         existing = self._read()
         seen = {r.id for r in existing}
         now = datetime.now(UTC).isoformat()
@@ -182,14 +191,14 @@ class Gold:
         for r in rows:
             missing = [k for k in ("id", "text", "labels") if k not in r]
             if missing or not r["labels"]:
-                raise ValueError(
+                raise GoldError(
                     f"imported row {r.get('id')!r} needs id, text and labels"
                 )
             row = GoldRow.model_validate(
                 {**r, "split": split, "labelled_by": "imported", "labelled_at": now}
             )
             if row.id in seen:
-                raise ValueError(f"id {row.id!r} is already in {self.path}")
+                raise GoldError(f"id {row.id!r} is already in {self.path}")
             seen.add(row.id)
             new.append(row)
         self._write(existing + new)
@@ -206,12 +215,12 @@ class Gold:
     def remove(self, ids) -> GoldSet:
         """Move rows to `<gold>.removed.jsonl` (appended) and rewrite the file without them."""
         if isinstance(ids, str):
-            raise TypeError("ids must be a list of ids, not a string")
+            raise GoldTypeError("ids must be a list of ids, not a string")
         ids = {str(i) for i in ids}
         rows = self._read()
         unknown = ids - {r.id for r in rows}
         if unknown:
-            raise ValueError(f"not in {self.path}: {sorted(unknown)}")
+            raise GoldError(f"not in {self.path}: {sorted(unknown)}")
         gone = [r for r in rows if r.id in ids]
         if gone:
             removed = self.path.with_suffix(".removed.jsonl")

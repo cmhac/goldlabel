@@ -31,6 +31,9 @@ PUBLIC = [
     "Cost",
     "settings",
     "label",
+    "GOLD_RULE_SHORT",
+    "GOLD_RULE_FULL",
+    "GoldError",
     "__version__",
 ]
 
@@ -56,13 +59,6 @@ def test_all_is_exactly_the_public_list():
     assert sorted(hunches.__all__) == sorted(PUBLIC)
     for name in PUBLIC:
         assert hasattr(hunches, name), name
-
-
-def test_not_yet_exported_names_are_absent():
-    import hunches
-
-    for name in ("GOLD_RULE_SHORT", "GOLD_RULE_FULL"):
-        assert name not in hunches.__all__
 
 
 def test_version_is_the_package_metadata():

@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from urllib.parse import parse_qs, urlparse
 
+from hunches._gold_rule import GOLD_RULE_SHORT, GoldError, GoldRuntimeError
 from hunches.gold import SPLITS, Gold, GoldSet
 from hunches.taxonomy import OFF_TOPIC, Taxonomy, validate_labels
 
@@ -59,7 +60,7 @@ def _acquire(lock) -> None:
             except (OSError, ValueError, KeyError, TypeError):
                 pid, started = None, None  # unreadable: stale
             if pid is not None and _alive(pid):
-                raise RuntimeError(
+                raise GoldRuntimeError(
                     f"{lock.with_suffix('')} is already being labelled (pid {pid}, started "
                     f"{started}); finish or stop that session first"
                 ) from None
@@ -68,7 +69,7 @@ def _acquire(lock) -> None:
         with os.fdopen(fd, "w") as f:
             json.dump({"pid": os.getpid(), "started": datetime.now(UTC).isoformat()}, f)
         return
-    raise RuntimeError(f"could not take the lock {lock}")
+    raise GoldRuntimeError(f"could not take the lock {lock}")
 
 
 def _release(lock) -> None:
@@ -261,7 +262,7 @@ class _Request(BaseHTTPRequestHandler):
             except KeyError:
                 return self._send(404, {"error": f"no row {id_!r} in this split"})
             except ValueError as e:
-                return self._send(400, {"error": str(e)})
+                return self._send(400, {"error": getattr(e, "text", str(e))})
         if path == "/api/back":
             return self._send(200, handle.back())
         if path == "/api/skip":
@@ -277,7 +278,7 @@ def serve(gold: Gold, taxonomy: Taxonomy, *, split=None, port=None) -> Handle:
     """Start the labelling server on 127.0.0.1 and return at once; it resumes at the first
     unlabelled row (file order) of `split` (`dev`, `test` or both)."""
     if split is not None and split not in SPLITS:
-        raise ValueError(f"split must be 'dev', 'test' or None, not {split!r}")
+        raise GoldError(f"split must be 'dev', 'test' or None, not {split!r}")
     handle = Handle(gold, taxonomy, split)
     _acquire(handle.lock)
     try:
@@ -313,7 +314,8 @@ def label(
             )
         print(
             f"Labelling page: {handle.url}\n"
-            "Label the rows in your browser, then press Done on the page."
+            "Label the rows in your browser, then press Done on the page.\n"
+            f"{GOLD_RULE_SHORT}"
         )
         if open_browser:
             webbrowser.open(handle.url)
