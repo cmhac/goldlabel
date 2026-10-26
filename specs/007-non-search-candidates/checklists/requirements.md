@@ -33,8 +33,8 @@
 
 - This is a library, so its public function names (`hn.get_candidates` and its options) are the user
   interface and appear in the spec; they are marked as provisional in Assumptions and confirmed in
-  the plan. The mentions of the fake `psycopg` and stubbed S3 client are in Assumptions and
-  Success Criteria only as how verification is done, per the constitution's testing rules.
+  the plan. Implementation details (SQL parameter handling, library versions, boto3 names) were moved out of
+  the spec to the plan; what remains is user-visible behaviour and how verification is done.
 - Both clarification questions resolved 2026-10-26 (ranking: distinct terms then total matches;
   server-side regex: strings in Postgres syntax, compiled patterns refused). The whole-corpus-larger-than-memory question keeps its default
   (use the existing result-size limit and refuse beyond it).
@@ -43,7 +43,8 @@
 - 2026-10-26 Ponytail review fixes applied: no default file write for keyword and whole-corpus
   calls (FR-007), the two-table Postgres layout (FR-026), S3 listing (FR-027), the server-side
   equality claim limited to ASCII with a human check (FR-006, SC-007), `limit` with seeds and the
-  `cache` option (FR-005, FR-025). Nice-to-haves 6 and 7 of the review are not yet applied.
+  `cache` option (FR-005, FR-025). Nice-to-haves 6 and 7 applied afterwards (implementation details trimmed, story 4 renumbered,
+  stale `items.jsonl` wording removed).
 - Ponytail was applied: the spec carries a "Deliberately skipped" list and asks for no option,
   abstraction or format beyond the two calls and an optional-similarity candidate list.
 - 2026-10-26: `LocalCorpus` is removed in favour of `Table` (FR-024). This is a hard break to a

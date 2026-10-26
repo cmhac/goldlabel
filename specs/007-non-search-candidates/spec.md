@@ -127,26 +127,26 @@ returns the rows the fake answers with, ranked and limited like a Python-side se
 
 1. **Given** a Postgres corpus and the server-side option, **When** a keyword search runs, **Then**
    one read-only statement per search is sent, only matching rows are received, and the terms
-   reach the database as bound parameters.
+   reach the database as values, never as part of the statement text.
 2. **Given** a user term containing `%`, `_`, a backslash, quotes or `;`, **When** the search runs with literal
    matching, **Then** it is matched as the literal characters and cannot alter the statement.
 3. **Given** a corpus that is not a Postgres corpus, **When** the server-side option is asked for,
    **Then** the call fails with a message saying only a Postgres corpus can filter on the server.
-6. **Given** a Postgres table with only an id column and a text column (no embedding column, no
+4. **Given** a Postgres table with only an id column and a text column (no embedding column, no
    vector extension installed), **When** a keyword search or a whole-corpus request runs, **Then**
    it works; a seed search against the same table fails with a message that says the table has no
    embedding column to search.
-4. **Given** a compiled Python regular expression, **When** the server-side option is on, **Then**
+5. **Given** a compiled Python regular expression, **When** the server-side option is on, **Then**
    the call refuses, naming the term and saying that server-side regular expressions are written
    as strings with the regex option, in the database's own syntax.
-7. **Given** a string with the regex option and the server-side option on, **When** the search
-   runs, **Then** the string is sent to the database unchanged as a bound parameter and matched in
+6. **Given** a string with the regex option and the server-side option on, **When** the search
+   runs, **Then** the string is sent to the database unchanged, as a value, and matched in
    the database's regular-expression syntax, where an inline option such as `(?i)` sets
    case-insensitivity; the documentation says this syntax can differ from Python's.
-8. **Given** a Postgres corpus whose text is in a second table, **When** a whole-corpus, a
+7. **Given** a Postgres corpus whose text is in a second table, **When** a whole-corpus, a
    Python-side keyword or a server-side keyword search runs, **Then** the text is read from, and
    filtered in, that second table, and an id with no text row fails naming the id.
-5. **Given** the same corpus read both ways, **When** the terms are plain ASCII text, **Then** the
+8. **Given** the same corpus read both ways, **When** the terms are plain ASCII text, **Then** the
    server-side and the Python-side searches return the same ids in the same order. With the fake
    database this checks only that the library builds the right statement and ranks what comes
    back; the comparison on a real database is a human check.
@@ -181,7 +181,7 @@ holds more than one batch of unmatched items plus the kept matches.
 ### User Story 6 - Bring your own table: CSV, Parquet, JSONL, DataFrame (Priority: P1)
 
 A user whose data is in a CSV or Parquet file, or already in a pandas or polars DataFrame, wants to
-build candidates from it directly, without first writing a folder of `items.jsonl`. They say which
+build candidates from it directly, without first converting it to another format. They say which
 column is the id (optional) and which is the text. If the table also has an embedding column, the
 same table works for seed search.
 
@@ -289,7 +289,8 @@ same ids in the same order.
   items in corpus order for the whole corpus. A limit below one MUST be refused.
 - **FR-006**: Users MUST be able to ask a Postgres corpus to do the matching on the database
   server with an option on the keyword call. The statement MUST be read-only, MUST pass every user
-  term as a bound parameter and every identifier through the existing identifier quoting. For
+  term to the database as a value, never as part of the statement text, and MUST quote table and
+  column names as seed search does. For
   plain-text terms made of ASCII characters it MUST return the same ids in the same order as the
   Python-side match; for other characters the database's own locale decides case-insensitivity,
   and the documentation says so. Asking for
@@ -485,8 +486,8 @@ same ids in the same order.
   by `get_candidates` without seeds omit the similarity fields.
 - **No new dependency**: matching and CSV/JSONL reading use the standard library; DataFrames are
   used through their own methods, not imported by the library; Parquet needs polars or pandas with
-  pyarrow, which the user installs (polars reads Parquet natively; pandas' `read_parquet`
-  requires pyarrow, per their documentation). The plan checks the installed versions.
+  a Parquet engine, which the user installs. The plan checks the installed versions and
+  records which libraries read Parquet.
 - **Local semantic corpora**: seed search over a table reads its embedding column into memory and
   compares with the same cosine-similarity maths as before; it is not a compact binary format, so
   very large embedded corpora belong in Postgres or S3 Vectors. The declared model name is the
@@ -497,7 +498,7 @@ same ids in the same order.
   arguments; the plan confirms it. It is one more corpus kind, not a base class.
 - **Semantic mode from tables**: supported when the table carries the embeddings. Embedding the
   text inside hunches is not part of this feature.
-- **Verification**: everything runs against hand-built tables, the fake `psycopg` and a
+- **Verification**: everything runs against hand-built tables, a fake database and a
   stubbed S3 client; a real database or bucket is a human step, recorded as such. Human checks
   added here: server-side and Python-side keyword results compared on a real Postgres, including
   the two-table layout, and a keyword read of a real S3 Vectors index.
