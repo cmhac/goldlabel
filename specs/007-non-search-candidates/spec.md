@@ -8,7 +8,7 @@
 
 **Input**: User description: "Non-search candidate sources for the hunches library: let a user build a Candidates list without semantic seed search. (1) a keyword/regex candidate list over a corpus, and (2) the whole corpus with no filtering. Today `Candidates` rows assume `max_similarity` and `best_seed`, so its repr, bands, above, top_seeds and band_sample break on rows without them; the corpus classes (LocalCorpus, S3Corpus, PgCorpus) have no plain item reader, only the search code reads items. Proposed shape (to be refined in the spec): make similarity fields optional on Candidates with plain-count fallbacks in repr/_repr_html_, record a `source` ("seeds", "keywords", "all"), and add `hn.keywords(corpus, terms, regex=False)` and `hn.everything(corpus)` with a streaming item reader for all three corpus types (pgvector tables can be larger than memory). Must keep: no I/O on import, async+sync forms, polars+pandas export, unknown cost shown as `?`, never touch gold labels, minimal implementation with no abstractions."
 
-**Review decisions (user, 2026-10-26)**: a corpus with no embeddings is a valid input when no semantic search is used (below);  several regular expressions with their own flags, each searched separately; keyword hits ranked the way semantic hits are; a `limit` argument defaulting to no limit; one corpus per call, with merging corpora left to the user upstream and no source registry or system-wide storage; and server-side SQL filtering for Postgres as a real feature.
+**Review decisions (user, 2026-10-26)**: a corpus with no embeddings is a valid input when no semantic search is used; data may come from a CSV, Parquet or JSONL file, a pandas or polars DataFrame, or a list of rows, for semantic search too when the rows already carry embeddings (story 6);  several regular expressions with their own flags, each searched separately; keyword hits ranked the way semantic hits are; a `limit` argument defaulting to no limit; one corpus per call, with merging corpora left to the user upstream and no source registry or system-wide storage; and server-side SQL filtering for Postgres as a real feature.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -168,6 +168,45 @@ holds more than one batch of unmatched items plus the kept matches.
 
 ---
 
+### User Story 6 - Bring your own table: CSV, Parquet, JSONL, DataFrame (Priority: P1)
+
+A user whose data is in a CSV or Parquet file, or already in a pandas or polars DataFrame, wants to
+build candidates from it directly, without first writing a folder of `items.jsonl`. They say which
+column is the id (optional) and which is the text. If the table also has an embedding column, the
+same table works for seed search.
+
+**Why this priority**: it is how non-semantic users will actually arrive; without it, stories 1 and
+2 require a conversion step that defeats their purpose.
+
+**Independent Test**: write the same five rows as CSV, Parquet, JSONL, a polars DataFrame, a pandas
+DataFrame and a list of dicts; a keyword search and a whole-corpus request over each return the
+same ids in the same order.
+
+**Acceptance Scenarios**:
+
+1. **Given** a CSV with columns `post_id` and `body`, **When** the user names them as id and text
+   columns and asks for the whole table, **Then** every row is a candidate with `id` taken from
+   `post_id` and `text` from `body`.
+2. **Given** a Parquet file, a pandas DataFrame or a polars DataFrame with the same rows, **When**
+   the same call is made, **Then** the result is identical.
+3. **Given** a table with no id column named, **When** it is read, **Then** each row's id is its
+   position in the table, and the documentation says these ids are only stable while the row order
+   is.
+4. **Given** a table with a missing column, an empty or missing text value, or a repeated id,
+   **When** it is read, **Then** the call fails before any search, naming the column, or the first
+   offending row and its value, and never drops or invents rows.
+5. **Given** a table with an embedding column, one list of numbers per row, and the embedding model
+   named, **When** a seed search runs with that model, **Then** it works like a seed search over a
+   local corpus, including the model-mismatch check.
+6. **Given** a table with no embedding column, **When** a seed search is asked for, **Then** it
+   fails with a message that says the table has no embedding column and that keyword and
+   whole-corpus calls need none.
+7. **Given** a Parquet file when neither polars nor a Parquet-capable pandas is installed, **When**
+   it is read, **Then** the call fails with a message that names what to install; importing the
+   library never imports either.
+
+---
+
 ### Edge Cases
 
 - A term that is empty, or only whitespace, is refused: it would match every item and the user
@@ -191,6 +230,13 @@ holds more than one batch of unmatched items plus the kept matches.
   unknown price still shows as `?`.
 - Classifying a large whole-corpus list is the user's decision: the library shows the estimate
   first, as it already does, and never starts a run by itself.
+- A table is read into memory whole; a file too large for memory is out of scope (filter it
+  upstream or load it into Postgres). A table's own order is its row order.
+- Ids are read as text, so a numeric id column gives the same ids as the same data in a text
+  column. Extra columns are ignored by the library and not carried into the candidate rows.
+- An embedding value that is not a list of numbers, or a vector whose length differs from the
+  others, fails the seed search naming the first offending row; keyword and whole-corpus calls never
+  look at the embedding column.
 - One corpus per call. A user with several corpora calls once per corpus and combines the results
   before the library sees them. Candidate and gold files identify an item by its `id` alone, so
   ids that repeat across corpora would be treated as the same item; the library does not detect
@@ -205,7 +251,8 @@ holds more than one batch of unmatched items plus the kept matches.
 
 - **FR-001**: Users MUST be able to get a candidate list holding every item of a local, S3 or
   Postgres corpus, without seeds, an embedder or a cutoff, and MUST NOT need embeddings to do so
-  where the storage allows it (local and Postgres; an S3 Vectors index always holds vectors).
+  where the storage allows it (local, Postgres and tables; an S3 Vectors index always holds
+  vectors).
 - **FR-002**: Users MUST be able to get a candidate list of the items that match any of a list of
   terms. A term is a plain string (matched as literal text without regard to case, unless the
   regex option is on) or a compiled regular expression (always matched as a pattern, carrying its
@@ -229,8 +276,8 @@ holds more than one batch of unmatched items plus the kept matches.
   notebook event loop, and both MUST write the result like a seed search does (`out`: default
   location, a path, or nothing).
 - **FR-008**: Every candidate MUST keep its corpus `id` and `text`; each item MUST appear at most
-  once; whole-corpus order MUST be the corpus's own order (file order for a local corpus, ascending
-  id for a Postgres table).
+  once; whole-corpus order MUST be the corpus's own order (file order for a local corpus, row order for a
+  table, ascending id for a Postgres table).
 - **FR-009**: A candidate list MUST record how it was built: from seeds, from keywords or from the
   whole corpus, and this MUST survive writing and reading the file.
 - **FR-010**: A list not built from seeds MUST NOT carry a similarity or a best seed, and MUST NOT
@@ -262,6 +309,20 @@ holds more than one batch of unmatched items plus the kept matches.
   names what is missing (the vector file, its metadata, or the embedding column). The text of the
   documentation and the agent instructions MUST stop describing hunches as working only over an
   already-embedded corpus.
+- **FR-020**: Users MUST be able to describe a table as a corpus from a CSV file, a Parquet file, a
+  JSONL file, a pandas DataFrame, a polars DataFrame or a list of row dicts, naming the text column
+  and optionally the id column (default id: row position) and an embedding column with the
+  embedding model's name. The same descriptor MUST work with the keyword, whole-corpus and (when
+  an embedding column and model are given) seed-search calls.
+- **FR-021**: Reading a table MUST fail, before any search, on a missing named column, a missing or
+  empty text value, or a repeated id, naming the column or the first offending row. It MUST NOT
+  drop, repair or invent rows.
+- **FR-022**: DataFrames MUST be accepted without the library importing pandas or polars itself
+  (importing the library stays free of both); a Parquet file MUST be readable with polars or a
+  pandas that has a Parquet engine, and MUST fail with a message naming what to install when
+  neither is available. No new dependency is added to the project.
+- **FR-023**: A seed search over a table MUST check the table's recorded embedding model against
+  the embedder, as a local corpus does, and MUST refuse when none was given.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -273,6 +334,9 @@ holds more than one batch of unmatched items plus the kept matches.
   lack: a way to read their items one batch at a time, without vectors, and, for Postgres, a way to
   have the server do the matching. A local or Postgres corpus is valid without embeddings; the
   Postgres corpus descriptor keeps its name, and its embedding column is only used by seed search.
+- **Table**: a corpus described from a CSV, Parquet or JSONL file, a pandas or polars DataFrame or a
+  list of row dicts: the source, the text column, optionally the id column, optionally an embedding
+  column and the embedding model's name. Held in memory.
 - **Term**: a plain string or a compiled regular expression with its own flags.
 
 ## Deliberately skipped *(Ponytail)*
@@ -293,7 +357,12 @@ holds more than one batch of unmatched items plus the kept matches.
   embedding column is noted in the docs, not redesigned).
 - Server-side ranking or limiting: the database only filters; ranking and limit are applied in the
   library so that both backends rank alike.
-- Reading or writing vectors, or re-embedding, in the new calls.
+- Embedding a table's text for seed search (a new cost, cache and model dependency): a table needs
+  its embeddings supplied; computing them is a separate feature if wanted.
+- Other table sources (Excel, SQL queries, Arrow IPC, globs of many files, URLs and cloud paths),
+  streaming a table larger than memory, several text columns, carrying extra columns into the
+  candidates, and writing tables out.
+- Reading or writing vectors, or re-embedding, in the keyword and whole-corpus calls.
 - A command-line entry point, a new file format, or a base class of "sources".
 
 ## Success Criteria *(mandatory)*
@@ -317,6 +386,8 @@ holds more than one batch of unmatched items plus the kept matches.
 - **SC-008**: A local corpus folder containing only `items.jsonl`, and a stubbed Postgres table
   with only id and text columns, each produce a keyword list and a whole-corpus list with no error
   and no read of a vector.
+- **SC-009**: The same five rows given as CSV, Parquet, JSONL, a polars DataFrame, a pandas
+  DataFrame and a list of dicts produce identical keyword and whole-corpus results.
 - **SC-007**: On a fixture of plain-text terms, the server-side and Python-side searches return
   identical ids in identical order; no user term appears inside the statement text.
 
@@ -339,8 +410,15 @@ holds more than one batch of unmatched items plus the kept matches.
   the plan's other names are confirmed in the plan.
 - **Compatibility**: a seed-search result keeps its exact fields and display; only candidates built
   by the new calls omit the similarity fields.
-- **No new dependency**: matching uses what the library already ships with and the standard
-  library.
+- **No new dependency**: matching and CSV/JSONL reading use the standard library; DataFrames are
+  used through their own methods, not imported by the library; Parquet needs polars or pandas with
+  pyarrow, which the user installs (polars reads Parquet natively; pandas' `read_parquet`
+  requires pyarrow, per their documentation). The plan checks the installed versions.
+- **Table naming**: the descriptor is provisionally `hn.Table(source, text_column="text",
+  id_column=None, vector_column=None, embedding_model=None)`, mirroring `PgCorpus`'s column
+  arguments; the plan confirms it. It is one more corpus kind, not a base class.
+- **Semantic mode from tables**: supported when the table carries the embeddings. Embedding the
+  text inside hunches is not part of this feature.
 - **Verification**: everything runs against hand-built local corpora, the fake `psycopg` and a
   stubbed S3 client; a real database or bucket is a human step, recorded as such.
 
