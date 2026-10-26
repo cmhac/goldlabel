@@ -1,3 +1,4 @@
+import importlib
 import json
 import shutil
 import threading
@@ -8,8 +9,9 @@ from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RequestUsage
 
-from hunches import cost
 from hunches.settings import settings
+
+cost = importlib.import_module("hunches.cost")  # `hunches.cost` is the function
 
 FIXTURES = Path(__file__).parent / "fixtures" / "pre006"
 

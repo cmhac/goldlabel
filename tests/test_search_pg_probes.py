@@ -1,6 +1,8 @@
+import importlib
+
 import pytest
 
-from hunches import search
+search = importlib.import_module("hunches.search")  # `hunches.search` is the function
 
 
 class Cur:

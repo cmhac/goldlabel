@@ -1,9 +1,11 @@
+import importlib
 import threading
 
 import pytest
 
-from hunches import search
 from hunches.search import PgCorpus
+
+search = importlib.import_module("hunches.search")  # `hunches.search` is the function
 
 EXT_VERSION = ("0.8.1", "extensions")
 MB = 1024 * 1024

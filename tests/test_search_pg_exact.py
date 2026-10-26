@@ -1,10 +1,12 @@
+import importlib
 import uuid
 from typing import Any
 
 import pytest
 
-from hunches import search
 from hunches.search import PgCorpus
+
+search = importlib.import_module("hunches.search")  # `hunches.search` is the function
 
 EXT_VERSION = ("0.8.1", "extensions")
 

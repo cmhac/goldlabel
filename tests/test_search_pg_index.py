@@ -1,9 +1,11 @@
+import importlib
 from typing import Any
 
 import pytest
 
-from hunches import search
 from hunches.search import LocalCorpus, PgCorpus, S3Corpus
+
+search = importlib.import_module("hunches.search")  # `hunches.search` is the function
 
 
 class Cur:

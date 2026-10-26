@@ -3,7 +3,16 @@ import subprocess
 import sys
 
 KEPT = ["search", "candidates", "classifier", "cost", "metrics"]
-REMOVED = ["app", "screens", "theme", "history"]
+REMOVED = [
+    "app",
+    "screens",
+    "theme",
+    "history",
+    "files",
+    "system",
+    "keys",
+    "models",
+]
 
 
 def test_kept_modules_import_no_textual():

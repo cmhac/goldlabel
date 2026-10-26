@@ -10,9 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from hunches import candidates, classifier, cost, files
+from hunches import candidates, classifier
+from hunches.classifier import Classifier
+from hunches.cost import breakdown, cache_get, cache_key
 from hunches.gold import Gold
 from hunches.search import LocalCorpus, search_vectors
+from hunches.settings import settings
+from hunches.taxonomy import Taxonomy
 
 FIXTURES = Path(__file__).parent / "fixtures" / "pre006"
 
@@ -26,23 +30,21 @@ def expected():
 def project(tmp_path, monkeypatch):
     shutil.copytree(FIXTURES, tmp_path / ".hunches")
     monkeypatch.chdir(tmp_path)
-    corpus = (tmp_path / ".hunches" / "corpus").resolve()
-    files.write_config(
-        files.Config(
-            embedding_model="fake-embed",
-            classifier_model="fake-classifier",
-            corpus_dir=str(corpus),
-        )
-    )
+    settings.root = tmp_path / ".hunches"
     return tmp_path
 
 
+def read_jsonl(project, name):
+    path = project / ".hunches" / name
+    return [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
+
+
 def test_files_are_well_formed(project):
-    taxonomy = files.read_taxonomy()
+    taxonomy = Taxonomy.read(project / ".hunches" / "taxonomy.yaml")
     assert taxonomy.mode == "multi"
     assert [label.name for label in taxonomy.labels] == ["alpha", "beta"]
     assert candidates.read_seeds(".hunches/seeds.csv") == ["alpha seed"]
-    assert files.read_text("prompt.md") == "Classify the item.\n"
+    assert (project / ".hunches" / "prompt.md").read_text() == "Classify the item.\n"
     meta = json.loads((project / ".hunches" / "candidates.meta.json").read_text())
     assert meta == {
         "seeds_digest": candidates.seeds_digest(["alpha seed"]),
@@ -50,7 +52,12 @@ def test_files_are_well_formed(project):
         "floor": 0.6,
         "embedding_model": "fake-embed",
     }
-    assert [c["id"] for c in files.read_jsonl("candidates.jsonl")] == ["a1", "a2"]
+    assert [
+        c["id"]
+        for c in candidates.Candidates.read(
+            project / ".hunches" / "candidates.jsonl"
+        ).rows
+    ] == ["a1", "a2"]
     gold = Gold(project / ".hunches" / "gold.jsonl").all.rows
     assert [(g.id, g.split, g.labels) for g in gold] == [
         ("a1", "dev", ["alpha"]),
@@ -58,7 +65,7 @@ def test_files_are_well_formed(project):
         ("a2", "test", ["alpha"]),
         ("c1", "test", []),  # no labels yet (pre-006 wrote [] for pending)
     ]
-    results = files.read_jsonl("results.jsonl")
+    results = read_jsonl(project, "results.jsonl")
     assert [("run" in r) for r in results] == [True, False]
 
 
@@ -78,10 +85,10 @@ def test_cache_and_cost_are_well_formed(project, expected):
     names = sorted(p.stem for p in (project / ".hunches" / "cache").glob("*.json"))
     assert names == sorted([cls["cache_key"], emb["cache_key"]])
     # the pre-006 .hunches/cost.json is not read; the ledger now lives in the cache directory
-    assert cost.breakdown(None) == {}
+    assert breakdown(None) == {}
     emb_entry, cls_entry = (
-        cost.cache_get(None, emb["cache_key"]),
-        cost.cache_get(None, cls["cache_key"]),
+        cache_get(None, emb["cache_key"]),
+        cache_get(None, cls["cache_key"]),
     )
     assert emb_entry is not None and cls_entry is not None
     assert emb_entry["output"] == emb["vector"]
@@ -93,14 +100,14 @@ def test_cache_and_cost_are_well_formed(project, expected):
 
 def test_expected_matches_current_code(project, expected):
     cls = expected["classification"]
-    taxonomy = files.read_taxonomy()
+    taxonomy = Taxonomy.read(project / ".hunches" / "taxonomy.yaml")
     system = classifier.system_prompt(cls["prompt"], taxonomy)
     assert system == cls["system_prompt"]
-    assert cost.cache_key(cls["model"], system, cls["text"]) == cls["cache_key"]
-    assert files.run_digest(cls["prompt"], taxonomy, cls["model"]) == cls["run_digest"]
-    assert files.read_jsonl("results.jsonl")[0]["run"] == cls["run_digest"]
+    assert cache_key(cls["model"], system, cls["text"]) == cls["cache_key"]
+    assert Classifier(cls["model"], taxonomy, cls["prompt"]).digest == cls["run_digest"]
+    assert read_jsonl(project, "results.jsonl")[0]["run"] == cls["run_digest"]
     emb = expected["seed_embedding"]
-    assert cost.cache_key(emb["model"], "embed_query", emb["seed"]) == emb["cache_key"]
+    assert cache_key(emb["model"], "embed_query", emb["seed"]) == emb["cache_key"]
 
 
 def test_local_search_matches_recorded(project, expected):

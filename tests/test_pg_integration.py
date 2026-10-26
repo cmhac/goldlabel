@@ -7,6 +7,7 @@ never writes. The `index` tests also need pgvector 0.8.0 or newer. Expected valu
 or are written by hand, never from the code under test.
 """
 
+import importlib
 import json
 import os
 import threading
@@ -20,8 +21,10 @@ from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
 from pydantic_ai.usage import RequestUsage
 
-from hunches import candidates, search
+from hunches import candidates
 from hunches.search import LocalCorpus, PgCorpus
+
+search = importlib.import_module("hunches.search")  # `hunches.search` is the function
 
 psycopg = pytest.importorskip("psycopg")
 

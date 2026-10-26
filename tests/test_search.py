@@ -1,10 +1,12 @@
+import importlib
 import json
 
 import numpy as np
 import pytest
 
-from hunches import search
 from hunches.search import LocalCorpus, S3Corpus
+
+search = importlib.import_module("hunches.search")  # `hunches.search` is the function
 
 
 @pytest.fixture(autouse=True)

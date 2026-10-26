@@ -1,4 +1,5 @@
 import hashlib
+import importlib
 import json
 from dataclasses import FrozenInstanceError
 
@@ -8,9 +9,11 @@ from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.usage import RequestUsage
 
-from hunches import classifier, cost
+from hunches import classifier
 from hunches.settings import settings
 from hunches.taxonomy import Label, Taxonomy
+
+cost = importlib.import_module("hunches.cost")  # `hunches.cost` is the function
 
 USAGE = RequestUsage(input_tokens=1, output_tokens=1)
 

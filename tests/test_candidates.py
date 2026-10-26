@@ -1,3 +1,4 @@
+import importlib
 import json
 import math
 import shutil
@@ -9,10 +10,12 @@ from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
 from pydantic_ai.usage import RequestUsage
 
-from hunches import candidates, cost
+from hunches import candidates
 from hunches.candidates import Candidates, asearch, read_seeds, search
 from hunches.search import LocalCorpus, PgCorpus, S3Corpus
 from hunches.settings import settings
+
+cost = importlib.import_module("hunches.cost")  # `hunches.cost` is the function
 
 FIXTURES = Path(__file__).parent / "fixtures" / "pre006"
 

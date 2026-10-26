@@ -172,6 +172,8 @@ Classifies ~`per_band` random items per similarity band; reports the off-topic r
 
 Implemented in task 04 (`cost.py`): every function takes `cache` first: a directory, `None` for the default `<settings.root>/cache`, or `False` for no cache (reads return nothing, writes do nothing). The ledger is `<cache>/cost.json`, written atomically (temp file + `os.replace`) under a process-wide lock, so threads lose no update; two *processes* sharing one cache directory can still lose a ledger update (cache entries are unaffected). A pre-006 `<root>/cost.json` is not read. `hn.cost` is the function `hunches.cost.cost`; its public export in `__init__` (task 11) shadows the submodule name `hunches.cost`, so code inside the package imports `from hunches.cost import ...` by name from then on.
 
+**Implemented in task 11** (`__init__.py`, deletions): `files.py`, `system.py` and `models.py` are deleted with their tests (`keys.py` went in task 05). Nothing in `src/` used `models.py` (`price_label`, `snapshot_date`, `known_models` served only the model pickers and `cost` never called them), so it is deleted rather than trimmed, and the spec's "price lookup only" row no longer applies: `cost.py` prices through `genai-prices` directly. `keyring`, `platformdirs` and `python-dotenv` are no longer dependencies (`textual` was already gone); the library never loads `.env`. `hunches/__init__.py` exports exactly the names of "The pieces" plus `__version__` (package metadata; `0+unknown` if not installed); `label`, `GOLD_RULE_SHORT` and `GOLD_RULE_FULL` arrive in tasks 14 and 15. Importing is free of side effects, and `textual`, `keyring`, `platformdirs`, `dotenv`, `boto3` and `psycopg` are not imported by `import hunches`. **Name shadowing**: `hunches.search`, `hunches.cost` and `hunches.settings` are the function, the function and the object, not the submodules; always import by name (`from hunches.search import LocalCorpus`, `from hunches.settings import settings, resolve`), and a test that needs a whole module uses `importlib.import_module("hunches.cost")`. `uv run ty check` excludes `specs/` (the old design handoff imports `textual`).
+
 ## The labelling web page
 
 Started only by `hn.label`. Requirements:
@@ -214,8 +216,8 @@ The skills are the replacement for the in-app assistant. They contain **guidance
 | Candidate building, bands, floor | `candidates.py` |
 | Classifier, validation, structured output, retries, cache | `classifier.py` |
 | Metrics | `metrics.py` |
-| Cost, cache, timing ledger, `genai-prices` | `cost.py`, `models.py` (price lookup only) |
-| `Taxonomy`, `GoldRow` models | `files.py` |
+| Cost, cache, timing ledger, `genai-prices` | `cost.py` (`models.py` is gone, see task 11) |
+| `Taxonomy`, `GoldRow` models | `taxonomy.py`, `gold.py` |
 
 Changed: functions take explicit arguments instead of reading `Config` and `Path(".hunches")` globally; `search.search` and friends take a corpus object; `cost` takes a cache directory; module-level `_MEMO` caches go.
 

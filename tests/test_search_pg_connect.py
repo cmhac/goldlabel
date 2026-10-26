@@ -1,3 +1,4 @@
+import importlib
 import sys
 import types
 from typing import Any
@@ -5,8 +6,9 @@ from typing import Any
 import pytest
 from botocore.exceptions import NoCredentialsError
 
-from hunches import search
 from hunches.search import PgCorpus
+
+search = importlib.import_module("hunches.search")  # `hunches.search` is the function
 
 URL = "postgresql://alice:s3cr%40t@db.example.com:5433/mydb"
 IAM_URL = "postgresql://bob@inst.abc123.us-east-1.rds.amazonaws.com:5432/mydb"
@@ -129,18 +131,6 @@ def test_url_is_read_from_the_named_variable_only(monkeypatch):
     monkeypatch.setenv("MY_PG", URL)
     search.pg_connect(corpus)
     assert fake.conns[0].args == (URL,)
-
-
-def test_the_keyring_is_never_consulted(monkeypatch):
-    import keyring
-
-    def boom(*a, **k):
-        raise AssertionError("the keyring must not be read")
-
-    monkeypatch.setattr(keyring, "get_password", boom)
-    _, corpus = setup(monkeypatch, url=None)
-    with pytest.raises(ValueError):
-        search.pg_connect(corpus)
 
 
 def test_connect_is_read_only_and_never_prepares(monkeypatch):
