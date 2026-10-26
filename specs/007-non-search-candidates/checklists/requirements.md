@@ -31,7 +31,7 @@
 
 ## Notes
 
-- This is a library, so its public function names (`hn.keywords`, `hn.everything`) are the user
+- This is a library, so its public function names (`hn.get_candidates` and its options) are the user
   interface and appear in the spec; they are marked as provisional in Assumptions and confirmed in
   the plan. The mentions of the fake `psycopg` and stubbed S3 client are in Assumptions and
   Success Criteria only as how verification is done, per the constitution's testing rules.

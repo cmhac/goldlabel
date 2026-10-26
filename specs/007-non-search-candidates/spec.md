@@ -8,7 +8,7 @@
 
 **Input**: User description: "Non-search candidate sources for the hunches library: let a user build a Candidates list without semantic seed search. (1) a keyword/regex candidate list over a corpus, and (2) the whole corpus with no filtering. Today `Candidates` rows assume `max_similarity` and `best_seed`, so its repr, bands, above, top_seeds and band_sample break on rows without them; the corpus classes (LocalCorpus, S3Corpus, PgCorpus) have no plain item reader, only the search code reads items. Proposed shape (to be refined in the spec): make similarity fields optional on Candidates with plain-count fallbacks in repr/_repr_html_, record a `source` ("seeds", "keywords", "all"), and add `hn.keywords(corpus, terms, regex=False)` and `hn.everything(corpus)` with a streaming item reader for all three corpus types (pgvector tables can be larger than memory). Must keep: no I/O on import, async+sync forms, polars+pandas export, unknown cost shown as `?`, never touch gold labels, minimal implementation with no abstractions."
 
-**Review decisions (user, 2026-10-26)**: `LocalCorpus` is removed, because its folder layout (`vectors.npy` + `items.jsonl` + `meta.json`) was this tool's own invention while Postgres, S3 Vectors and tabular files are existing standards; `Table` replaces it, and a table needs an embedding column only when the user wants seed search; a corpus with no embeddings is a valid input when no semantic search is used; data may come from a CSV, Parquet or JSONL file, a pandas or polars DataFrame, or a list of rows, for semantic search too when the rows already carry embeddings (story 6);  several regular expressions with their own flags, each searched separately; keyword hits ranked the way semantic hits are; a `limit` argument defaulting to no limit; one corpus per call, with merging corpora left to the user upstream and no source registry or system-wide storage; and server-side SQL filtering for Postgres as a real feature.
+**Review decisions (user, 2026-10-26)**: there is one entry point, `get_candidates`, replacing `search`; with no filter it returns the whole corpus, and seeds or keywords are optional filters, so there is no separate `everything` or `keywords` function; `LocalCorpus` is removed, because its folder layout (`vectors.npy` + `items.jsonl` + `meta.json`) was this tool's own invention while Postgres, S3 Vectors and tabular files are existing standards; `Table` replaces it, and a table needs an embedding column only when the user wants seed search; a corpus with no embeddings is a valid input when no semantic search is used; data may come from a CSV, Parquet or JSONL file, a pandas or polars DataFrame, or a list of rows, for semantic search too when the rows already carry embeddings (story 6);  several regular expressions with their own flags, each searched separately; keyword hits ranked the way semantic hits are; a `limit` argument defaulting to no limit; one corpus per call, with merging corpora left to the user upstream and no source registry or system-wide storage; and server-side SQL filtering for Postgres as a real feature.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -216,7 +216,7 @@ same ids in the same order.
 ### Edge Cases
 
 - A term that is empty, or only whitespace, is refused: it would match every item and the user
-  meant `everything`.
+  meant to leave the filter out.
 - An empty list of terms is refused. A bare string instead of a list of terms is refused with the
   same message style as seeds.
 - A limit of zero or less is refused; `None` (the default) means no limit.
@@ -275,7 +275,7 @@ same ids in the same order.
   the item matched, then its total number of matches (non-overlapping occurrences, summed over
   terms), both descending, then the corpus's order; both numbers are shown as columns. Each term
   counts at most once toward the distinct-term number however many times it matches.
-- **FR-005**: Both calls MUST accept a `limit` (default none, meaning no limit). A limit keeps the
+- **FR-005**: The candidate call MUST accept a `limit` (default none, meaning no limit). A limit keeps the
   best-ranked items for keywords, and the first items in corpus order for the whole corpus. A limit
   below one MUST be refused.
 - **FR-006**: Users MUST be able to ask a Postgres corpus to do the matching on the database
@@ -287,8 +287,8 @@ same ids in the same order.
   the regex option are matched in the database's own regular-expression syntax; compiled Python
   patterns MUST be refused, naming the term, because their flags do not exist there. Ranking and
   the limit are applied in the library to the rows the server returns, so both backends rank alike.
-- **FR-007**: Both calls MUST have an async and a sync form, the sync form working inside a running
-  notebook event loop, and both MUST write the result like a seed search does (`out`: default
+- **FR-007**: The candidate call MUST have an async and a sync form, the sync form working inside a
+  running notebook event loop, and MUST write the result like a seed search does (`out`: default
   location, a path, or nothing).
 - **FR-008**: Every candidate MUST keep its corpus `id` and `text`; each item MUST appear at most
   once; whole-corpus order MUST be the corpus's own order (row order for a table, ascending id for a Postgres
@@ -317,7 +317,7 @@ same ids in the same order.
 - **FR-016**: The feature MUST NOT add a registry of sources, a shared or system-wide store, or a
   second way to describe a connection; corpora are described in code as they are today.
 - **FR-017**: The public names, the agent skill and its references, the agent-instructions block
-  and the README MUST describe the new calls and when to prefer seeds, keywords or the whole
+  and the README MUST describe the candidate call and when to prefer seeds, keywords or the whole
   corpus; the existing drift tests MUST keep passing.
 - **FR-018**: Importing the library MUST still do no I/O and import no optional dependency.
 - **FR-019**: A seed search against a corpus that has no embeddings MUST fail with a message that
@@ -338,6 +338,16 @@ same ids in the same order.
   neither is available. No new dependency is added to the project.
 - **FR-023**: A seed search over a table MUST compare the embedding model the table declares with
   the embedder's, refusing on a difference and refusing when none was declared.
+- **FR-025**: There MUST be one public entry point for building candidates, `get_candidates` (sync)
+  with `aget_candidates` (async), replacing `search` and `asearch` with no alias. Called with only
+  a corpus it returns the whole corpus. `seeds` (with an embedder and optional floor) and
+  `keywords` (with the regex and server-side options) are its optional filters. At most one filter
+  may be given: seeds together with keywords MUST be refused, saying so. An empty list for either
+  filter MUST be refused rather than read as "no filter" (absent and empty differ). An option that
+  belongs to a filter that was not given (a floor or embedder without seeds, the regex or
+  server-side option without keywords) MUST fail with a message naming it. Because the function
+  named `search` leaves the package, the package-level name `hunches.search` is again the
+  submodule, and the agent documentation's note about names that shadow submodules is corrected.
 - **FR-024**: `LocalCorpus` MUST be removed from the public names, the code, the documentation
   (README, `AGENTS.md`), the agent skill and references, the example and the tests, replaced by
   `Table`; no alias or deprecation shim is kept. Seed search, its bands, candidate files and
@@ -389,6 +399,9 @@ same ids in the same order.
   streaming a table larger than memory, several text columns, carrying extra columns into the
   candidates, and writing tables out.
 - Reading or writing vectors, or re-embedding, in the keyword and whole-corpus calls.
+- Separate `everything` and `keywords` functions with their own async forms: one `get_candidates`
+  with optional filters covers them.
+- Combining filters in one call (seeds with keywords): refused; filter further downstream.
 - A command-line entry point, a new file format, or a base class of "sources".
 
 ## Success Criteria *(mandatory)*
@@ -430,12 +443,14 @@ same ids in the same order.
 - **S3 Vectors**: the corpus's text is read from item metadata the same way a search reads it, and
   a missing text field is an error, as it is today. Whether the service can list a whole index
   with that metadata is checked against its current docs in the plan, not assumed here.
-- **Naming and exports**: the new calls are `hn.keywords(corpus, terms, regex=False, limit=None,
-  ...)` and `hn.everything(corpus, limit=None, ...)` with async forms `akeywords` and
-  `aeverything`, following the existing `search`/`asearch` pair; the server-side option's name and
-  the plan's other names are confirmed in the plan.
+- **Naming and exports**: the entry point is provisionally `hn.get_candidates(corpus, *,
+  seeds=None, embedder=None, floor=None, keywords=None, regex=False, server_side=False,
+  limit=None, out=None, cache=None)` with the async form `aget_candidates`, replacing
+  `search`/`asearch`; the exact signature and the other names are confirmed in the plan. The
+  rename touches every place that uses `search`: the code, about fifteen test files, the README,
+  `AGENTS.md`, the skill and references and the walkthrough, which the plan lists.
 - **Compatibility**: a seed-search result keeps its exact fields and display; only candidates built
-  by the new calls omit the similarity fields.
+  by `get_candidates` without seeds omit the similarity fields.
 - **No new dependency**: matching and CSV/JSONL reading use the standard library; DataFrames are
   used through their own methods, not imported by the library; Parquet needs polars or pandas with
   pyarrow, which the user installs (polars reads Parquet natively; pandas' `read_parquet`
