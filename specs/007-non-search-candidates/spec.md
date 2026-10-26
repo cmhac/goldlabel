@@ -272,13 +272,15 @@ same ids in the same order.
   so where the storage allows it (tables and Postgres; an S3 Vectors index always holds vectors,
   but these calls never ask for them).
 - **FR-002**: Users MUST be able to get a candidate list of the items that match any of a list of
-  terms. A term is a plain string (matched as literal text without regard to case (simple lower-casing, not full case folding, so
-  `strasse` does not match `Straße`), unless the
+  terms. A term is a plain string (matched as literal text without regard to case (Python's simple case-insensitive matching, not full
+  case folding, so `strasse` does not match `Straße`), unless the
   regex option is on) or a compiled regular expression (always matched as a pattern, carrying its
   own flags).
 - **FR-003**: Each term MUST be applied to every item independently of the others; one term's
   flags MUST NOT affect another's. An invalid pattern MUST fail before the corpus is read, naming
-  the pattern.
+  the pattern; a pattern that matches the empty string (it would match every item) MUST be refused
+  the same way. For a server-side regular expression string, whose syntax is the database's, the
+  database rejects an invalid one and the error names the term.
 - **FR-004**: Keyword results MUST be ranked, best first, and every row MUST carry the value it
   was ranked by. Ranking MUST be by the number of distinct terms
   the item matched, then its total number of matches (non-overlapping occurrences, summed over
@@ -462,8 +464,8 @@ same ids in the same order.
 ## Assumptions
 
 - **Matching rule**: terms are checked against the item's text only; any term suffices. Plain
-  strings are matched case-insensitively by simple lower-casing, not full Unicode case folding and
-  not locale-aware.
+  strings are matched case-insensitively by Python's simple case-insensitive matching, not full
+  Unicode case folding and not locale-aware.
 - **Regular expressions**: compiled patterns are the way to give a term its own flags; the regex
   option applies to plain strings and gives them no flags (inline flags written in the pattern
   still work). Flag behaviour is Python's for the Python-side search.
