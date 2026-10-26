@@ -144,9 +144,9 @@ def test_no_cors_or_cookie_headers(start):
     assert not {n for n in names if n.startswith("access-control") or n == "set-cookie"}
 
 
-def test_placeholder_page(start):
+def test_index_page_is_html(start):
     status, body, _ = Client(start()).call("GET", "/")
-    assert status == 200 and isinstance(body, str) and body.strip()
+    assert status == 200 and "<title>" in body
 
 
 def test_unknown_path_is_404(start):
@@ -441,4 +441,4 @@ def test_nothing_public_beyond_serve():
         for n, v in vars(_label).items()
         if not n.startswith("_") and getattr(v, "__module__", None) == "hunches._label"
     }
-    assert public == {"serve", "Handle"}
+    assert public == {"serve", "label", "Handle"}

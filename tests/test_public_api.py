@@ -30,6 +30,7 @@ PUBLIC = [
     "cost",
     "Cost",
     "settings",
+    "label",
     "__version__",
 ]
 
@@ -60,7 +61,7 @@ def test_all_is_exactly_the_public_list():
 def test_not_yet_exported_names_are_absent():
     import hunches
 
-    for name in ("label", "GOLD_RULE_SHORT", "GOLD_RULE_FULL"):
+    for name in ("GOLD_RULE_SHORT", "GOLD_RULE_FULL"):
         assert name not in hunches.__all__
 
 

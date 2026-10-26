@@ -7,6 +7,7 @@ import by name, `from hunches.cost import cache_key`, `from hunches.settings imp
 
 from importlib.metadata import PackageNotFoundError, version
 
+from hunches._label import label
 from hunches.candidates import Candidates, asearch, read_seeds, search
 from hunches.classifier import Classifier, CostLimit, Estimate, Predictions
 from hunches.cost import Cost, cost
@@ -52,6 +53,7 @@ __all__ = [
     "cost",
     "eval_log",
     "evaluate",
+    "label",
     "read_seeds",
     "search",
     "settings",

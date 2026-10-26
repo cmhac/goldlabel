@@ -2,7 +2,8 @@
 
 A label is written only because a person's HTTP request says so, stamped `labelled_by: "hunches-ui"`.
 Nothing here calls a model or returns a prediction. The server decides which item is next, so the
-page stays thin. The page itself arrives in a later task; `/` is a placeholder.
+page stays thin. The page is `web/index.html` + `app.js` + `app.css` from the package; the three are served only with
+the token and Host checks like everything else, and the HTML carries the token in its asset URLs.
 """
 
 import atexit
@@ -11,8 +12,10 @@ import os
 import secrets
 import sys
 import threading
+import webbrowser
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib import resources
 from urllib.parse import parse_qs, urlparse
 
 from hunches.gold import SPLITS, Gold, GoldSet
@@ -20,6 +23,11 @@ from hunches.taxonomy import OFF_TOPIC, Taxonomy, validate_labels
 
 OFF_TOPIC_DESCRIPTION = "the item matches none of the labels above"
 MAX_BODY = 1_000_000
+PAGES = {  # the only static paths: URL path -> (file in hunches/web, content type)
+    "/": ("index.html", "text/html"),
+    "/app.js": ("app.js", "text/javascript"),
+    "/app.css": ("app.css", "text/css"),
+}
 
 
 def _alive(pid: int) -> bool:
@@ -226,8 +234,10 @@ class _Request(BaseHTTPRequestHandler):
         if not self._allowed(handle):
             return self._send(403, {"error": "forbidden"})
         path = urlparse(self.path).path
-        if path == "/":
-            return self._send(200, "hunches labelling server\n", "text/plain")
+        if path in PAGES:
+            name, kind = PAGES[path]
+            page = resources.files("hunches").joinpath("web", name).read_text("utf-8")
+            return self._send(200, page.replace("__TOKEN__", handle.token), kind)
         if path == "/api/state":
             return self._send(200, handle.state())
         self._send(404, {"error": "not found"})
@@ -280,3 +290,38 @@ def serve(gold: Gold, taxonomy: Taxonomy, *, split=None, port=None) -> Handle:
         raise
     atexit.register(handle.stop)
     return handle
+
+
+def label(
+    gold: Gold,
+    taxonomy: Taxonomy,
+    *,
+    split: str | None = None,
+    block: bool = True,
+    open_browser: bool = True,
+    port: int | None = None,
+):
+    """Open the labelling page. Returns the labelled rows after **Done**, or the `Handle` when
+    `block=False`. Resumes at the first unlabelled row; every click is saved at once."""
+    handle = serve(gold, taxonomy, split=split, port=port)
+    try:
+        orphans = len(gold.orphaned(taxonomy))
+        if orphans:
+            print(
+                f"{orphans} labelled row(s) in {gold.path} use labels that are not in this "
+                "taxonomy; continuing."
+            )
+        print(
+            f"Labelling page: {handle.url}\n"
+            "Label the rows in your browser, then press Done on the page."
+        )
+        if open_browser:
+            webbrowser.open(handle.url)
+        if not block:
+            return handle
+        handle.wait()
+    except BaseException:
+        handle.stop()
+        raise
+    rows = [r for r in gold._read() if r.labels and split in (None, r.split)]
+    return GoldSet(rows, split or "all", gold.path)
