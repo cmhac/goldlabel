@@ -34,6 +34,19 @@ def isolated_system(tmp_path, monkeypatch):
     keyring.set_keyring(previous)
 
 
+@pytest.fixture(autouse=True)
+def reset_settings(monkeypatch):
+    """`settings.root` is process-wide state: every test starts from the default."""
+    from pathlib import Path
+
+    from hunches.settings import settings
+
+    monkeypatch.delenv("HUNCHES_DIR", raising=False)
+    settings.root = Path(".hunches")
+    yield
+    settings.root = Path(".hunches")
+
+
 class _ModelRequestsBlocked:
     """Falsy stand-in for `ALLOW_MODEL_REQUESTS` that remembers it was consulted.
 
