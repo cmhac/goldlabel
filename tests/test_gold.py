@@ -270,7 +270,7 @@ def test_views_are_read_only():
     s = Gold.__dict__
     assert isinstance(s["dev"], property) and isinstance(s["all"], property)
     with pytest.raises(FrozenInstanceError):
-        GoldSet([], "x").rows = []  # frozen
+        GoldSet([], "x").rows = []  # frozen  # ty: ignore[invalid-assignment]
 
 
 # --- orphaned and remove ------------------------------------------------------------------------
