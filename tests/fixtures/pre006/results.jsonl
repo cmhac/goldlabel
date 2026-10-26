@@ -1,0 +1,2 @@
+{"id": "a1", "text": "alpha one", "labels": ["alpha"], "max_similarity": 1.0, "run": "e95d074dfe5a14a154d7a9af6bc21e2c7cf2f027004519707945c4161c6359a6"}
+{"id": "a2", "text": "alpha two", "labels": ["alpha"], "max_similarity": 0.9}

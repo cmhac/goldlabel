@@ -1,5 +1,7 @@
 # 003 — TUI redesign: rail layout, structured editing, assistant context
 
+> **Superseded by 006 for everything user-facing (the TUI is removed).** See `../006-library/spec.md`. The text below is kept as history.
+
 Status: draft for implementation. Builds on `../001-initial-version/spec.md` and `../002-onboarding-setup/spec.md`, both implemented. Written 2026-10-05 against `main` at `2278ad0` ("Merge pull request #4 …system-and-project-setup").
 
 **Source.** A design handoff from the frontend design agent (`Content_analysis_toolkit_spec.zip`). It is a change set against `main` at that same tree (`2278ad08fd5c`, verified), not a fresh design. The handoff is copied unmodified into [`design/`](design/) so tasks can cite it. This spec is the result of reading all of it, reading the code it targets, and checking its open questions against the installed Textual 8.2.8 and pydantic-ai 2.53.

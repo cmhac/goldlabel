@@ -1,0 +1,45 @@
+{
+  "classification": {
+    "model": "fake-classifier",
+    "text": "alpha is the first letter",
+    "prompt": "Classify the item.\n",
+    "system_prompt": "Classify the item.\n\nLabels:\n- alpha: about alpha\n- beta: about beta\n- off_topic: the item matches none of the labels above\nReturn every label that applies. off_topic must never be combined with another label.\nFirst give a short reasoning (one to three sentences) that names the evidence in the text, then the labels.",
+    "cache_key": "056cf160cbe641e76df4d0fb63ead5eff49f0e0cd7d6f0762e8d3a341cfc6f0f",
+    "run_digest": "e95d074dfe5a14a154d7a9af6bc21e2c7cf2f027004519707945c4161c6359a6",
+    "labels": [
+      "alpha"
+    ],
+    "reasoning": "It mentions alpha."
+  },
+  "seed_embedding": {
+    "model": "fake-embed",
+    "seed": "alpha seed",
+    "cache_key": "e9b03eab63738bc2f73bdc3c844672128fc763a60a8be156b16c01cbff1f2e54",
+    "vector": [
+      1.0,
+      0.0,
+      0.0
+    ]
+  },
+  "search": {
+    "query": [
+      1.0,
+      0.2,
+      0.0
+    ],
+    "floor": 0.6,
+    "hits": [
+      [
+        "a1",
+        "alpha one",
+        0.9805806875228882
+      ],
+      [
+        "a2",
+        "alpha two",
+        0.9021342396736145
+      ]
+    ],
+    "capped": false
+  }
+}

@@ -1,579 +1,239 @@
-"""One scripted run through all nine stages, offline, restarting the app at every boundary."""
+"""SC-1: the README chain end to end, with no real network.
 
+The corpus is the tiny hand-built one of `examples/sample`, the embedder and the classifier model
+are fakes, and the gold labels come from a SIMULATED HUMAN: a background thread that labels over the
+labelling server's HTTP API, the way a browser tab would. This tests the pipeline; it is a test
+fixture, not an agent writing gold labels, and nothing in the library offers a way to do the same.
+"""
+
+import dataclasses
+import http.client
 import json
-import math
 import shutil
+import threading
 from pathlib import Path
+from urllib.parse import urlparse
 
-import numpy as np
 import pytest
-from conftest import panel_title
-from pydantic_ai import Agent, Embedder
+from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
-from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart
-from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
+from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.usage import RequestUsage
-from textual.widgets import DataTable, Input
 
-from hunches import classifier, cost, files, system
-from hunches.app import ConfirmScreen, HunchesApp
-from hunches.screens.brief import BriefScreen
-from hunches.screens.gold import GoldScreen
-from hunches.screens.new_project import NewProjectScreen
-from hunches.screens.projects import ProjectsScreen
-from hunches.screens.search import SearchScreen
-from hunches.screens.taxonomy import TaxonomyScreen, VersionsScreen
+import hunches as hn
+from hunches import _label
+from hunches.classifier import CostLimit
 
-# 120 items: 40 at 0.61 (band 0), 40 at 0.70, 30 at 0.80, 10 at 0.30 (below the 0.60 floor).
-# The seed "alpha" embeds to [1, 0], so cosine similarity is the first coordinate.
-SIMS = [0.61] * 40 + [0.70] * 40 + [0.80] * 30 + [0.30] * 10
-CUTOFF = 0.65
+SAMPLE = Path(__file__).parent.parent / "examples" / "sample" / "corpus"
+
+# What the people labelling decided, written by hand for the five items above the 0.60 floor.
+HUMAN = {
+    "layoff-1": ["layoff"],
+    "layoff-2": ["layoff"],
+    "layoff-3": ["layoff"],
+    "burnout-1": ["burnout"],
+    "burnout-2": ["burnout"],
+}
 
 
-class StubEmbedder(Embedder):
+class HandEmbedder(Embedder):
+    """Every seed is the vector [1, 0], the direction the sample corpus's layoff items point in."""
+
     def __init__(self):
-        super().__init__(TestEmbeddingModel("m"))
+        super().__init__(TestEmbeddingModel("hand-built-2d"))
+        self.calls = 0
 
     async def embed_query(self, query, *, settings=None):
+        self.calls += 1
         return EmbeddingResult(
             [[1.0, 0.0]],
             inputs=[query],
             input_type="query",
-            model_name="m",
+            model_name="hand-built-2d",
             provider_name="test",
             usage=RequestUsage(input_tokens=3),
         )
 
 
-async def brief_stream(messages, info: AgentInfo):
-    if any(p.part_kind == "tool-return" for p in messages[-1].parts):
-        yield "Done."
-    else:
-        yield {0: DeltaToolCall(name="propose_seeds", json_args='{"seeds": ["alpha"]}')}
+class FakeModel:
+    """A FunctionModel that labels by keyword and counts its calls (one call = one live item)."""
+
+    def __init__(self):
+        self.calls = 0
+        self.model = FunctionModel(self._answer, model_name="fake-classifier")
+
+    def _answer(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        self.calls += 1
+        text = str(messages).lower()
+        if (
+            "laid off" in text
+            or "reorg" in text
+            or ("redundanc" in text and "rumours count" in text)
+        ):
+            labels = ["layoff"]
+        elif "exhausted" in text or "weekends" in text:
+            labels = ["burnout"]
+        else:
+            labels = ["off_topic"]
+        part = ToolCallPart(
+            info.output_tools[0].name, {"reasoning": "keywords", "labels": labels}
+        )
+        return ModelResponse(parts=[part])
 
 
-async def taxonomy_stream(messages, info: AgentInfo):
-    returns = [p for p in messages[-1].parts if p.part_kind == "tool-return"]
-    if not returns:
-        args = {"mode": "single", "labels": [{"name": "a", "description": "even"}]}
-        yield {0: DeltaToolCall(name="write_taxonomy", json_args=json.dumps(args))}
-    elif "Taxonomy written" in str(returns[0].content):
-        yield {
-            0: DeltaToolCall(
-                name="write_prompt", json_args='{"prompt": "Label the item."}'
+def simulated_human(url: str) -> threading.Thread:
+    """Label every pending row over HTTP with HUMAN's answers, then press Done."""
+    u = urlparse(url)
+    assert u.hostname and u.port
+    host, port = u.hostname, u.port
+    token = u.query.removeprefix("token=")
+
+    def call(method, path, body=None):
+        conn = http.client.HTTPConnection(host, port, timeout=5)
+        headers = {"X-Hunches-Token": token}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        conn.request(method, path, json.dumps(body) if body else None, headers)
+        r = conn.getresponse()
+        data = json.loads(r.read().decode())
+        conn.close()
+        assert r.status == 200, data
+        return data
+
+    def run():
+        state = call("GET", "/api/state")
+        while state["item"] is not None:
+            state = call(
+                "POST",
+                "/api/label",
+                {"id": state["item"]["id"], "labels": HUMAN[state["item"]["id"]]},
             )
-        }
-    else:
-        yield "Done."
+        call("POST", "/api/done")
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    return thread
 
 
-CALLS: list[
-    str
-] = []  # one entry per classifier model call: proves "no model call" while labelling
-
-
-def classify_fn(messages, info: AgentInfo):
-    """Even item numbers are "a", odd ones off_topic; the same rule the test uses as gold."""
-    CALLS.append("classify")
-    request = messages[0]
-    assert isinstance(request, ModelRequest)
-    text = str(next(p.content for p in request.parts if p.part_kind == "user-prompt"))
-    answer = ["a"] if int(text.split()[-1]) % 2 == 0 else ["off_topic"]
-    return ModelResponse(
-        parts=[
-            ToolCallPart(
-                info.output_tools[0].name, {"reasoning": "r", "labels": answer}
-            )
-        ]
-    )
-
-
-def write_corpus(corpus: Path, sims: list[float]) -> None:
-    corpus.mkdir(exist_ok=True)
-    vectors = [[s, math.sqrt(1 - s * s)] for s in sims]
-    np.save(corpus / "vectors.npy", np.array(vectors, np.float32))
-    items = [{"id": f"i{n}", "text": f"item {n}"} for n in range(len(sims))]
-    (corpus / "items.jsonl").write_text("".join(json.dumps(r) + "\n" for r in items))
-    (corpus / "meta.json").write_text(json.dumps({"embedding_model": "m"}))
-
-
-@pytest.fixture(autouse=True)
-def project(tmp_path, monkeypatch):
+def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    CALLS.clear()
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")  # never used: models are stubbed
-    system.write_system(
-        system.System(
-            provider="anthropic",
-            assistant_model="anthropic:claude-sonnet-5-5",
-            classifier_model="anthropic:claude-haiku-4-5",
-            recommendation_seen=system.RECOMMENDED_REVISION,
-        )
-    )
-    write_corpus(tmp_path / "corpus", SIMS)
-    # the taxonomy screen opens with a context turn: it must not reach a real model either
-    original = TaxonomyScreen.__init__
-
-    async def ready(messages, info: AgentInfo):
-        yield "Ready."
-
-    def init(self):
-        original(self)
-        self.agent.model = FunctionModel(stream_function=ready)
-
-    monkeypatch.setattr(TaxonomyScreen, "__init__", init)
-    # every classifier call, in every stage, goes to the FunctionModel
+    corpus_dir = tmp_path / "corpus"
+    shutil.copytree(SAMPLE, corpus_dir)
+    humans = []
     monkeypatch.setattr(
-        classifier, "Agent", lambda model, **kw: Agent(FunctionModel(classify_fn), **kw)
+        _label.webbrowser, "open", lambda url: humans.append(simulated_human(url))
     )
 
+    # 1. search: embeds the seeds (one live call per seed), calls no classifier model
+    fake = FakeModel()
+    embedder = HandEmbedder()
+    # ty sees the submodule `hunches.search` here; at run time `hn.search` is the function
+    candidates = hn.search(  # ty: ignore[call-non-callable]
+        hn.LocalCorpus(corpus_dir), ["I lost my job"], embedder=embedder
+    )
+    assert embedder.calls == 1
+    assert fake.calls == 0
+    assert [r["id"] for r in candidates.rows] == list(HUMAN)  # 0.95 ... 0.66, by hand
+    assert Path(".hunches/candidates.jsonl").exists()
 
-async def chat(app, pilot, stream, message):
-    app.screen.agent.model = FunctionModel(stream_function=stream)
-    box = app.screen.query_one("#chat-input", Input)
-    box.focus()
-    box.value = message
-    await pilot.press("enter")
-    await pilot.pause(0.5)
-    await app.workers.wait_for_complete()
-    await pilot.pause()
+    # 2. taxonomy and classifier
+    taxonomy = hn.Taxonomy(
+        mode="single",
+        labels={
+            "layoff": "The author lost, or fears losing, their job.",
+            "burnout": "The author is worn out by work.",
+        },
+    )
+    clf = hn.Classifier(fake.model, taxonomy, prompt="Label the post.")
 
+    # 3. gold: draw pending rows, a person labels them in the page
+    gold = hn.Gold()
+    gold.draw(candidates, n=3, split="dev", seed=4)
+    assert all(r.labels is None for r in gold.pending.rows)
+    dev_ids = {r.id for r in gold.pending.rows}
+    assert "layoff-3" in dev_ids  # the item the first prompt gets wrong (see FakeModel)
+    hn.label(gold, taxonomy)  # blocks until the simulated human presses Done
+    humans.pop().join(timeout=10)
+    assert len(gold.dev.rows) == 3 and not gold.pending.rows
+    assert {r.labelled_by for r in gold.dev.rows} == {"hunches-ui"}
+    assert fake.calls == 0  # labelling never calls a model
 
-async def approve(pilot, button=None):
-    """Approve through the F2 key, or by clicking `button` (a screen's Approve button)."""
-    if button:
-        await pilot.click(button)
-    else:
-        await pilot.press("f2")
-    await pilot.pause()
-    await pilot.click("#yes")
-    await pilot.pause()
+    # 4. first evaluate: one live call per dev item; layoff-3 is wrong, so 2 of 3
+    ev1 = hn.evaluate(clf, gold.dev, target=0.9)
+    assert fake.calls == 3
+    assert ev1.score() == pytest.approx(2 / 3)
+    assert [d["id"] for d in ev1.disagreements] == ["layoff-3"]
 
+    # 5. identical re-evaluate: all cached, zero calls
+    hn.evaluate(clf, gold.dev)
+    assert fake.calls == 3
 
-async def label_all(app, pilot, count):
-    """Label `count` unlabelled items like a perfect user: key 1 for "a", key 0 for off_topic."""
-    screen = app.screen
-    assert isinstance(screen, GoldScreen)
-    for _ in range(count):
-        row = screen.rows[screen.index]
-        await pilot.press("1" if int(row.text.split()[-1]) % 2 == 0 else "0")
-        await pilot.pause()
-    await app.workers.wait_for_complete()
-    await pilot.pause()
+    # 6. a changed prompt: one call per item again, and it now agrees with the humans
+    clf2 = clf.with_prompt("Label the post. Rumours count as layoffs.")
+    ev2 = hn.evaluate(clf2, gold.dev, target=0.9)
+    assert fake.calls == 6
+    assert ev2.score() == pytest.approx(1.0)
+    assert ev2.digest != ev1.digest
 
+    # 7. the test split is drawn, labelled and evaluated once
+    gold.draw(candidates, n=1, split="test", seed=0)
+    hn.label(gold, taxonomy)
+    humans.pop().join(timeout=10)
+    final = hn.evaluate(clf2, gold.test)
+    assert fake.calls == 7
+    assert final.score() == pytest.approx(1.0)
 
-async def test_all_nine_stages_with_resume():
-    await run_all_stages()
+    # 8. the band sample classifies the one candidate nobody has seen yet, live
+    report = hn.band_sample(clf2, candidates, per_band=30, seed=0)
+    assert fake.calls == 8
+    assert sum(r["n"] for r in report.rows) == 5
 
+    # 9. estimate calls no model; max_cost refuses an unpriced live run; a cached run needs no price
+    new = ["A new post one", "A new post two"]
+    est = clf2.estimate(new)
+    assert (est.n, est.cached, est.live, est.dollars) == (2, 0, 2, None)
+    with pytest.raises(CostLimit):
+        clf2.classify(new, out="refused.jsonl", max_cost=0.50)
+    assert fake.calls == 8
+    assert not Path("refused.jsonl").exists()
+    above = candidates.above(0.70)
+    assert clf2.estimate(above).live == 0
+    results = clf2.classify(above, out="results.jsonl", max_cost=0.50)
+    assert fake.calls == 8
+    assert results.cached == 3 and results.live == 0
+    assert [r["labels"] for r in results.rows] == [["layoff"]] * 3
+    assert len(Path("results.jsonl").read_text().splitlines()) == 3
 
-async def run_all_stages():
-    # setup, then stage 1: brief and seeds
-    app = HunchesApp()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        assert app.stage == 0 and isinstance(app.screen, ProjectsScreen)
-        await pilot.press("n")
-        await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, NewProjectScreen)
-        screen.query_one("#corpus", Input).value = "corpus"  # location: this folder
-        await pilot.pause()
-        await pilot.click("#create")
-        await pilot.pause()
-        assert app.stage == 1 and isinstance(app.screen, BriefScreen)
-        await chat(app, pilot, brief_stream, "Find even items")
-        assert files.read_text("brief.md") == "Find even items\n"
-        await approve(pilot, "#approve")
-        assert app.stage == 2
-        assert files.read_text("seeds.csv") == "seed\nalpha\n"
+    # 10. save a bundle; a pipeline script loads it and classifies new items to `out`
+    clf2.save("classifiers/layoffs", evaluation=final)
 
-    # resume at 2 (seeds approved, no candidates); stage 2: search
-    app = HunchesApp()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        assert app.stage == 2 and isinstance(app.screen, SearchScreen)
-        app.screen.embedder = StubEmbedder()
-        await pilot.press("r")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        # the 10 low items are below the floor
-        assert panel_title(app.screen.query_one("#bands-panel"))[1] == "110 candidates"
+    def pipeline(items, out):
+        loaded = hn.Classifier.load("classifiers/layoffs")
+        # a bundle stores the model as a string; swap in the stub instead of a real provider
+        loaded = dataclasses.replace(loaded, model=fake.model)
+        return loaded.classify(items, out=out)
 
-    # resume at 3; stage 3: taxonomy and prompt
-    app = HunchesApp()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        assert app.stage == 3 and isinstance(app.screen, TaxonomyScreen)
-        await chat(app, pilot, taxonomy_stream, "one label, single")
-        await approve(pilot)
-        assert app.stage == 4
-        assert files.read_config().target_metric == "accuracy"
-
-    # resume at 4 with part of the dev set labelled; stage 4: gold dev set
-    app = HunchesApp()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        assert app.stage == 4 and isinstance(app.screen, GoldScreen)
-        await label_all(app, pilot, 20)
-    app = HunchesApp()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        assert app.stage == 4
-        assert app.screen.index == 20  # type: ignore[unresolved-attribute]  # first unlabelled item
-        await label_all(app, pilot, 30)
-        assert CALLS == []  # labelling never calls the classifier
-        await approve(pilot)
-        assert app.stage == 5
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        assert len(CALLS) == 50  # the first Tuning run classifies the whole dev set
-
-    # resume at 5; stage 5: tuning (everything agrees, so the target is met)
-    app = HunchesApp()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        assert app.stage == 5
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        await pilot.press("f2")
-        await pilot.pause()
-        assert app.stage == 6 and files.read_state().dev_done
-
-    # resume at 6; stage 6: test set labelling, then the single held-out run
-    app = HunchesApp()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        assert app.stage == 6 and isinstance(app.screen, GoldScreen)
-        await label_all(app, pilot, 50)
-        await approve(pilot)
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        assert app.stage == 6 and not isinstance(app.screen, GoldScreen)
-        await pilot.press("f2")
-        await pilot.pause()
-        assert app.stage == 7 and files.read_state().test_done
-    gold = files.read_gold()
-    assert [sum(r.split == s for r in gold) for s in ("dev", "test")] == [50, 50]
-    assert not {r.id for r in gold if r.split == "dev"} & {
-        r.id for r in gold if r.split == "test"
+    piped = pipeline(["I got laid off today", "Soup recipe"], out="piped.jsonl")
+    assert fake.calls == 10
+    assert piped.labels == [["layoff"], ["off_topic"]]
+    lines = [json.loads(x) for x in Path("piped.jsonl").read_text().splitlines()]
+    # lines are appended as items finish, so the file's order is not the input's
+    assert {x["text"]: x["labels"] for x in lines} == {
+        "I got laid off today": ["layoff"],
+        "Soup recipe": ["off_topic"],
     }
+    assert {x["run"] for x in lines} == {clf2.digest}
 
-    # resume at 7; stage 7: threshold
-    app = HunchesApp()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        assert app.stage == 7
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        app.screen.query_one("#bands", DataTable).focus()
-        await pilot.press("down", "down", "enter")  # band 2 = 0.650
-        await pilot.press("f2")
-        await pilot.pause()
-        assert app.stage == 8
-    data = json.loads(files.read_text("threshold.json") or "")
-    assert data["threshold"] == CUTOFF and data["n_candidates"] == 70
-
-    # resume at 8; stage 8: full run
-    app = HunchesApp()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        assert app.stage == 8
-        await pilot.click("#run-button")  # Start
-        await pilot.pause()
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-    results = files.read_jsonl("results.jsonl")
-    assert len(results) == 70 and len({r["id"] for r in results}) == 70
-    for r in results:
-        assert r["max_similarity"] >= CUTOFF and "error" not in r
-        want = ["a"] if int(r["text"].split()[-1]) % 2 == 0 else ["off_topic"]
-        assert r["labels"] == want
-
-    # resume at 9; stage 9: browse shows every result
-    app = HunchesApp()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        assert app.stage == 9
-        assert app.screen.query_one("#table", DataTable).row_count == 70
-
-    # the stand-in model has no known price, so cost is unknown, never $0
-    assert cost.total()[1]
-
-
-def stage_counts(screen) -> dict[int, tuple[int, int]]:
-    """(live, cached) per stage from the Redo plan table."""
-    out = {}
-    for key in screen.query_one("#plan", DataTable).rows:
-        row = [str(c) for c in screen.query_one("#plan", DataTable).get_row(key)]
-        stage = row[0].split()[1] if row[0][0] in "▸↻◐✓" else None
-        if stage:
-            out[int(stage)] = (int(row[2]), int(row[3]))
-    return out
-
-
-async def test_prompt_edit_after_a_full_run_plan_matches_the_rerun_and_undo_restores_current():
-    from hunches import history
-    from hunches.screens.redo_plan import RedoPlanScreen
-
-    await run_all_stages()
-    assert all(kind == "current" for kind, _ in files.stage_status().values())
-    old_prompt = files.read_text("prompt.md")
-    app = HunchesApp()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        assert app.stage == 9
-        CALLS.clear()
-
-        # a new prompt: stages 5-8 are stale, 1-4 stay current, nothing was called or removed
-        history.save("prompt", "Label the item, carefully.", "user", "Prompt: edited")
-        status = files.stage_status()
-        assert [status[n][0] for n in range(1, 5)] == ["current"] * 4
-        assert [status[n] for n in range(5, 9)] == [("stale", "prompt changed")] * 4
-        assert len(files.read_jsonl("results.jsonl")) == 70  # stays until overwritten
-
-        # undo puts the old prompt back and everything is current again, with no model call;
-        # redo makes it stale again
-        history.undo("prompt")
-        assert files.read_text("prompt.md") == old_prompt
-        assert all(k == "current" for k, _ in files.stage_status().values())
-        history.redo("prompt")
-        assert files.stage_status()[5] == ("stale", "prompt changed")
-        assert CALLS == []
-
-        # the plan: every item text is new, except those that several stages share (the cache key is
-        # the text), which the later stage finds already cached
-        dev = {r.text for r in files.read_gold() if r.split == "dev"}
-        test = {r.text for r in files.read_gold() if r.split == "test"}
-        by_id = {c["id"]: c["text"] for c in files.read_jsonl("candidates.jsonl")}
-        sample = {
-            by_id[i]
-            for band in json.loads(files.read_text("threshold_sample.json") or "")[
-                "ids"
-            ]
-            for i in band
-        }
-        full = {
-            c["text"]
-            for c in files.read_jsonl("candidates.jsonl")
-            if c["max_similarity"] >= CUTOFF
-        }
-        assert (len(dev), len(test), len(full)) == (50, 50, 70)
-        live7 = len(sample - dev - test)
-        live8 = len(full - dev - test - sample)
-        want = {
-            5: (50, 0),
-            6: (50, 0),
-            7: (live7, len(sample) - live7),
-            8: (live8, 70 - live8),
-        }
-        await pilot.press("f9")
-        await pilot.pause()
-        assert isinstance(app.screen, RedoPlanScreen)
-        assert stage_counts(app.screen) == want
-        assert CALLS == []  # the plan classifies nothing
-        await pilot.press("escape")
-        await pilot.pause()
-
-        # redoing each stage calls the model exactly as often as the plan said
-        got = {}
-        app.goto_stage(5)
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        got[5] = len(CALLS)
-        assert files.stage_status()[5][0] == "stale"  # recomputed, not yet approved
-        await pilot.press("f2")
-        await pilot.pause()
-        assert app.stage == 6 and files.stage_status()[5][0] == "current"
-        CALLS.clear()
-        assert app.stage == 6
-        await pilot.press("r")  # the stale result is only re-run on request
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        got[6] = len(CALLS)
-        CALLS.clear()
-        await pilot.press("f2")
-        await pilot.pause()
-        app.goto_stage(7)
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        got[7] = len(CALLS)
-        CALLS.clear()
-        app.screen.query_one("#bands", DataTable).focus()
-        await pilot.press("down", "down", "enter", "f2")
-        await pilot.pause()
-        assert app.stage == 8
-        await pilot.click("#run-button")
-        await pilot.pause()
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        got[8] = len(CALLS)
-        assert got == {n: want[n][0] for n in want}
-        assert all(kind == "current" for kind, _ in files.stage_status().values())
-        results = files.read_jsonl("results.jsonl")
-        assert len(results) == 70
-
-        # the re-run was cache-correct: nothing is left to redo, and a second pass calls nothing
-        assert classifier.redo_plan() == []
-
-        # going back to the old prompt marks 5-8 stale again, but every call is a cache hit
-        CALLS.clear()
-        history.undo("prompt")
-        assert files.read_text("prompt.md") == old_prompt
-        plan = classifier.redo_plan()
-        assert [r["stage"] for r in plan] == [5, 6, 7, 8]
-        assert [r["live_calls"] for r in plan] == [0, 0, 0, 0]
-        assert [r["cached_calls"] for r in plan] == [50, 50, len(sample), 70]
-        assert CALLS == []
-
-
-async def test_first_run_new_project_then_open_another_from_projects(
-    tmp_path, monkeypatch
-):
-    import os
-
-    from textual.widgets import Button
-
-    from hunches.screens.system import SystemSettingsScreen
-
-    system._path().unlink()  # undo the fixture: a true first run
-    other = tmp_path / "other"
-    shutil.copytree(tmp_path / "corpus", other / "corpus")
-    (other / ".hunches").mkdir()
-    files.write_config(
-        files.Config(
-            assistant_model="a",
-            classifier_model="c",
-            corpus_dir="corpus",
-            embedding_model="m",
-        ),
-        other,
-    )
-    app = HunchesApp()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        assert isinstance(app.screen, SystemSettingsScreen)
-        app.screen.query_one("#save", Button).press()
-        await pilot.pause()
-        assert app.stage == 0 and isinstance(app.screen, ProjectsScreen)
-        await pilot.press("n")
-        await pilot.pause()
-        app.screen.query_one("#corpus", Input).value = "corpus"
-        await pilot.pause()
-        await pilot.click("#create")
-        await pilot.pause()
-        assert app.stage == 1 and Path.cwd() == tmp_path
-        system.add_project(other)
-        await pilot.press("f4")
-        await pilot.pause()
-        table = app.screen.query_one(DataTable)
-        table.move_cursor(row=[r.value for r in table.rows].index(str(other)))
-        await pilot.press("enter")
-        await pilot.pause()
-        assert app.stage == 1 and isinstance(app.screen, BriefScreen)
-        assert os.getcwd() == str(other)
-
-
-async def reach_stage_4(app, pilot):
-    """New project, brief, seeds, search, taxonomy and prompt, in one session: ends on the dev gold screen."""
-    await pilot.pause()
-    await pilot.press("n")
-    await pilot.pause()
-    app.screen.query_one("#corpus", Input).value = "corpus"
-    await pilot.pause()
-    await pilot.click("#create")
-    await pilot.pause()
-    await chat(app, pilot, brief_stream, "Find even items")
-    await approve(pilot, "#approve")
-    app.screen.embedder = StubEmbedder()
-    await pilot.click("#run")  # the first search asks nothing
-    await app.workers.wait_for_complete()
-    await pilot.pause()
-    await pilot.press("n")
-    await pilot.pause()
-    assert isinstance(app.screen, TaxonomyScreen)
-    await chat(app, pilot, taxonomy_stream, "one label, single")
-    await approve(pilot, "#approve")
-    assert app.stage == 4 and isinstance(app.screen, GoldScreen)
-
-
-async def test_pool_short_blocks_labelling_until_seeds_are_added():
-    write_corpus(
-        Path("corpus"), [0.7] * 30 + [0.3] * 10
-    )  # 30 candidates, the dev set needs 50
-    app = HunchesApp()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await reach_stage_4(app, pilot)
-        screen = app.screen
-        assert isinstance(screen, GoldScreen) and screen.pool_short
-        assert (
-            screen.pool_short["found"] == 30 and not screen.query_one("#main").display
-        )
-        await pilot.press("1", "enter")
-        await pilot.pause()
-        assert all(not r.labels for r in files.read_gold())  # nothing can be labelled
-        assert CALLS == []
-        await pilot.click("#add-seeds")  # the way out: more seeds
-        await pilot.pause()
-        assert app.stage == 1 and isinstance(app.screen, BriefScreen)
-
-
-async def test_taxonomy_version_round_trip():
-    app = HunchesApp()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await reach_stage_4(app, pilot)
-        await label_all(app, pilot, 12)
-        dev = {r.id for r in files.read_gold()}
-        assert sum(bool(r.labels) for r in files.read_gold()) == 12
-
-        # change the label names after gold rows exist: confirm, and the labelling restarts
-        await pilot.press("p")
-        await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, TaxonomyScreen)
-        await pilot.click("#edit-labels", offset=(2, 0))
-        await pilot.pause()
-        screen.query(".label-name").first(Input).value = "z"
-        await pilot.pause()
-        await pilot.press("ctrl+s")
-        await pilot.pause()
-        assert isinstance(app.screen, ConfirmScreen)
-        await pilot.click("#yes")
-        await pilot.pause()
-        assert [v["version"] for v in files.list_versions()] == [1]
-        assert [lb.name for lb in files.read_taxonomy().labels] == ["z"]
-        gold = files.read_gold()
-        assert {r.id for r in gold} == dev and all(not r.labels for r in gold)
-        archived = files.root() / "versions" / "1"
-        assert "name: a" in (archived / "taxonomy.yaml").read_text()
-        assert (
-            sum(
-                bool(json.loads(x)["labels"])
-                for x in (archived / "gold.jsonl").read_text().splitlines()
-            )
-            == 12
-        )
-
-        # relabel the same items under the new labels
-        await approve(pilot)
-        assert app.stage == 4 and isinstance(app.screen, GoldScreen)
-        await label_all(app, pilot, 50)
-        assert all(r.labels for r in files.read_gold())
-        assert CALLS == []
-
-        # restore the earlier version: the current state is archived first
-        await pilot.press("p")
-        await pilot.pause()
-        await pilot.click("#versions", offset=(2, 0))
-        await pilot.pause()
-        assert isinstance(app.screen, VersionsScreen)
-        await pilot.click("#restore-1")
-        await pilot.pause()
-        assert isinstance(app.screen, ConfirmScreen)
-        await pilot.click("#yes")
-        await pilot.pause()
-        assert [lb.name for lb in files.read_taxonomy().labels] == ["a"]
-        assert [v["version"] for v in files.list_versions()] == [1, 2]
-        assert (
-            "name: z" in (files.root() / "versions" / "2" / "taxonomy.yaml").read_text()
-        )
-        assert sum(bool(r.labels) for r in files.read_gold()) == 12
+    # 11. the evaluation log: one line per evaluate call, with the prompt of each
+    log = [json.loads(x) for x in Path(".hunches/evals.jsonl").read_text().splitlines()]
+    assert [(x["split"], x["n"]) for x in log] == [
+        ("dev", 3),
+        ("dev", 3),
+        ("dev", 3),
+        ("test", 1),
+    ]
+    assert [x["live_calls"] for x in log] == [3, 0, 3, 1]
+    assert log[0]["prompt"] == "Label the post."
+    assert log[2]["prompt"] == "Label the post. Rumours count as layoffs."
+    assert "test split evaluated 1 times (1 distinct prompts)" in repr(hn.eval_log())

@@ -1,7 +1,7 @@
 [project]
 name = "hunches"
 version = "0.1.0"
-description = "Interactive TUI toolkit for content analysis over an already-embedded corpus."
+description = "Content analysis over an already-embedded corpus, as a Python library."
 readme = "README.md"
 authors = [{ name = "Chris Hacker", email = "c.m.hacker1997@gmail.com" }]
 requires-python = ">=3.12"
@@ -11,13 +11,9 @@ requires-python = ">=3.12"
 # The full `pydantic-ai` metapackage would also work but installs all providers.
 dependencies = [
     "pydantic-ai-slim[anthropic,openai]",
-    "textual[syntax]",
     "numpy",
     "genai-prices",
     "pyyaml",
-    "python-dotenv",
-    "platformdirs>=4.12.2",
-    "keyring>=25.7.0",
 ]
 
 [project.optional-dependencies]
@@ -25,9 +21,6 @@ s3 = ["boto3"]
 pg = ["psycopg[binary]"]
 rds = ["psycopg[binary]", "boto3"]
 local = ["pydantic-ai-slim[sentence-transformers]"]
-
-[project.scripts]
-hunches = "hunches.app:main"
 
 [build-system]
 requires = ["uv_build>=0.8.17,<0.9.0"]
@@ -38,15 +31,23 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-xdist",
-    "pytest-textual-snapshot",
     "ruff",
     "ty",
     "pre-commit",
     "types-pyyaml",
+    "polars",
+    "pandas",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = "-n auto"
-markers = ["ui: drives a Textual app with Pilot (slow); pre-commit skips these, CI runs them"]
 testpaths = ["tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/**" = ["B018"]  # a notebook cell ends with the value it displays
+
+[tool.ty.src]
+# specs: design handoff files import textual, which is no longer a dependency.
+# examples: ty reads `hn.search` as the submodule `hunches.search`, which the package shadows with the function.
+exclude = ["specs", "examples"]

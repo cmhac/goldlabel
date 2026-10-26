@@ -1,5 +1,7 @@
 # 005 — pgvector backend
 
+> **Superseded by 006 for everything user-facing (the TUI is removed).** See `../006-library/spec.md`. The text below is kept as history.
+
 Status: approved by Chris 2026-10-09 (exact default, 512 MB limit, refuse `index` below 0.8.0, IAM in scope); **implemented** (tasks 01 to 13, one commit each, `005/NN`), **pending Chris's test against his RDS database** before anything is merged; the managed-service steps are in `manual-checklist.md`. Sections titled "Verified in task NN" record what implementation found and where it deviated from the first draft; where they differ from the text above them, they win. Builds on `../001-initial-version/spec.md`, `../002-onboarding-setup/spec.md`, `../003-tui-redesign/spec.md` and `../004-history-and-redo/spec.md`, all implemented. Written 2026-10-09 against `main` at `c8ebdf1`.
 
 **Read order for an implementer:** this spec → your task file in `tasks/` (`tasks/README.md` has the order and rules) → the code named under "What changes in the code".

@@ -1,0 +1,23 @@
+{
+  "models": {
+    "fake-classifier": {
+      "input_tokens": 10,
+      "output_tokens": 5,
+      "calls": 1,
+      "dollars": null
+    },
+    "fake-embed": {
+      "input_tokens": 3,
+      "output_tokens": 0,
+      "calls": 1,
+      "dollars": null
+    }
+  },
+  "timings": [
+    {
+      "label": "classify",
+      "n_items": 1,
+      "seconds": 0.05355799900007696
+    }
+  ]
+}

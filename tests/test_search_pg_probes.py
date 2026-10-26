@@ -1,6 +1,8 @@
+import importlib
+
 import pytest
 
-from hunches import search
+search = importlib.import_module("hunches.search")  # `hunches.search` is the function
 
 
 class Cur:
@@ -67,8 +69,8 @@ def test_index_mode_needs_080():
     with pytest.raises(RuntimeError) as e:
         search.require_index_mode_version((0, 6, 0), "index")
     assert str(e.value) == (
-        'pg_search = "index" needs pgvector 0.8.0 or newer (found 0.6.0). '
-        'Use pg_search = "exact", or upgrade the extension.'
+        'search="index" needs pgvector 0.8.0 or newer (found 0.6.0). '
+        'Use search="exact", or upgrade the extension.'
     )
     search.require_index_mode_version((0, 7, 9), "exact")  # no check
     search.require_index_mode_version((0, 8, 0), "index")

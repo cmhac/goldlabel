@@ -1,0 +1,4 @@
+{"id": "a1", "text": "alpha one", "labels": ["alpha"], "split": "dev"}
+{"id": "b1", "text": "beta one", "labels": ["beta"], "split": "dev"}
+{"id": "a2", "text": "alpha two", "labels": ["alpha"], "split": "test"}
+{"id": "c1", "text": "gamma one", "labels": [], "split": "test"}

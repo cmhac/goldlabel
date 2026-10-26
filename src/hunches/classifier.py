@@ -1,17 +1,36 @@
 import asyncio
+import hashlib
 import json
+import sys
 import time
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
+import warnings
+from dataclasses import asdict, dataclass, replace
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
 
+import yaml
 from pydantic import BaseModel
 from pydantic_ai import Agent, ModelRetry
-from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.exceptions import (
+    ModelAPIError,
+    ModelHTTPError,
+    UnexpectedModelBehavior,
+)
 from pydantic_ai.models import Model
 
-from hunches import candidates, cost, files
-from hunches.files import Taxonomy, all_labels, validate_labels
+from hunches import _frame, _html, _sync
+from hunches.cost import (
+    cache_get,
+    cache_key,
+    cache_put,
+    items_per_second,
+    messages_dollars,
+    per_call_dollars,
+    record,
+    record_timing,
+)
+from hunches.taxonomy import Taxonomy, all_labels, validate_labels
 
 
 @dataclass
@@ -20,6 +39,21 @@ class Prediction:
     error: str | None = None  # validation retries exhausted or the model call failed
     cached: bool = False
     reasoning: str | None = None  # None when `error` is set
+    dollars: float | None = (
+        0.0  # what this call cost; 0.0 for a cache hit, None if unpriced
+    )
+    api_error: bool = False  # `error` is a model API error (not a validation failure)
+
+
+# Stop a run after this many model API errors in a row (completion order, cache hits ignored): an
+# outage or a bad setting would otherwise fail, and bill the retries of, every remaining item.
+MAX_API_ERRORS_IN_A_ROW = 5
+# These statuses mean every item would fail the same way, so the run stops at the first one.
+FATAL_STATUSES = (401, 403)
+
+
+class CostLimit(Exception):
+    """`max_cost` would be (or was) exceeded, or cannot be honoured because the price is unknown."""
 
 
 def system_prompt(prompt: str, taxonomy: Taxonomy) -> str:
@@ -44,162 +78,439 @@ def _model_name(model: str | Model) -> str:
     return model if isinstance(model, str) else model.model_name
 
 
-def _hit(key: str) -> dict | None:
-    """The cache entry's output dict; an old-shape entry (a bare label list, no reasoning) is a miss."""
-    hit = cost.cache_get(key)
-    return (
-        hit["output"] if hit is not None and isinstance(hit["output"], dict) else None
+def _dollars(value: float | None) -> str:
+    return "?" if value is None else f"${value:.4f}"
+
+
+def _rows(items) -> list[dict]:
+    """Normalise `items`: strings (id = position), dicts with `id` and `text`, or an object with `.rows`."""
+    if hasattr(items, "rows"):
+        items = items.rows
+    return [
+        {"id": i, "text": item} if isinstance(item, str) else dict(item)
+        for i, item in enumerate(items)
+    ]
+
+
+UNKNOWN_COST = "the price is unknown, so the cost is unknown, not zero"
+PREVIEW_LINES = 12
+PRICE_UNKNOWN = (
+    "the price is unknown (no priced call recorded for this model), "
+    "so the cost is unknown, not zero"
+)
+
+
+@dataclass(frozen=True)
+class Estimate:
+    n: int
+    cached: int
+    live: int
+    dollars: float | None  # None: the price is unknown (never 0)
+    seconds: float | None  # None: no timing recorded yet
+
+    def _lines(self) -> list[str]:
+        cost = "?" if self.dollars is None else f"~${self.dollars:.4f}"
+        time = "?" if self.seconds is None else f"~{self.seconds:.0f}s"
+        return [
+            f"Estimate: {self.n} items, {self.cached} cached, {self.live} live calls",
+            f"cost {cost}, time {time}",
+        ]
+
+    def _repr_html_(self) -> str:
+        out = "".join(_html.line(x) for x in self._lines())
+        return out + (_html.warning(PRICE_UNKNOWN) if self.dollars is None else "")
+
+    def __repr__(self) -> str:
+        lines = self._lines()
+        if self.dollars is None:
+            lines.append(f"WARNING: {PRICE_UNKNOWN}")
+        return "\n".join(lines)
+
+
+@dataclass
+class Predictions:
+    """`rows` are in input order. `labels` lists each row's labels (None where the item failed)."""
+
+    rows: list[dict]
+    live: int = 0  # calls made now
+    cached: int = 0  # answered from the cache
+    resumed: int = 0  # already in `out` under this run, not asked again
+    cost: float | None = (
+        0.0  # dollars spent by the live calls; None if any price is unknown
     )
 
+    @property
+    def errors(self) -> list[dict]:
+        return [r for r in self.rows if r.get("error")]
 
-def is_cached(text: str, prompt: str, taxonomy: Taxonomy, model: str | Model) -> bool:
-    """True when `classify` would answer from the cache. Calls nothing."""
-    key = cost.cache_key(_model_name(model), system_prompt(prompt, taxonomy), text)
-    return _hit(key) is not None
+    @property
+    def labels(self) -> list[list[str] | None]:
+        return [r["labels"] for r in self.rows]
+
+    def to_polars(self):
+        return _frame.to_polars(self.rows)
+
+    def to_pandas(self):
+        return _frame.to_pandas(self.rows)
+
+    def _lines(self) -> list[str]:
+        counts = (
+            f"{len(self.rows)} items, {self.live} live, {self.cached} cached, "
+            f"{self.resumed} resumed from out, {len(self.errors)} errors"
+        )
+        return [f"Predictions: {counts}", f"cost {_dollars(self.cost)}"]
+
+    def _repr_html_(self) -> str:
+        rows = [
+            (
+                r["id"],
+                r["text"],
+                f"ERROR: {r['error']}" if r.get("error") else r["labels"],
+                r.get("reasoning"),
+            )
+            for r in self.rows
+        ]
+        out = "".join(_html.line(x) for x in self._lines())
+        if self.cost is None:
+            out += _html.warning(UNKNOWN_COST)
+        return out + _html.table(["id", "text", "labels", "reasoning"], rows)
+
+    def __repr__(self) -> str:
+        lines = self._lines()
+        if self.cost is None:
+            lines.append(f"WARNING: {UNKNOWN_COST}")
+        return "\n".join(lines)
 
 
-async def classify(
-    text: str,
-    prompt: str,
-    taxonomy: Taxonomy,
-    model: str | Model,
-    *,
-    timed: bool = True,
-) -> Prediction:
-    """Classify one text. Cache hits cost nothing and record no timing; failures are not cached."""
-    system = system_prompt(prompt, taxonomy)
-    name = _model_name(model)
-    key = cost.cache_key(name, system, text)
-    if (out := _hit(key)) is not None:
-        return Prediction(out["labels"], cached=True, reasoning=out["reasoning"])
+def _stderr_line(done: int, total: int, info: dict) -> None:
+    sys.stderr.write(
+        f"\r{done}/{total}  {info['live']} live, {info['cached']} cached, "
+        f"{info['errors']} errors, cost {_dollars(info['cost'])}"
+    )
+    if done == total:
+        sys.stderr.write("\n")
+    sys.stderr.flush()
 
-    # a Literal built at runtime from the taxonomy; the type checker can't see through it
-    label_type = Literal[tuple(all_labels(taxonomy))]  # ty: ignore[invalid-type-form]
 
-    class Classification(BaseModel):
-        reasoning: str  # declared first so the model explains before it decides
-        labels: list[label_type]
+def _reporter(progress):
+    if callable(progress):
+        return progress
+    if progress and (sys.stderr.isatty() or "ipykernel" in sys.modules):
+        return _stderr_line
+    return None
 
-    agent = Agent(model, output_type=Classification, system_prompt=system)
 
-    @agent.output_validator
-    def check(out: Classification) -> Classification:
+@dataclass(frozen=True)
+class Classifier:
+    """`cache`: a directory, None for `<settings.root>/cache`, or False for none."""
+
+    model: str | Model
+    taxonomy: Taxonomy
+    prompt: str
+    cache: object = None
+    evaluation = (
+        None  # set by `load` from evaluation.json; not a field, so `replace` drops it
+    )
+
+    def save(self, dir, evaluation=None) -> None:
+        """Write the bundle: classifier.yaml (model), taxonomy.yaml, prompt.md, and evaluation.json.
+
+        Only these files are written; anything else in `dir` is left alone. The cache location is
+        runtime, not part of the bundle.
+        """
+        dir = Path(dir)
+        dir.mkdir(parents=True, exist_ok=True)
+        (dir / "classifier.yaml").write_text(
+            yaml.safe_dump({"model": _model_name(self.model)}, sort_keys=False)
+        )
+        self.taxonomy.write(dir / "taxonomy.yaml")
+        (dir / "prompt.md").write_text(self.prompt.rstrip("\n") + "\n")
+        if evaluation is not None:
+            data = {
+                "split": evaluation.split,
+                "n": evaluation.n,
+                "score": evaluation.score(),
+                "metric": evaluation.metric,
+                "metrics": asdict(evaluation.metrics),
+                "digest": evaluation.digest,
+                "date": datetime.now(UTC).isoformat(),
+                "sources": evaluation.sources,
+            }
+            (dir / "evaluation.json").write_text(json.dumps(data, indent=2) + "\n")
+
+    @classmethod
+    def load(cls, dir, *, cache=None) -> "Classifier":
+        """Read a bundle written by `save`; warns if its recorded evaluation is for other settings."""
+        dir = Path(dir)
+        spec = yaml.safe_load((dir / "classifier.yaml").read_text())
+        clf = cls(
+            spec["model"],
+            Taxonomy.read(dir / "taxonomy.yaml"),
+            (dir / "prompt.md").read_text(),
+            cache=cache,
+        )
+        path = dir / "evaluation.json"
+        evaluation = json.loads(path.read_text()) if path.exists() else None
+        if evaluation is not None and evaluation["digest"] != clf.digest:
+            warnings.warn(
+                f"the evaluation recorded in {path} no longer matches this prompt, model and "
+                "taxonomy (the bundle was edited after it was evaluated)",
+                UserWarning,
+                stacklevel=2,
+            )
+        object.__setattr__(clf, "evaluation", evaluation)
+        return clf
+
+    def _repr_html_(self) -> str:
+        names = ", ".join(self.taxonomy.names)
+        lines = self.prompt.strip().splitlines()
+        preview = "\n".join(lines[:PREVIEW_LINES])
+        out = [
+            _html.line(
+                f"Classifier: model {_model_name(self.model)}, digest {self.digest[:12]}"
+            ),
+            _html.line(f"{self.taxonomy.mode}-label: {names}"),
+            f"<pre>{_html.esc(preview)}</pre>",
+        ]
+        if len(lines) > PREVIEW_LINES:
+            out.append(
+                _html.line(f"{len(lines) - PREVIEW_LINES} more lines in the prompt")
+            )
+        ev = self.evaluation
+        if ev is None:
+            out.append(_html.line("no evaluation recorded"))
+        else:
+            out.append(
+                _html.line(
+                    f"evaluation: {ev['metric']} {ev['score']:.4f} on {ev['split']} "
+                    f"({ev['n']} rows, {ev['date'][:10]})"
+                )
+            )
+        return "".join(out)
+
+    def with_prompt(self, text: str) -> "Classifier":
+        return replace(self, prompt=text)
+
+    def with_taxonomy(self, taxonomy: Taxonomy) -> "Classifier":
+        return replace(self, taxonomy=taxonomy)
+
+    @property
+    def digest(self) -> str:
+        """What the cache key hashes minus the item text: equal digests mean cache hits."""
+        data = [_model_name(self.model), system_prompt(self.prompt, self.taxonomy)]
+        return hashlib.sha256(json.dumps(data).encode()).hexdigest()
+
+    def _key(self, text: str) -> str:
+        system = system_prompt(self.prompt, self.taxonomy)
+        return cache_key(_model_name(self.model), system, text)
+
+    def _hit(self, text: str) -> dict | None:
+        """The cache entry's output dict; an old-shape entry (a bare label list) is a miss."""
+        hit = cache_get(self.cache, self._key(text))
+        return (
+            hit["output"]
+            if hit is not None and isinstance(hit["output"], dict)
+            else None
+        )
+
+    def estimate(self, items) -> Estimate:
+        """Count cached vs live calls and price the live ones from recorded usage. Calls no model."""
+        return self._estimate([r["text"] for r in _rows(items)])
+
+    def _estimate(self, texts: list[str]) -> Estimate:
+        cached = sum(self._hit(t) is not None for t in texts)
+        live = len(texts) - cached
+        name = _model_name(self.model)
+        if live == 0:
+            return Estimate(len(texts), cached, 0, 0.0, 0.0)
+        per_call, _ = per_call_dollars(self.cache, name)
+        rate = items_per_second(self.cache, "classify")
+        return Estimate(
+            len(texts),
+            cached,
+            live,
+            None if per_call is None else per_call * live,
+            None if rate is None else live / rate,
+        )
+
+    async def _predict(self, text: str) -> Prediction:
+        """Classify one text. Cache hits cost nothing; failures are not cached."""
+        system = system_prompt(self.prompt, self.taxonomy)
+        name = _model_name(self.model)
+        key = self._key(text)
+        taxonomy = self.taxonomy
+        if (out := self._hit(text)) is not None:
+            return Prediction(out["labels"], cached=True, reasoning=out["reasoning"])
+
+        # a Literal built at runtime from the taxonomy; the type checker can't see through it
+        label_type = Literal[tuple(all_labels(taxonomy))]  # ty: ignore[invalid-type-form]
+
+        class Classification(BaseModel):
+            reasoning: str  # declared first so the model explains before it decides
+            labels: list[label_type]
+
+        agent = Agent(self.model, output_type=Classification, system_prompt=system)
+
+        @agent.output_validator
+        def check(out: Classification) -> Classification:
+            try:
+                validate_labels(out.labels, taxonomy)
+            except ValueError as e:
+                raise ModelRetry(str(e)) from e
+            return out
+
         try:
-            validate_labels(out.labels, taxonomy)
-        except ValueError as e:
-            raise ModelRetry(str(e)) from e
-        return out
+            result = await agent.run(text)
+        except UnexpectedModelBehavior as e:
+            return Prediction(None, error=e.message)
+        except ModelAPIError as e:
+            if isinstance(e, ModelHTTPError) and e.status_code in FATAL_STATUSES:
+                raise
+            return Prediction(None, error=e.message, api_error=True)
+        usage = result.usage
+        dollars = messages_dollars(result.new_messages())
+        record(self.cache, name, usage, dollars)
+        out = result.output
+        cache_put(
+            self.cache,
+            key,
+            {"labels": list(out.labels), "reasoning": out.reasoning},
+            usage,
+        )
+        return Prediction(list(out.labels), reasoning=out.reasoning, dollars=dollars)
 
-    start = time.monotonic()
-    try:
-        result = await agent.run(text)
-    except UnexpectedModelBehavior as e:
-        return Prediction(None, error=e.message)
-    seconds = time.monotonic() - start
-    usage = result.usage
-    cost.record(name, usage, cost.messages_dollars(result.new_messages()))
-    if timed:
-        cost.record_timing("classify", 1, seconds)
-    out = result.output
-    cost.cache_put(key, {"labels": list(out.labels), "reasoning": out.reasoning}, usage)
-    return Prediction(list(out.labels), reasoning=out.reasoning)
+    def classify(self, items, **kwargs) -> Predictions:
+        """Same as `aclassify`, for scripts and notebooks (also inside a running event loop)."""
+        return _sync.run(self.aclassify(items, **kwargs))
 
+    async def aclassify(
+        self,
+        items,
+        *,
+        out=None,
+        max_cost: float | None = None,
+        concurrency: int = 8,
+        progress=True,
+    ) -> Predictions:
+        """Classify `items`; failures are returned as rows with `error`, never raised or cached.
 
-async def classify_many(
-    texts: list[str],
-    prompt: str,
-    taxonomy: Taxonomy,
-    model: str | Model,
-    *,
-    concurrency: int = 8,
-) -> AsyncIterator[tuple[int, Prediction]]:
-    """Yield (index into texts, prediction) as each finishes, so callers can write incrementally.
+        `items`: strings (id = position), dicts with `id` and `text`, or an object with `.rows`.
+        `out`: a JSONL path. Each finished item appends `{id, text, labels, reasoning, run, ...other
+        input fields}` (flushed per line); failed items are not written. Ids already there with a
+        successful row under this classifier's `digest` are skipped. Rows under another `run` are
+        classified again and the old row stays in the file, so readers must take the last row per id.
+        `max_cost`: raise `CostLimit` before starting when the estimate is over it or the price is
+        unknown; stop with `CostLimit` mid-run when live spend crosses it (finished rows are kept).
+        A model API error (HTTP 429/5xx, timeout, connection error) is an error row too, but 401/403
+        raise at once and `MAX_API_ERRORS_IN_A_ROW` of them in a row raise `ModelAPIError`; finished
+        rows are kept. `progress`: True prints one updating line on a terminal or in a notebook, False is silent,
+        a callable gets `(done, total, info)` with `info` = live, cached, errors, cost.
+        """
+        run = self.digest
+        rows = _rows(items)
+        path = Path(out) if out else None
+        done_rows: dict = {}
+        if path is not None and path.exists():
+            for line in path.read_text().splitlines():
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                if row.get("run") == run and row.get("labels") is not None:
+                    done_rows[row["id"]] = row
+        results: list[dict | None] = [done_rows.get(r["id"]) for r in rows]
+        todo = [i for i, row in enumerate(results) if row is None]
 
-    Records one wall-clock timing for the live (non-cached) items of the batch.
-    """
-    semaphore = asyncio.Semaphore(concurrency)
+        if max_cost is not None:
+            est = self._estimate([rows[i]["text"] for i in todo])
+            if est.live and est.dollars is None:
+                raise CostLimit(
+                    f"cannot honour max_cost={max_cost}: the price of "
+                    f"{_model_name(self.model)} is unknown (no priced call recorded)"
+                )
+            if est.dollars is not None and est.dollars > max_cost:
+                raise CostLimit(
+                    f"estimated cost ${est.dollars:.4f} is over max_cost={max_cost}"
+                )
 
-    async def one(i: int) -> tuple[int, Prediction]:
-        async with semaphore:
-            return i, await classify(texts[i], prompt, taxonomy, model, timed=False)
+        report = _reporter(progress)
+        counts = {"live": 0, "cached": 0, "errors": 0, "cost": 0.0}
+        semaphore = asyncio.Semaphore(concurrency)
 
-    tasks = [asyncio.create_task(one(i)) for i in range(len(texts))]
-    start = time.monotonic()
-    live = 0
-    last_live = start
-    try:
-        for finished in asyncio.as_completed(tasks):
-            i, prediction = await finished
-            if not prediction.cached:
-                live += 1
-                last_live = time.monotonic()
-            yield i, prediction
-    finally:
-        for task in tasks:
-            task.cancel()
-        if live:
-            cost.record_timing("classify", live, last_live - start)
+        async def one(i: int) -> tuple[int, Prediction]:
+            async with semaphore:
+                return i, await self._predict(rows[i]["text"])
 
-
-def redo_plan(from_stage: int = 1) -> list[dict]:
-    """One row per stale or incomplete stage: how many model calls redoing it makes live and how many
-    come from the cache, and what the live ones cost. Calls nothing.
-
-    Stages are counted in order, as a user redoing them would run them: an item an earlier stage
-    classifies live is a cache hit for a later one. Stages without model calls have None counts.
-    Dollars is None with price_unknown set when there are live calls and no known price, never 0.
-    """
-    status = files.stage_status()
-    todo = [n for n in range(1, 10) if status[n][0] in ("stale", "incomplete")]
-    if not todo:
-        return []
-    config = files.read_config()
-    taxonomy = files.read_taxonomy() if files.read_text("taxonomy.yaml") else None
-    prompt = files.read_text("prompt.md") or ""
-    gold = files.read_gold()
-    by_id = {c["id"]: c["text"] for c in files.read_jsonl("candidates.jsonl")}
-    sample = json.loads(files.read_text("threshold_sample.json") or "{}")
-    has_threshold = files.read_text("threshold.json") is not None
-    texts = {  # what each stage sends to the classifier
-        5: [r.text for r in gold if r.split == "dev" and r.labels],
-        6: [r.text for r in gold if r.split == "test" and r.labels],
-        7: [by_id[i] for band in sample.get("ids", []) for i in band if i in by_id],
-        8: [c["text"] for c in files.pending()] if has_threshold else [],
-    }
-    rows = []
-    done: set[str] = set()  # texts an earlier stage of this plan classifies live
-    for n in todo:
-        live = cached = model = None
-        if n == 2:
-            model = config.embedding_model
-            hits = [
-                cost.cache_get(cost.cache_key(model, "embed_query", seed)) is not None
-                for seed in candidates.read_seeds()
-            ]
-            live, cached = hits.count(False), hits.count(True)
-        elif n in texts and taxonomy is not None:
-            model = config.classifier_model
-            hits = [
-                t in done or is_cached(t, prompt, taxonomy, model) for t in texts[n]
-            ]
-            live, cached = hits.count(False), hits.count(True)
-            done |= {t for t, hit in zip(texts[n], hits) if not hit}
-        dollars, unknown = (0.0, False) if live == 0 else (None, False)
-        if live and model:
-            per_call, _ = cost.per_call_dollars(model)
-            dollars, unknown = (
-                (None, True) if per_call is None else (per_call * live, False)
-            )
-        if n >= from_stage:
-            rows.append(
-                {
-                    "stage": n,
-                    "status": status[n][0],
-                    "reason": status[n][1],
-                    "live_calls": live,
-                    "cached_calls": cached,
-                    "dollars": dollars,
-                    "price_unknown": unknown,
+        tasks = [asyncio.create_task(one(i)) for i in todo]
+        start = time.monotonic()
+        last_live = start
+        finished = len(rows) - len(todo)
+        api_errors = 0  # model API errors in a row
+        try:
+            for waiting in asyncio.as_completed(tasks):
+                i, prediction = await waiting
+                item = rows[i]
+                row = {
+                    "id": item["id"],
+                    "text": item["text"],
+                    "labels": prediction.labels,
+                    **(
+                        {"error": prediction.error}
+                        if prediction.error
+                        else {"reasoning": prediction.reasoning}
+                    ),
+                    "run": run,
+                    **{k: v for k, v in item.items() if k not in ("id", "text")},
                 }
-            )
-    return rows
+                results[i] = row
+                finished += 1
+                if prediction.cached:
+                    counts["cached"] += 1
+                else:
+                    counts["live"] += 1
+                    last_live = time.monotonic()
+                    if prediction.dollars is None or counts["cost"] is None:
+                        counts["cost"] = None
+                    else:
+                        counts["cost"] += prediction.dollars
+                if prediction.api_error:
+                    api_errors += 1
+                elif not prediction.cached:
+                    api_errors = 0
+                if prediction.error:
+                    counts["errors"] += 1
+                elif path is not None:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with path.open("a") as f:
+                        f.write(json.dumps(row) + "\n")
+                        f.flush()
+                if report:
+                    report(finished, len(rows), dict(counts))
+                if api_errors >= MAX_API_ERRORS_IN_A_ROW:
+                    raise ModelAPIError(
+                        _model_name(self.model),
+                        f"stopped: {api_errors} model API errors in a row; last: "
+                        f"{prediction.error}",
+                    )
+                if max_cost is not None and not prediction.cached:
+                    if counts["cost"] is None:
+                        raise CostLimit(
+                            "stopped: a live call's price is unknown, so max_cost "
+                            f"{max_cost} cannot be honoured"
+                        )
+                    if counts["cost"] > max_cost:
+                        raise CostLimit(
+                            f"stopped: spent ${counts['cost']:.4f}, over max_cost={max_cost}"
+                        )
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            if counts["live"]:
+                record_timing(self.cache, "classify", counts["live"], last_live - start)
+        return Predictions(
+            [r for r in results if r is not None],
+            live=counts["live"],
+            cached=counts["cached"],
+            resumed=len(rows) - len(todo),
+            cost=counts["cost"],
+        )

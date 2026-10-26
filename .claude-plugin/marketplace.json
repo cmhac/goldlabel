@@ -1,0 +1,17 @@
+{
+  "name": "hunches",
+  "owner": {
+    "name": "Chris Hacker"
+  },
+  "metadata": {
+    "description": "Content analysis over an already-embedded corpus: seed phrases, semantic search, an LLM classifier checked against human-labelled gold data, in a notebook or script."
+  },
+  "plugins": [
+    {
+      "name": "hunches",
+      "source": "./",
+      "description": "Content analysis over an already-embedded corpus: seed phrases, semantic search, an LLM classifier checked against human-labelled gold data, in a notebook or script.",
+      "version": "0.1.0"
+    }
+  ]
+}
