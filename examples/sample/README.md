@@ -1,15 +1,7 @@
-# Sample project
+# Sample
 
-Eight items with hand-built 2-D vectors (`corpus/`) and a ready `.hunches/config.toml`.
-
-```
-cd examples/sample
-uv run hunches
-```
-
-The UI opens on stage 1 (brief and seeds) and needs `ANTHROPIC_API_KEY` for the chat agent.
-
-The vectors are not real embeddings: `meta.json` names the made-up model `hand-built-2d`, so
-the search stage (which embeds your seed phrases with `embedding_model`) will fail until you
-point `corpus_dir` and `embedding_model` at a real embedded corpus. The automated end-to-end
-test (`tests/test_e2e.py`) uses the same kind of hand-built vectors with a stubbed embedder.
+`walkthrough.ipynb` (Jupyter, marimo, Colab) and `walkthrough.py` (the same cells with `# %%` markers)
+walk the whole chain over `corpus/`: eight short posts with hand-built 2-D vectors, not real embeddings.
+Search and the first prompt run offline; classifying needs `ANTHROPIC_API_KEY` in the environment, and
+the gold rows are labelled by a person in the labelling page. Run it from this folder; files go to
+`.hunches/` (git-ignored).

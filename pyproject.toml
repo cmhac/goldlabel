@@ -44,5 +44,10 @@ asyncio_mode = "auto"
 addopts = "-n auto"
 testpaths = ["tests"]
 
+[tool.ruff.lint.per-file-ignores]
+"examples/**" = ["B018"]  # a notebook cell ends with the value it displays
+
 [tool.ty.src]
-exclude = ["specs"]  # design handoff files import textual, which is no longer a dependency
+# specs: design handoff files import textual, which is no longer a dependency.
+# examples: ty reads `hn.search` as the submodule `hunches.search`, which the package shadows with the function.
+exclude = ["specs", "examples"]
