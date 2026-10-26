@@ -8,7 +8,7 @@
 
 **Input**: User description: "Non-search candidate sources for the hunches library: let a user build a Candidates list without semantic seed search. (1) a keyword/regex candidate list over a corpus, and (2) the whole corpus with no filtering. Today `Candidates` rows assume `max_similarity` and `best_seed`, so its repr, bands, above, top_seeds and band_sample break on rows without them; the corpus classes (LocalCorpus, S3Corpus, PgCorpus) have no plain item reader, only the search code reads items. Proposed shape (to be refined in the spec): make similarity fields optional on Candidates with plain-count fallbacks in repr/_repr_html_, record a `source` ("seeds", "keywords", "all"), and add `hn.keywords(corpus, terms, regex=False)` and `hn.everything(corpus)` with a streaming item reader for all three corpus types (pgvector tables can be larger than memory). Must keep: no I/O on import, async+sync forms, polars+pandas export, unknown cost shown as `?`, never touch gold labels, minimal implementation with no abstractions."
 
-**Review decisions (user, 2026-10-26)**: several regular expressions with their own flags, each searched separately; keyword hits ranked the way semantic hits are; a `limit` argument defaulting to no limit; one corpus per call, with merging corpora left to the user upstream and no source registry or system-wide storage; and server-side SQL filtering for pgvector as a real feature.
+**Review decisions (user, 2026-10-26)**: a corpus with no embeddings is a valid input when no semantic search is used (below);  several regular expressions with their own flags, each searched separately; keyword hits ranked the way semantic hits are; a `limit` argument defaulting to no limit; one corpus per call, with merging corpora left to the user upstream and no source registry or system-wide storage; and server-side SQL filtering for Postgres as a real feature.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -109,9 +109,9 @@ unchanged, and a file written before this feature loads as a seed-search result.
 
 ---
 
-### User Story 4 - Filter on the database server for a big pgvector table (Priority: P3)
+### User Story 4 - Filter on the database server for a big Postgres table (Priority: P3)
 
-A user whose corpus is a large pgvector table wants the database to do the keyword or regular
+A user whose corpus is a large Postgres table (with or without an embedding column) wants the database to do the keyword or regular
 expression filtering, so that only matching rows leave the server, instead of every row being
 downloaded and matched in Python.
 
@@ -124,13 +124,17 @@ returns the rows the fake answers with, ranked and limited like a local search.
 
 **Acceptance Scenarios**:
 
-1. **Given** a pgvector corpus and the server-side option, **When** a keyword search runs, **Then**
+1. **Given** a Postgres corpus and the server-side option, **When** a keyword search runs, **Then**
    one read-only statement per search is sent, only matching rows are received, and the terms
    reach the database as bound parameters.
 2. **Given** a user term containing `%`, `_`, quotes or `;`, **When** the search runs with literal
    matching, **Then** it is matched as the literal characters and cannot alter the statement.
-3. **Given** a corpus that is not a pgvector corpus, **When** the server-side option is asked for,
-   **Then** the call fails with a message saying only a pgvector corpus can filter on the server.
+3. **Given** a corpus that is not a Postgres corpus, **When** the server-side option is asked for,
+   **Then** the call fails with a message saying only a Postgres corpus can filter on the server.
+6. **Given** a Postgres table with only an id column and a text column (no embedding column, no
+   vector extension installed), **When** a keyword search or a whole-corpus request runs, **Then**
+   it works; a seed search against the same table fails with a message that says the table has no
+   embedding column to search.
 4. **Given** a regular expression with flags that the database's regular-expression language
    cannot express, **When** the server-side option is on, **Then** the call refuses and names the
    flag instead of silently matching differently. *(The flag mapping is the second open question.)*
@@ -141,7 +145,7 @@ returns the rows the fake answers with, ranked and limited like a local search.
 
 ### User Story 5 - Big remote corpora do not need to fit in memory to be keyword-searched (Priority: P3)
 
-A user with a corpus in a pgvector table or an S3 Vectors index, larger than memory, wants a
+A user with a corpus in a Postgres table or an S3 Vectors index, larger than memory, wants a
 keyword list from it. Only the matching items, or only the best `limit` of them, are kept.
 
 **Why this priority**: a local corpus covers the main need; the read-only remote readers are the
@@ -153,12 +157,12 @@ holds more than one batch of unmatched items plus the kept matches.
 
 **Acceptance Scenarios**:
 
-1. **Given** a pgvector or S3 corpus, **When** a keyword search runs without the server-side
+1. **Given** a Postgres or S3 corpus, **When** a keyword search runs without the server-side
    option, **Then** every item is read once, only matches are kept, and nothing is written to the
    database or the bucket.
 2. **Given** a limit of N, **When** a keyword search runs, **Then** the library never holds more
    than N ranked matches at a time.
-3. **Given** a pgvector corpus and a request for the whole corpus, **When** the table is larger than
+3. **Given** a Postgres corpus and a request for the whole corpus, **When** the table is larger than
    the corpus's own result-size limit, **Then** the call refuses with a message that names the
    limit instead of exhausting memory.
 
@@ -175,8 +179,13 @@ holds more than one batch of unmatched items plus the kept matches.
 - Items with the same text but different ids stay separate rows; ids are never merged.
 - Text that contains regular-expression characters is matched literally when the term is a plain
   string and the regex option is off.
-- A corpus whose item file and vector file disagree in length: whole-corpus and keyword reads do not
-  use vectors, so they do not fail on it (a seed search still does).
+- A corpus with no embeddings at all is valid for whole-corpus and keyword calls: a local folder
+  with only `items.jsonl` (no `vectors.npy`, no `meta.json`), or a Postgres table with no embedding
+  column. These calls never read vectors, so a missing or mismatched vector file or column does not
+  fail them (a seed search still does, with a message naming what is missing).
+- Postgres rows have no inherent order, so "the corpus's own order" for a Postgres table is ascending
+  by its id column. This is what makes server-side and Python-side results comparable and a limit
+  repeatable.
 - Whole-corpus and keyword lists use no embedder, so they record no embedding model and ask for
   none; a later classification is estimated and capped by `max_cost` exactly as before, and an
   unknown price still shows as `?`.
@@ -195,7 +204,8 @@ holds more than one batch of unmatched items plus the kept matches.
 ### Functional Requirements
 
 - **FR-001**: Users MUST be able to get a candidate list holding every item of a local, S3 or
-  pgvector corpus, without seeds, an embedder or a cutoff.
+  Postgres corpus, without seeds, an embedder or a cutoff, and MUST NOT need embeddings to do so
+  where the storage allows it (local and Postgres; an S3 Vectors index always holds vectors).
 - **FR-002**: Users MUST be able to get a candidate list of the items that match any of a list of
   terms. A term is a plain string (matched as literal text without regard to case, unless the
   regex option is on) or a compiled regular expression (always matched as a pattern, carrying its
@@ -209,17 +219,18 @@ holds more than one batch of unmatched items plus the kept matches.
 - **FR-005**: Both calls MUST accept a `limit` (default none, meaning no limit). A limit keeps the
   best-ranked items for keywords, and the first items in corpus order for the whole corpus. A limit
   below one MUST be refused.
-- **FR-006**: Users MUST be able to ask a pgvector corpus to do the matching on the database
+- **FR-006**: Users MUST be able to ask a Postgres corpus to do the matching on the database
   server with an option on the keyword call. The statement MUST be read-only, MUST pass every user
   term as a bound parameter and every identifier through the existing identifier quoting, and MUST
   return the same ids in the same order as the Python-side match for plain-text terms. Asking for
-  it on a non-pgvector corpus MUST fail with a clear message. [NEEDS CLARIFICATION: how regular
+  it on a non-Postgres corpus MUST fail with a clear message. [NEEDS CLARIFICATION: how regular
   expressions and their flags behave server-side; see question 2.]
 - **FR-007**: Both calls MUST have an async and a sync form, the sync form working inside a running
   notebook event loop, and both MUST write the result like a seed search does (`out`: default
   location, a path, or nothing).
 - **FR-008**: Every candidate MUST keep its corpus `id` and `text`; each item MUST appear at most
-  once; whole-corpus order MUST be the corpus's own order.
+  once; whole-corpus order MUST be the corpus's own order (file order for a local corpus, ascending
+  id for a Postgres table).
 - **FR-009**: A candidate list MUST record how it was built: from seeds, from keywords or from the
   whole corpus, and this MUST survive writing and reading the file.
 - **FR-010**: A list not built from seeds MUST NOT carry a similarity or a best seed, and MUST NOT
@@ -235,9 +246,9 @@ holds more than one batch of unmatched items plus the kept matches.
 - **FR-013**: Candidate files written before this feature (no recorded source) MUST load as
   seed-search results with identical behaviour.
 - **FR-014**: Reading a corpus for these calls MUST be read-only (no write to the database,
-  bucket or corpus files). Without the server-side option, keyword searches over pgvector and S3
+  bucket or corpus files). Without the server-side option, keyword searches over Postgres and S3
   MUST hold no more than one batch of unmatched items at a time, plus the kept matches (at most
-  `limit` of them when a limit is given). A whole-corpus pgvector request that exceeds the corpus's
+  `limit` of them when a limit is given). A whole-corpus Postgres request that exceeds the corpus's
   own result-size limit MUST be refused.
 - **FR-015**: The feature MUST NOT write, infer or suggest a gold label, and MUST NOT add any way
   to set one.
@@ -247,6 +258,10 @@ holds more than one batch of unmatched items plus the kept matches.
   and the README MUST describe the new calls and when to prefer seeds, keywords or the whole
   corpus; the existing drift tests MUST keep passing.
 - **FR-018**: Importing the library MUST still do no I/O and import no optional dependency.
+- **FR-019**: A seed search against a corpus that has no embeddings MUST fail with a message that
+  names what is missing (the vector file, its metadata, or the embedding column). The text of the
+  documentation and the agent instructions MUST stop describing hunches as working only over an
+  already-embedded corpus.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -254,9 +269,10 @@ holds more than one batch of unmatched items plus the kept matches.
   from seeds also carries, per item, its best similarity and the seed that won it, plus the cutoff
   and embedding model. A list built from keywords carries, per item, its rank value. A list built
   from the whole corpus carries neither. Every list records its source.
-- **Corpus**: the existing local, S3 and pgvector descriptors. This feature adds one thing they
-  lack: a way to read their items one batch at a time, without vectors, and, for pgvector, a way to
-  have the server do the matching.
+- **Corpus**: the existing local, S3 and Postgres descriptors. This feature adds one thing they
+  lack: a way to read their items one batch at a time, without vectors, and, for Postgres, a way to
+  have the server do the matching. A local or Postgres corpus is valid without embeddings; the
+  Postgres corpus descriptor keeps its name, and its embedding column is only used by seed search.
 - **Term**: a plain string or a compiled regular expression with its own flags.
 
 ## Deliberately skipped *(Ponytail)*
@@ -270,6 +286,11 @@ holds more than one batch of unmatched items plus the kept matches.
   upstream of the library.
 - A registry of sources, saved connections or any system-wide storage.
 - Server-side filtering for S3 Vectors or a local corpus; S3 Vectors metadata filters.
+- A non-vector S3 corpus (plain objects or a different store): an S3 Vectors index is the only S3
+  kind.
+- Renaming `PgCorpus` or adding a second Postgres descriptor for tables without embeddings; and
+  reworking `PgCorpus.check`, which keeps reporting on the vector setup (its use on a table with no
+  embedding column is noted in the docs, not redesigned).
 - Server-side ranking or limiting: the database only filters; ranking and limit are applied in the
   library so that both backends rank alike.
 - Reading or writing vectors, or re-embedding, in the new calls.
@@ -293,6 +314,9 @@ holds more than one batch of unmatched items plus the kept matches.
 - **SC-006**: A keyword search over a stubbed remote corpus of at least ten times the batch size
   returns only the matching rows and issues no write; with a limit it never holds more than that
   many ranked matches.
+- **SC-008**: A local corpus folder containing only `items.jsonl`, and a stubbed Postgres table
+  with only id and text columns, each produce a keyword list and a whole-corpus list with no error
+  and no read of a vector.
 - **SC-007**: On a fixture of plain-text terms, the server-side and Python-side searches return
   identical ids in identical order; no user term appears inside the statement text.
 
@@ -303,7 +327,7 @@ holds more than one batch of unmatched items plus the kept matches.
 - **Regular expressions**: compiled patterns are the way to give a term its own flags; the regex
   option applies to plain strings and gives them no flags (inline flags written in the pattern
   still work). Flag behaviour is Python's for the Python-side search.
-- **Scope**: the whole-corpus list is held in memory like every other candidate list. For pgvector
+- **Scope**: the whole-corpus list is held in memory like every other candidate list. For Postgres
   the existing result-size limit is the guard; a truly larger-than-memory whole-corpus
   classification is out of scope (keyword-filter, limit or sample first).
 - **S3 Vectors**: the corpus's text is read from item metadata the same way a search reads it, and
