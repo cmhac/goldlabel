@@ -380,6 +380,7 @@ def test_only_import_rows_can_set_a_label():
     assert not {n for n in dir(GoldSet) if not n.startswith("_")} - {
         "rows",
         "name",
+        "path",
         "counts",
     }
 

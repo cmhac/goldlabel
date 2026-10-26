@@ -2,6 +2,7 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -38,6 +39,9 @@ class GoldSet:
 
     rows: list[GoldRow]
     name: str = "all"
+    path: Path | None = (
+        None  # the gold file a view of `Gold` came from (the evaluation log records it)
+    )
 
     def __len__(self) -> int:
         return len(self.rows)
@@ -96,22 +100,26 @@ class Gold:
     @property
     def dev(self) -> GoldSet:
         return GoldSet(
-            [r for r in self._read() if r.labels and r.split == "dev"], "dev"
+            [r for r in self._read() if r.labels and r.split == "dev"],
+            "dev",
+            self.path,
         )
 
     @property
     def test(self) -> GoldSet:
         return GoldSet(
-            [r for r in self._read() if r.labels and r.split == "test"], "test"
+            [r for r in self._read() if r.labels and r.split == "test"],
+            "test",
+            self.path,
         )
 
     @property
     def pending(self) -> GoldSet:
-        return GoldSet([r for r in self._read() if not r.labels], "pending")
+        return GoldSet([r for r in self._read() if not r.labels], "pending", self.path)
 
     @property
     def all(self) -> GoldSet:
-        return GoldSet(self._read(), "all")
+        return GoldSet(self._read(), "all", self.path)
 
     def draw(self, candidates, n: int = 50, split: str = "dev", seed=None) -> GoldSet:
         """Append `n` pending rows (`labels=None`) not already anywhere in the file."""
