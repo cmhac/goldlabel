@@ -70,11 +70,11 @@ async def test_second_run_identical_and_free():
     embedder = StubEmbedder({"alpha": [1, 0], "beta": [0, 1]})
     await candidates.build_candidates(embedder)
     first = (files.root() / "candidates.jsonl").read_text()
-    spent = cost.breakdown()["m"]
+    spent = cost.breakdown(None)["m"]
     assert embedder.calls == 2 and spent["calls"] == 2
     await candidates.build_candidates(embedder)
     assert (files.root() / "candidates.jsonl").read_text() == first
-    assert embedder.calls == 2 and cost.breakdown()["m"] == spent
+    assert embedder.calls == 2 and cost.breakdown(None)["m"] == spent
 
 
 @pytest.mark.parametrize(

@@ -45,7 +45,7 @@ def _model_name(model: str | Model) -> str:
 
 def _hit(key: str) -> dict | None:
     """The cache entry's output dict; an old-shape entry (a bare label list, no reasoning) is a miss."""
-    hit = cost.cache_get(key)
+    hit = cost.cache_get(None, key)
     return (
         hit["output"] if hit is not None and isinstance(hit["output"], dict) else None
     )
@@ -96,11 +96,13 @@ async def classify(
         return Prediction(None, error=e.message)
     seconds = time.monotonic() - start
     usage = result.usage
-    cost.record(name, usage, cost.messages_dollars(result.new_messages()))
+    cost.record(None, name, usage, cost.messages_dollars(result.new_messages()))
     if timed:
-        cost.record_timing("classify", 1, seconds)
+        cost.record_timing(None, "classify", 1, seconds)
     out = result.output
-    cost.cache_put(key, {"labels": list(out.labels), "reasoning": out.reasoning}, usage)
+    cost.cache_put(
+        None, key, {"labels": list(out.labels), "reasoning": out.reasoning}, usage
+    )
     return Prediction(list(out.labels), reasoning=out.reasoning)
 
 
@@ -137,4 +139,4 @@ async def classify_many(
         for task in tasks:
             task.cancel()
         if live:
-            cost.record_timing("classify", live, last_live - start)
+            cost.record_timing(None, "classify", live, last_live - start)

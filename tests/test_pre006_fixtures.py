@@ -77,13 +77,11 @@ def test_cache_and_cost_are_well_formed(project, expected):
     cls, emb = expected["classification"], expected["seed_embedding"]
     names = sorted(p.stem for p in (project / ".hunches" / "cache").glob("*.json"))
     assert names == sorted([cls["cache_key"], emb["cache_key"]])
-    spent = cost.breakdown()
-    assert set(spent) == {"fake-classifier", "fake-embed"}
-    assert spent["fake-classifier"]["calls"] == 1
-    assert spent["fake-embed"]["calls"] == 1
+    # the pre-006 .hunches/cost.json is not read; the ledger now lives in the cache directory
+    assert cost.breakdown(None) == {}
     emb_entry, cls_entry = (
-        cost.cache_get(emb["cache_key"]),
-        cost.cache_get(cls["cache_key"]),
+        cost.cache_get(None, emb["cache_key"]),
+        cost.cache_get(None, cls["cache_key"]),
     )
     assert emb_entry is not None and cls_entry is not None
     assert emb_entry["output"] == emb["vector"]

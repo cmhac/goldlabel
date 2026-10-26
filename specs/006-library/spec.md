@@ -158,6 +158,8 @@ Classifies ~`per_band` random items per similarity band; reports the off-topic r
 
 `hn.cost(cache=None)` returns the running total and per-model breakdown from the ledger in the cache directory; any unknown price makes the total `?` with a warning. Classification and embedding calls record to it; cache hits record nothing.
 
+Implemented in task 04 (`cost.py`): every function takes `cache` first: a directory, `None` for the default `<settings.root>/cache`, or `False` for no cache (reads return nothing, writes do nothing). The ledger is `<cache>/cost.json`, written atomically (temp file + `os.replace`) under a process-wide lock, so threads lose no update; two *processes* sharing one cache directory can still lose a ledger update (cache entries are unaffected). A pre-006 `<root>/cost.json` is not read. `hn.cost` is the function `hunches.cost.cost`; its public export in `__init__` (task 11) shadows the submodule name `hunches.cost`, so code inside the package imports `from hunches.cost import ...` by name from then on.
+
 ## The labelling web page
 
 Started only by `hn.label`. Requirements:

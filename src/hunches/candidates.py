@@ -46,14 +46,14 @@ async def embed_seeds(
     vectors = []
     for seed in seeds:
         key = cache_key(model, "embed_query", seed)
-        hit = cache_get(key)
+        hit = cache_get(None, key)
         if hit:
             vectors.append(hit["output"])
             continue
         result = await embedder.embed_query(seed)
         vector = [float(x) for x in result.embeddings[0]]
-        cache_put(key, vector, result.usage)
-        record(model, result.usage, embedding_dollars(result))
+        cache_put(None, key, vector, result.usage)
+        record(None, model, result.usage, embedding_dollars(result))
         vectors.append(vector)
     return vectors
 

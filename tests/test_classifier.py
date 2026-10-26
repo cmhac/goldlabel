@@ -7,6 +7,7 @@ from pydantic_ai.usage import RequestUsage
 from hunches import cost
 from hunches.classifier import classify, classify_many, is_cached, system_prompt
 from hunches.files import Label, Taxonomy
+from hunches.settings import settings
 
 
 @pytest.fixture(autouse=True)
@@ -70,19 +71,19 @@ async def test_gives_up_with_recorded_error_not_crash():
     )
     p = await classify("text", "prompt", taxonomy(), model)
     assert p.labels is None and p.error
-    assert not list((cost.root() / "cache").glob("*.json"))
+    assert not list((settings.root / "cache").glob("*.json"))
 
 
 async def test_second_identical_call_is_cache_hit_with_no_added_cost():
     model, calls = scripted(["a"])
     first = await classify("text", "prompt", taxonomy(), model)
-    snapshot = (cost.breakdown(), cost.items_per_second())
+    snapshot = (cost.breakdown(None), cost.items_per_second(None))
     second = await classify("text", "prompt", taxonomy(), model)
     assert second.labels == first.labels == ["a"]
     assert second.cached and not first.cached
     assert len(calls) == 1
-    assert (cost.breakdown(), cost.items_per_second()) == snapshot
-    assert next(iter(cost.breakdown().values()))["calls"] == 1
+    assert (cost.breakdown(None), cost.items_per_second(None)) == snapshot
+    assert next(iter(cost.breakdown(None).values()))["calls"] == 1
 
 
 async def test_prompt_change_misses_cache():
@@ -122,12 +123,12 @@ async def test_classify_many_yields_all_and_records_one_timing():
     }
     assert sorted(got) == [0, 1, 2, 3]
     assert all(p.labels == ["a"] for p in got.values())
-    assert cost.items_per_second("classify") is not None
+    assert cost.items_per_second(None, "classify") is not None
     # second pass is all cache hits: no further timing rows
-    rows = len(cost._read()["timings"])
+    rows = len(cost._read(None)["timings"])
     again = [i async for i, _ in classify_many(texts, "prompt", taxonomy(), model)]
     assert sorted(again) == [0, 1, 2, 3]
-    assert len(cost._read()["timings"]) == rows
+    assert len(cost._read(None)["timings"]) == rows
 
 
 async def test_reasoning_returned_live_and_on_cache_hit():
@@ -151,10 +152,10 @@ async def test_old_shape_cache_entry_is_a_miss_and_replaced():
     model, calls = scripted(["a"])
     key = cost.cache_key(model.model_name, system_prompt("prompt", tax), "text")
     usage = RequestUsage(input_tokens=1, output_tokens=1)
-    cost.cache_put(key, ["b"], usage)
+    cost.cache_put(None, key, ["b"], usage)
     p = await classify("text", "prompt", tax, model)
     assert p.labels == ["a"] and not p.cached and len(calls) == 1
-    hit = cost.cache_get(key)
+    hit = cost.cache_get(None, key)
     assert hit is not None
     assert hit["output"] == {"labels": ["a"], "reasoning": "because"}
 
@@ -193,6 +194,7 @@ async def test_is_cached_follows_classify_and_calls_nothing():
 def test_is_cached_old_list_shape_is_a_miss():
     tax = taxonomy()
     cost.cache_put(
+        None,
         cost.cache_key("m", system_prompt("p", tax), "t"),
         ["a"],
         RequestUsage(input_tokens=1, output_tokens=1),
