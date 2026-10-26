@@ -1,0 +1,15 @@
+{
+  "name": "hunches",
+  "version": "0.1.0",
+  "description": "Content analysis over an already-embedded corpus: seed phrases, semantic search, an LLM classifier checked against human-labelled gold data, in a notebook or script.",
+  "author": {
+    "name": "Chris Hacker"
+  },
+  "repository": "https://github.com/cmhac/hunches",
+  "keywords": [
+    "content-analysis",
+    "classification",
+    "embeddings",
+    "notebook"
+  ]
+}
