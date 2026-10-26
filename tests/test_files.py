@@ -2,14 +2,8 @@ import pytest
 from pydantic import ValidationError
 
 from hunches import files
-from hunches.files import (
-    Config,
-    GoldRow,
-    Label,
-    Taxonomy,
-    all_labels,
-    validate_labels,
-)
+from hunches.files import Config, GoldRow
+from hunches.taxonomy import Label, Taxonomy
 
 
 @pytest.fixture(autouse=True)
@@ -86,19 +80,13 @@ def test_text_files_round_trip():
         assert files.read_text(name) == f"content of {name}\n"
 
 
-def test_taxonomy_round_trip_and_all_labels():
+def test_taxonomy_round_trip_through_the_files_wrappers():
     tax = Taxonomy(
         mode="multi", labels=[Label(name="a", description="A: thing"), Label(name="b")]
     )
     files.write_text("placeholder", "")
     files.write_taxonomy(tax)
     assert files.read_taxonomy() == tax
-    assert all_labels(tax) == ["a", "b", "off_topic"]
-
-
-def test_taxonomy_rejects_off_topic():
-    with pytest.raises(ValidationError):
-        Taxonomy(mode="single", labels=[Label(name="off_topic")])
 
 
 def test_gold_round_trip():
@@ -108,28 +96,6 @@ def test_gold_round_trip():
     ]
     files.write_gold(rows)
     assert files.read_gold() == rows
-
-
-SINGLE = Taxonomy(mode="single", labels=[Label(name="a"), Label(name="b")])
-MULTI = Taxonomy(mode="multi", labels=[Label(name="a"), Label(name="b")])
-
-
-@pytest.mark.parametrize("tax", [SINGLE, MULTI])
-def test_validate_labels_rules_both_modes(tax):
-    validate_labels(["a"], tax)
-    validate_labels(["off_topic"], tax)
-    with pytest.raises(ValueError, match="at least one"):
-        validate_labels([], tax)
-    with pytest.raises(ValueError, match="unknown"):
-        validate_labels(["zzz"], tax)
-    with pytest.raises(ValueError, match="only label"):
-        validate_labels(["a", "off_topic"], tax)
-
-
-def test_validate_labels_mode_specific():
-    with pytest.raises(ValueError, match="exactly one"):
-        validate_labels(["a", "b"], SINGLE)
-    validate_labels(["a", "b"], MULTI)
 
 
 def test_models_have_no_default_so_system_settings_is_the_only_source():

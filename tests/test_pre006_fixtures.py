@@ -41,7 +41,7 @@ def test_files_are_well_formed(project):
     taxonomy = files.read_taxonomy()
     assert taxonomy.mode == "multi"
     assert [label.name for label in taxonomy.labels] == ["alpha", "beta"]
-    assert candidates.read_seeds() == ["alpha seed"]
+    assert candidates.read_seeds(".hunches/seeds.csv") == ["alpha seed"]
     assert files.read_text("prompt.md") == "Classify the item.\n"
     meta = json.loads((project / ".hunches" / "candidates.meta.json").read_text())
     assert meta == {

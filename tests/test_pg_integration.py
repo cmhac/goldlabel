@@ -16,8 +16,11 @@ from typing import Any
 
 import numpy as np
 import pytest
+from pydantic_ai import Embedder
+from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
+from pydantic_ai.usage import RequestUsage
 
-from hunches import candidates, files, search
+from hunches import candidates, search
 from hunches.search import LocalCorpus, PgCorpus
 
 psycopg = pytest.importorskip("psycopg")
@@ -90,28 +93,24 @@ def project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HUNCHES_PG_URL", URL or "")
 
-    def use(**fields) -> Any:
-        """Write config.toml (build_candidates still reads it) and return the corpus."""
-        base = {
-            "classifier_model": "anthropic:claude-haiku-4-5",
-            "embedding_model": "m",
-            "backend": "pgvector",
-            **fields,
-        }
-        files.write_config(files.Config.model_validate(base))
-        if base["backend"] == "local":
-            return LocalCorpus(base["corpus_dir"])
-        names = {
-            k.removeprefix("pg_"): v for k, v in fields.items() if k.startswith("pg_")
-        }
-        return PgCorpus(**names)
+    last: list = []
 
+    def use(**fields) -> Any:
+        """The corpus: a PgCorpus (pg_* fields, minus the prefix) or a LocalCorpus."""
+        if fields.get("backend") == "local":
+            last[:] = [LocalCorpus(fields["corpus_dir"])]
+        else:
+            names = {k.removeprefix("pg_"): v for k, v in fields.items()}
+            last[:] = [PgCorpus(**names)]
+        return last[0]
+
+    use.last = last  # ty: ignore[unresolved-attribute]
     return use
 
 
-def pg_check():
-    """PgCorpus.check() of the pgvector corpus the current config.toml describes."""
-    pg = candidates.corpus_from_config(files.read_config())
+def pg_check(project):
+    """PgCorpus.check() of the pgvector corpus `project(...)` last returned."""
+    pg = project.last[0]
     assert isinstance(pg, PgCorpus)
     return pg.check()
 
@@ -207,17 +206,30 @@ def local_corpus(tmp_path, ids, vectors):
     return folder
 
 
-async def run_candidates(monkeypatch, seeds, project_corpus) -> dict[str, dict]:
-    """build_candidates for the project `corpus` was made for; candidates.jsonl rows by id."""
-    files.write_text("seeds.csv", "seed\n" + "\n".join(SEED_TEXTS) + "\n")
+class VectorEmbedder(Embedder):
+    """Answers the i-th seed text with the i-th hand-built vector."""
 
-    async def embed(_seeds, embedder=None):
-        return [[float(x) for x in v] for v in seeds]
+    def __init__(self, vectors):
+        super().__init__(TestEmbeddingModel("m"))
+        self.by_text = dict(zip(SEED_TEXTS, vectors))
 
-    monkeypatch.setattr(candidates, "embed_seeds", embed)
-    await candidates.build_candidates()
-    text = (files.root() / "candidates.jsonl").read_text()
-    return {r["id"]: r for r in map(json.loads, text.splitlines())}
+    async def embed_query(self, query, *, settings=None):
+        return EmbeddingResult(
+            [[float(x) for x in self.by_text[query]]],
+            inputs=[query],
+            input_type="query",
+            model_name="m",
+            provider_name="test",
+            usage=RequestUsage(input_tokens=1),
+        )
+
+
+async def run_candidates(monkeypatch, seeds, corpus) -> dict[str, dict]:
+    """search() over `corpus`; the candidate rows by id."""
+    found = await candidates.asearch(
+        corpus, SEED_TEXTS, embedder=VectorEmbedder(seeds), out=False, cache=False
+    )
+    return {r["id"]: r for r in found.rows}
 
 
 def assert_same(got, want, tol=1e-5, boundary=None):
@@ -338,7 +350,7 @@ async def test_partitioned_table(admin, schema, project, tmp_path, monkeypatch):
     vectors, seeds = corpus()
     ids = make_table(admin, schema, "docs", vectors, partitioned=True)
     await compare(tmp_path, project, monkeypatch, schema, "docs", ids, vectors, seeds)
-    report = pg_check()
+    report = pg_check(project)
     assert report["errors"] == {}
     assert (report["type"], report["dimension"]) == ("vector", D)
 
@@ -350,7 +362,7 @@ async def test_view(admin, schema, project, tmp_path, monkeypatch):
         f"CREATE VIEW {schema}.docs AS SELECT id, text, embedding FROM {schema}.base"
     )
     await compare(tmp_path, project, monkeypatch, schema, "docs", ids, vectors, seeds)
-    report = pg_check()
+    report = pg_check(project)
     assert report["errors"] == {}
     assert report["sample"] is not None
 
@@ -370,7 +382,7 @@ async def test_extension_in_a_non_default_schema(
         assert db.execute("SHOW search_path").fetchone()[0] == '"$user", public'
         ids = [r[0] for r in db.execute("SELECT id FROM hn.docs ORDER BY id")]
     await compare(tmp_path, project, monkeypatch, "hn", "docs", ids, vectors, seeds)
-    report = pg_check()
+    report = pg_check(project)
     assert report["schema"] == "extensions"
 
 

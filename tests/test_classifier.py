@@ -6,8 +6,8 @@ from pydantic_ai.usage import RequestUsage
 
 from hunches import cost
 from hunches.classifier import classify, classify_many, is_cached, system_prompt
-from hunches.files import Label, Taxonomy
 from hunches.settings import settings
+from hunches.taxonomy import Label, Taxonomy
 
 
 @pytest.fixture(autouse=True)

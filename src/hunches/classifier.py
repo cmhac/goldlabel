@@ -10,7 +10,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.models import Model
 
 from hunches import cost
-from hunches.files import Taxonomy, all_labels, validate_labels
+from hunches.taxonomy import Taxonomy, all_labels, validate_labels
 
 
 @dataclass

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from hunches.files import Taxonomy
+from hunches.taxonomy import Taxonomy
 
 
 @dataclass

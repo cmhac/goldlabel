@@ -5,9 +5,10 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, model_validator
 
-OFF_TOPIC = "off_topic"
+from hunches.taxonomy import Taxonomy
+
 SAMPLE_SIZE = 50  # gold rows per split (spec stages 4 and 6)
 
 
@@ -65,23 +66,6 @@ def pg_setting(config: Config, name: str):
     """A pg_* config field with its default applied (a stored 0 stays 0)."""
     value = getattr(config, name)
     return PG_DEFAULTS.get(name) if value is None else value
-
-
-class Label(BaseModel):
-    name: str
-    description: str = ""
-
-
-class Taxonomy(BaseModel):
-    mode: Literal["single", "multi"]
-    labels: list[Label]
-
-    @field_validator("labels")
-    @classmethod
-    def _no_off_topic(cls, labels: list[Label]) -> list[Label]:
-        if any(label.name == OFF_TOPIC for label in labels):
-            raise ValueError(f"'{OFF_TOPIC}' is built in; do not list it")
-        return labels
 
 
 class GoldRow(BaseModel):
@@ -183,34 +167,11 @@ def append_jsonl(name: str, row: dict) -> None:
 
 
 def read_taxonomy() -> Taxonomy:
-    return Taxonomy.model_validate(
-        yaml.safe_load((root() / "taxonomy.yaml").read_text())
-    )
-
-
-def taxonomy_yaml(taxonomy: Taxonomy) -> str:
-    return yaml.safe_dump(taxonomy.model_dump(), sort_keys=False)
+    return Taxonomy.read(root() / "taxonomy.yaml")
 
 
 def write_taxonomy(taxonomy: Taxonomy) -> None:
-    write_text("taxonomy.yaml", taxonomy_yaml(taxonomy))
-
-
-def all_labels(taxonomy: Taxonomy) -> list[str]:
-    return [label.name for label in taxonomy.labels] + [OFF_TOPIC]
-
-
-def validate_labels(labels: list[str], taxonomy: Taxonomy) -> None:
-    """Raise ValueError unless labels obey the spec rules (gold and predicted alike)."""
-    if not labels:
-        raise ValueError("at least one label is required")
-    unknown = set(labels) - set(all_labels(taxonomy))
-    if unknown:
-        raise ValueError(f"unknown labels: {sorted(unknown)}")
-    if OFF_TOPIC in labels and len(set(labels)) > 1:
-        raise ValueError(f"'{OFF_TOPIC}' must be the only label")
-    if taxonomy.mode == "single" and len(labels) != 1:
-        raise ValueError("single mode requires exactly one label")
+    taxonomy.write(ensure_root() / "taxonomy.yaml")
 
 
 def read_gold() -> list[GoldRow]:
