@@ -2,7 +2,8 @@ import threading
 
 import pytest
 
-from hunches import files, keys, search, system
+from hunches import search
+from hunches.search import PgCorpus
 
 EXT_VERSION = ("0.8.1", "extensions")
 MB = 1024 * 1024
@@ -63,34 +64,17 @@ def conn_for(step1, step2, rows=None, width=None):
 
 
 def setup(monkeypatch, conn, limit_mb=None):
-    files.write_config(
-        files.Config.model_validate(
-            {
-                "classifier_model": "anthropic:claude-haiku-4-5",
-                "backend": "pgvector",
-                "embedding_model": "m",
-                "pg_table": "public.docs",
-            }
-        )
+    corpus = PgCorpus(
+        "public.docs", max_result_mb=512 if limit_mb is None else limit_mb
     )
-    if limit_mb is not None:
-        system.write_system(
-            system.System(
-                provider="anthropic",
-                assistant_model="a",
-                classifier_model="c",
-                pg_max_result_mb=limit_mb,
-            )
-        )
-    monkeypatch.setattr(search, "pg_connect", lambda config: conn)
+    monkeypatch.setattr(search, "pg_connect", lambda corpus: conn)
+    return corpus
 
 
 @pytest.fixture(autouse=True)
 def project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("HUNCHES_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("HUNCHES_PG_URL", raising=False)
-    monkeypatch.setattr(keys, "_stored", lambda var: None)
 
 
 def scans(conn):
@@ -100,13 +84,13 @@ def scans(conn):
 def test_preflight_refuses_before_any_scan(monkeypatch):
     # 30 seeds x 10,000 hits x (2048 + 128) bytes = 652,800,000 bytes = 622.56 MiB
     conn = conn_for([], [], rows=1000, width=2048)
-    setup(monkeypatch, conn)
+    corpus = setup(monkeypatch, conn)
     with pytest.raises(RuntimeError) as e:
-        search.search_pg_exact([[1.0, 0, 0]] * 30, 0.3)
+        search.search_pg_exact(corpus, [[1.0, 0, 0]] * 30, 0.3)
     assert str(e.value) == (
         "Search could return up to ~623 MB (30 seeds × 10,000 hits × ~2176 bytes) "
         "which exceeds the result limit of 512 MB. Use fewer seeds or raise the limit "
-        "in System settings (F5)."
+        "in PgCorpus(max_result_mb=...)."
     )
     assert scans(conn) == [] and len(conn.executed) == 4
     assert conn.closed and conn.cancels == 0
@@ -115,35 +99,35 @@ def test_preflight_refuses_before_any_scan(monkeypatch):
 def test_preflight_passes_when_the_worst_case_fits(monkeypatch):
     # 10 seeds x 10,000 x 2176 = 217,600,000 bytes = 207.5 MiB
     conn = conn_for([], [], rows=1000, width=2048)
-    setup(monkeypatch, conn)
-    search.search_pg_exact([[1.0, 0, 0]] * 10, 0.3)
+    corpus = setup(monkeypatch, conn)
+    search.search_pg_exact(corpus, [[1.0, 0, 0]] * 10, 0.3)
     assert len(scans(conn)) == 1
 
 
 def test_no_statistics_skips_the_preflight(monkeypatch):
     conn = conn_for([], [], rows=None, width=None)
-    setup(monkeypatch, conn)
-    search.search_pg_exact([[1.0, 0, 0]] * 3000, 0.3)
+    corpus = setup(monkeypatch, conn)
+    search.search_pg_exact(corpus, [[1.0, 0, 0]] * 3000, 0.3)
     assert len(scans(conn)) == 1
 
 
 def test_zero_limit_skips_the_preflight_and_its_queries(monkeypatch):
     conn = Conn([EXT_VERSION], [("vector", "extensions", 3)], [], [])
-    setup(monkeypatch, conn, limit_mb=0)
-    search.search_pg_exact([[1.0, 0, 0]] * 3000, 0.3)
+    corpus = setup(monkeypatch, conn, limit_mb=0)
+    search.search_pg_exact(corpus, [[1.0, 0, 0]] * 3000, 0.3)
     assert len(conn.executed) == 3  # version, type, step 1 (no hits, no step 2)
     assert not any("pg_stats" in s or "reltuples" in s for s in conn.executed)
 
 
-def test_limit_is_read_from_system_json_each_search(monkeypatch):
+def test_limit_is_the_corpus_max_result_mb(monkeypatch):
     # 1 seed x 10,000 x 2176 = 20.75 MiB: over a 20 MB limit, under 21
     conn = conn_for([], [], rows=1000, width=2048)
-    setup(monkeypatch, conn, limit_mb=20)
+    corpus = setup(monkeypatch, conn, limit_mb=20)
     with pytest.raises(RuntimeError, match=r"~21 MB .* result limit of 20 MB"):
-        search.search_pg_exact([[1.0, 0, 0]], 0.3)
+        search.search_pg_exact(corpus, [[1.0, 0, 0]], 0.3)
     conn = conn_for([], [], rows=1000, width=2048)
-    setup(monkeypatch, conn, limit_mb=21)
-    search.search_pg_exact([[1.0, 0, 0]], 0.3)
+    corpus = setup(monkeypatch, conn, limit_mb=21)
+    search.search_pg_exact(corpus, [[1.0, 0, 0]], 0.3)
     assert len(scans(conn)) == 1
 
 
@@ -155,12 +139,12 @@ def test_streaming_abort_in_step_1(monkeypatch):
     # each row counts 972 + 128 = 1,100 bytes; the 953rd row brings the total to
     # 1,048,300 (under 1 MiB = 1,048,576) and the 954th to 1,049,400 (over)
     conn = conn_for(big_ids(2000), [], width=None)
-    setup(monkeypatch, conn, limit_mb=1)
+    corpus = setup(monkeypatch, conn, limit_mb=1)
     with pytest.raises(RuntimeError) as e:
-        search.search_pg_exact([[1.0, 0, 0]], 0.3)
+        search.search_pg_exact(corpus, [[1.0, 0, 0]], 0.3)
     assert str(e.value) == (
         "Search has already received 1.0 MB (954 rows), which exceeds the result "
-        "limit of 1 MB. Use fewer seeds or raise the limit in System settings (F5)."
+        "limit of 1 MB. Use fewer seeds or raise the limit in PgCorpus(max_result_mb=...)."
     )
     assert conn.consumed == 954  # the rest was not read
     assert conn.cancels == 1 and conn.closed
@@ -169,9 +153,9 @@ def test_streaming_abort_in_step_1(monkeypatch):
 def test_streaming_counts_text_in_step_2(monkeypatch):
     # step 1 row: 1 + 128 = 129 bytes; step 2 row: 1 + 1,048,576 + 128 -> over 1 MiB
     conn = conn_for([("a", 0, 0.5)], [("a", "x" * MB)], width=None)
-    setup(monkeypatch, conn, limit_mb=1)
+    corpus = setup(monkeypatch, conn, limit_mb=1)
     with pytest.raises(RuntimeError, match=r"\(2 rows\)"):
-        search.search_pg_exact([[1.0, 0, 0]], 0.3)
+        search.search_pg_exact(corpus, [[1.0, 0, 0]], 0.3)
     assert conn.cancels == 1 and conn.closed
 
 
@@ -180,8 +164,8 @@ def test_zero_limit_never_aborts_the_stream(monkeypatch):
     conn = Conn(
         [EXT_VERSION], [("vector", "extensions", 3)], rows, [(r[0], "t") for r in rows]
     )
-    setup(monkeypatch, conn, limit_mb=0)
-    hits, _ = search.search_pg_exact([[1.0, 0, 0]], 0.3)
+    corpus = setup(monkeypatch, conn, limit_mb=0)
+    hits, _ = search.search_pg_exact(corpus, [[1.0, 0, 0]], 0.3)
     assert len(hits[0]) == 2000 and conn.cancels == 0
 
 
@@ -190,9 +174,11 @@ def test_progress_counts_rows_over_both_steps(monkeypatch):
         [("a", 0, 0.9), ("b", 0, 0.8), ("a", 1, 0.7)],
         [("a", "A"), ("b", "B")],
     )
-    setup(monkeypatch, conn)
+    corpus = setup(monkeypatch, conn)
     calls = []
-    search.search_pg_exact([[1.0, 0, 0]] * 2, 0.3, progress=lambda *a: calls.append(a))
+    search.search_pg_exact(
+        corpus, [[1.0, 0, 0]] * 2, 0.3, progress=lambda *a: calls.append(a)
+    )
     assert calls == [(n, 0, "") for n in (1, 2, 3, 4, 5)]
 
 
@@ -223,7 +209,7 @@ class Blocking(Conn):
 
 def test_stop_from_another_thread_cancels_and_raises(monkeypatch):
     conn = Blocking()
-    setup(monkeypatch, conn)
+    corpus = setup(monkeypatch, conn)
     stop = search.Stop()
 
     def stopper():
@@ -233,18 +219,18 @@ def test_stop_from_another_thread_cancels_and_raises(monkeypatch):
     t = threading.Thread(target=stopper)
     t.start()
     with pytest.raises(search.SearchCancelled):
-        search.search_pg_exact([[1.0, 0, 0]], 0.3, stop=stop)
+        search.search_pg_exact(corpus, [[1.0, 0, 0]], 0.3, stop=stop)
     t.join()
     assert conn.cancels == 1 and conn.closed
 
 
 def test_stop_before_the_connection_exists(monkeypatch):
     conn = conn_for([], [])
-    setup(monkeypatch, conn)
+    corpus = setup(monkeypatch, conn)
     stop = search.Stop()
     stop.stop()
     with pytest.raises(search.SearchCancelled):
-        search.search_pg_exact([[1.0, 0, 0]], 0.3, stop=stop)
+        search.search_pg_exact(corpus, [[1.0, 0, 0]], 0.3, stop=stop)
     assert conn.cancels == 0 and conn.closed and scans(conn) == []
 
 

@@ -173,15 +173,15 @@ async def test_pgvector_exact_is_one_call_and_merges_like_the_per_seed_path(
     use_pgvector()
     calls = []
 
-    def stub(vectors, floor, progress=None, stop=None):
+    def stub(corpus, vectors, floor, progress=None, stop=None):
         calls.append((vectors, floor, progress, stop))
         return HITS, True
 
-    def no_per_seed(*a):
-        raise AssertionError("search() must not run in exact mode")
+    def no_per_seed(*a, **k):
+        raise AssertionError("search_vectors() must not run in exact mode")
 
     monkeypatch.setattr(candidates, "search_pg_exact", stub)
-    monkeypatch.setattr(candidates, "search", no_per_seed)
+    monkeypatch.setattr(candidates, "search_vectors", no_per_seed)
     seen = []
     handle = object()
     embedder = StubEmbedder({"alpha": [1, 0], "beta": [0, 1]})
@@ -216,7 +216,7 @@ async def test_pgvector_exact_calls_the_search_once_for_any_number_of_seeds(
     files.write_text("seeds.csv", "seed\nalpha\nbeta\ngamma\ndelta\n")
     calls = []
 
-    def stub(vectors, floor, progress=None, stop=None):
+    def stub(corpus, vectors, floor, progress=None, stop=None):
         calls.append(len(vectors))
         return [[] for _ in vectors], False
 
@@ -232,17 +232,21 @@ async def test_other_modes_still_search_once_per_seed(monkeypatch, backend):
     if backend == "index":
         use_pgvector("index")
     elif backend == "s3":
-        files.write_config(files.read_config().model_copy(update={"backend": "s3"}))
+        files.write_config(
+            files.read_config().model_copy(
+                update={"backend": "s3", "s3_bucket": "b", "s3_index": "i"}
+            )
+        )
     calls = []
 
-    def per_seed(vector, floor):
+    def per_seed(corpus, vector, floor, *, embedding_model):
         calls.append(vector)
         return [], False
 
     def no_exact(*a, **k):
         raise AssertionError("search_pg_exact must not run")
 
-    monkeypatch.setattr(candidates, "search", per_seed)
+    monkeypatch.setattr(candidates, "search_vectors", per_seed)
     monkeypatch.setattr(candidates, "search_pg_exact", no_exact)
     await candidates.build_candidates(StubEmbedder({"alpha": [1, 0], "beta": [0, 1]}))
     assert calls == [[1, 0], [0, 1]]

@@ -1,13 +1,10 @@
+from typing import Any
+
 import pytest
 
-from hunches import keys, search
-from hunches.files import Config
+from hunches import search
+from hunches.search import PgCorpus
 
-MODELS = {
-    "backend": "pgvector",
-    "embedding_model": "m",
-    "classifier_model": "a:b",
-}
 URL = "postgresql://alice:s3cr%40t@db.example.com:5432/mydb"
 
 
@@ -80,13 +77,13 @@ class Conn:
 
 @pytest.fixture
 def check(monkeypatch):
-    monkeypatch.setattr(keys, "_stored", lambda var: None)
     monkeypatch.setenv("HUNCHES_PG_URL", URL)
 
-    def run(conn, seeds=None, **config):
-        config = Config.model_validate({**MODELS, "pg_table": "public.docs", **config})
+    def run(conn, seeds=None, **fields: Any):
+        kwargs: dict[str, Any] = {"table": "public.docs", **fields}
+        corpus = PgCorpus(**kwargs)
         monkeypatch.setattr(search, "pg_connect", lambda c: conn)
-        return search.check_store(config, seeds)
+        return corpus.check(seeds)
 
     return run
 
@@ -116,7 +113,7 @@ def test_no_count_and_only_selects(check):
 
 def test_sample_query_maps_the_configured_columns(check):
     conn = Conn()
-    check(conn, pg_id_column="doc", pg_text_column="body")
+    check(conn, id_column="doc", text_column="body")
     sample = next(s for s in conn.executed if "left(" in s)
     assert sample == 'SELECT "doc", left("body", 60) FROM "public"."docs" LIMIT 1'
 
@@ -125,11 +122,11 @@ def test_two_tables_sample_joins_the_text_table(check):
     conn = Conn()
     got = check(
         conn,
-        pg_table="public.item_embeddings",
-        pg_id_column="item_id",
-        pg_text_table="public.items",
-        pg_text_id_column="id",
-        pg_text_column="body",
+        table="public.item_embeddings",
+        id_column="item_id",
+        text_table="public.items",
+        text_id_column="id",
+        text_column="body",
     )
     sample = next(s for s in conn.executed if "left(" in s)
     assert sample == (
@@ -140,7 +137,7 @@ def test_two_tables_sample_joins_the_text_table(check):
 
 
 def test_two_tables_without_a_matching_row_warns(check):
-    got = check(Conn(**{"left(": []}), pg_text_table="items")
+    got = check(Conn(**{"left(": []}), text_table="items")
     assert got["sample"] is None
     assert got["warnings"] == [
         (
@@ -167,7 +164,7 @@ def test_halfvec_dimension(check):
         atttypmod=[("halfvec", "extensions", 3072)],
         pg_index=[("h", "hnsw", "halfvec_cosine_ops")],
     )
-    got = check(conn, pg_search="index")
+    got = check(conn, search="index")
     assert (got["type"], got["dimension"]) == ("halfvec", 3072)
     assert got["warnings"] == []  # halfvec_cosine_ops is the cosine class of halfvec
 
@@ -191,15 +188,15 @@ def test_missing_column_is_an_error_not_a_warning(check):
 
 @pytest.mark.parametrize("mode", ["exact", "index"])
 def test_cosine_index_present_has_no_warning(check, mode):
-    assert check(Conn(), pg_search=mode)["warnings"] == []
+    assert check(Conn(), search=mode)["warnings"] == []
 
 
 def test_index_mode_without_cosine_index_warns(check):
     conn = Conn(pg_index=[("docs_l2", "hnsw", "vector_l2_ops")])
-    got = check(conn, pg_search="index")
+    got = check(conn, search="index")
     assert got["warnings"] == [
         (
-            'pg_search = "index" but no index on "embedding" uses vector_cosine_ops; '
+            'search="index" but no index on "embedding" uses vector_cosine_ops; '
             "the search orders by <=> (cosine), so Postgres would not use it."
         )
     ]
@@ -207,7 +204,7 @@ def test_index_mode_without_cosine_index_warns(check):
 
 
 def test_index_mode_without_any_index_warns(check):
-    got = check(Conn(pg_index=[]), pg_search="index")
+    got = check(Conn(pg_index=[]), search="index")
     assert len(got["warnings"]) == 1 and "vector_cosine_ops" in got["warnings"][0]
     assert got["notes"] == []
 
@@ -247,11 +244,11 @@ def test_no_pair_note_without_seeds(check):
 
 
 def test_index_mode_on_old_pgvector_reports_the_version_message(check):
-    got = check(Conn(pg_extension=[("0.6.0", "public")]), pg_search="index")
+    got = check(Conn(pg_extension=[("0.6.0", "public")]), search="index")
     assert got["version"] == (0, 6, 0)
     assert got["warnings"][0] == (
-        'pg_search = "index" needs pgvector 0.8.0 or newer (found 0.6.0). '
-        'Use pg_search = "exact", or upgrade the extension.'
+        'search="index" needs pgvector 0.8.0 or newer (found 0.6.0). '
+        'Use search="exact", or upgrade the extension.'
     )
 
 
@@ -289,10 +286,10 @@ def test_each_piece_reports_its_own_scrubbed_error(check):
 
 
 def test_connection_failure_is_the_only_report(monkeypatch):
-    def refuse(config):
+    def refuse(corpus):
         raise RuntimeError("connection refused ***")
 
     monkeypatch.setattr(search, "pg_connect", refuse)
-    got = search.check_store(Config.model_validate({**MODELS, "pg_table": "t"}), 3)
+    got = PgCorpus("t").check(3)
     assert got["errors"] == {"connect": "connection refused ***"}
     assert got["version"] is None and got["warnings"] == []

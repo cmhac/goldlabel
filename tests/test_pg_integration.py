@@ -12,11 +12,13 @@ import os
 import threading
 import time
 import uuid
+from typing import Any
 
 import numpy as np
 import pytest
 
 from hunches import candidates, files, search
+from hunches.search import LocalCorpus, PgCorpus
 
 psycopg = pytest.importorskip("psycopg")
 
@@ -88,7 +90,8 @@ def project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HUNCHES_PG_URL", URL or "")
 
-    def use(**fields):
+    def use(**fields) -> Any:
+        """Write config.toml (build_candidates still reads it) and return the corpus."""
         base = {
             "classifier_model": "anthropic:claude-haiku-4-5",
             "embedding_model": "m",
@@ -96,9 +99,21 @@ def project(tmp_path, monkeypatch):
             **fields,
         }
         files.write_config(files.Config.model_validate(base))
-        return files.read_config()
+        if base["backend"] == "local":
+            return LocalCorpus(base["corpus_dir"])
+        names = {
+            k.removeprefix("pg_"): v for k, v in fields.items() if k.startswith("pg_")
+        }
+        return PgCorpus(**names)
 
     return use
+
+
+def pg_check():
+    """PgCorpus.check() of the pgvector corpus the current config.toml describes."""
+    pg = candidates.corpus_from_config(files.read_config())
+    assert isinstance(pg, PgCorpus)
+    return pg.check()
 
 
 def corpus(n=300, dim=D):
@@ -192,8 +207,8 @@ def local_corpus(tmp_path, ids, vectors):
     return folder
 
 
-async def run_candidates(monkeypatch, seeds, config) -> dict[str, dict]:
-    """build_candidates for `config`; candidates.jsonl rows by id."""
+async def run_candidates(monkeypatch, seeds, project_corpus) -> dict[str, dict]:
+    """build_candidates for the project `corpus` was made for; candidates.jsonl rows by id."""
     files.write_text("seeds.csv", "seed\n" + "\n".join(SEED_TEXTS) + "\n")
 
     async def embed(_seeds, embedder=None):
@@ -257,7 +272,7 @@ async def test_exact_reads_the_table_once_and_uses_no_ann_index(
 ):
     vectors, _ = corpus()
     make_table(admin, schema, "docs", vectors, index="hnsw")
-    project(pg_table=f"{schema}.docs")
+    pg = project(pg_table=f"{schema}.docs")
     seeds = np.random.default_rng(3).normal(size=(nseeds, D))
     recorded = []
 
@@ -274,7 +289,7 @@ async def test_exact_reads_the_table_once_and_uses_no_ann_index(
         return conn
 
     monkeypatch.setattr(psycopg, "connect", recording_connect)
-    search.search_pg_exact(seeds, -1.0)
+    search.search_pg_exact(pg, seeds, -1.0)
     step1, params = next((q, p) for q, p in recorded if "ranked" in q.as_string(None))
     plan = admin.execute(
         psycopg.sql.SQL("EXPLAIN (ANALYZE, FORMAT JSON) ") + step1, params
@@ -323,7 +338,7 @@ async def test_partitioned_table(admin, schema, project, tmp_path, monkeypatch):
     vectors, seeds = corpus()
     ids = make_table(admin, schema, "docs", vectors, partitioned=True)
     await compare(tmp_path, project, monkeypatch, schema, "docs", ids, vectors, seeds)
-    report = search.check_store(files.read_config())
+    report = pg_check()
     assert report["errors"] == {}
     assert (report["type"], report["dimension"]) == ("vector", D)
 
@@ -335,7 +350,7 @@ async def test_view(admin, schema, project, tmp_path, monkeypatch):
         f"CREATE VIEW {schema}.docs AS SELECT id, text, embedding FROM {schema}.base"
     )
     await compare(tmp_path, project, monkeypatch, schema, "docs", ids, vectors, seeds)
-    report = search.check_store(files.read_config())
+    report = pg_check()
     assert report["errors"] == {}
     assert report["sample"] is not None
 
@@ -355,7 +370,7 @@ async def test_extension_in_a_non_default_schema(
         assert db.execute("SHOW search_path").fetchone()[0] == '"$user", public'
         ids = [r[0] for r in db.execute("SELECT id FROM hn.docs ORDER BY id")]
     await compare(tmp_path, project, monkeypatch, "hn", "docs", ids, vectors, seeds)
-    report = search.check_store(files.read_config())
+    report = pg_check()
     assert report["schema"] == "extensions"
 
 
@@ -367,9 +382,9 @@ async def test_very_low_floor_returns_every_pair_and_spills(
     vectors = rng.normal(size=(20_000, D)).astype(np.float32)
     seeds = rng.normal(size=(4, D)).astype(np.float32)
     ids = make_table(admin, schema, "docs", vectors)
-    project(pg_table=f"{schema}.docs")
+    pg = project(pg_table=f"{schema}.docs")
     # a floor below every similarity: all 4 x 20,000 pairs pass
-    hits, capped = search.search_pg_exact(seeds, -1.0)
+    hits, capped = search.search_pg_exact(pg, seeds, -1.0)
     assert [len(h) for h in hits] == [20_000] * 4 and not capped
     assert {h[0] for h in hits[0]} == set(ids)
     # at the smallest work_mem (64kB) the ranking sort of those pairs goes to disk
@@ -403,8 +418,8 @@ async def test_zero_vectors_are_excluded_even_below_a_floor_of_zero(
 ):
     vectors = np.array([[1, 0], [0, 0], [0, 1], [-1, 0]], np.float32)
     ids = make_table(admin, schema, "docs", vectors, idtype="text")
-    project(pg_table=f"{schema}.docs")
-    hits, _ = search.search_pg_exact(np.array([[1.0, 0.0]]), -1.0)
+    pg = project(pg_table=f"{schema}.docs")
+    hits, _ = search.search_pg_exact(pg, np.array([[1.0, 0.0]]), -1.0)
     # the zero row has distance NaN; without the guard `1 - NaN >= -1` would let it in
     assert [(i, round(s, 6)) for i, _, s in hits[0]] == [
         (ids[0], 1.0),
@@ -450,10 +465,10 @@ def test_index_mode_against_exact(admin, scratch_db, project, monkeypatch):
         if planner == "forced-index":
             # on a table this size the planner prefers a sequential scan, which is complete
             admin.execute(f"ALTER DATABASE {name} SET enable_seqscan = off")
-        project(pg_table="big", pg_search="exact")
-        exact, _ = search.search_pg_exact(np.array([query]), floor)
-        project(pg_table="big", pg_search="index")
-        index, _ = search.search(list(query), floor)
+        pg = project(pg_table="big", pg_search="exact")
+        exact, _ = search.search_pg_exact(pg, np.array([query]), floor)
+        pg = project(pg_table="big", pg_search="index")
+        index, _ = search.search_vectors(pg, list(query), floor, embedding_model="m")
         with psycopg.connect(
             conninfo
         ) as db:  # the pgvector defaults: no iterative scan
@@ -486,14 +501,14 @@ def test_check_store_reports_a_real_table(admin, schema, project):
     vectors, _ = corpus()
     make_table(admin, schema, "plain", vectors)
     make_table(admin, schema, "indexed", vectors, index="hnsw")
-    plain = search.check_store(project(pg_table=f"{schema}.plain"))
+    plain = project(pg_table=f"{schema}.plain").check()
     assert plain["errors"] == {} and plain["warnings"] == []
     assert plain["indexes"] == []
     assert any(n.startswith("No index:") for n in plain["notes"])
     assert (plain["type"], plain["dimension"]) == ("vector", D)
     assert plain["sample"] == ("r00000", "text of r00000")
     assert plain["version"] == version_of(admin)
-    indexed = search.check_store(project(pg_table=f"{schema}.indexed"))
+    indexed = project(pg_table=f"{schema}.indexed").check()
     assert [i[1:] for i in indexed["indexes"]] == [("hnsw", "vector_cosine_ops")]
     assert not any(n.startswith("No index:") for n in indexed["notes"])
 
@@ -518,13 +533,13 @@ def test_stop_cancels_the_running_query(admin, slow_table, project, monkeypatch)
     # other xdist workers use this database too: count only this test's own connection
     app = "hn_stop_" + uuid.uuid4().hex[:8]
     monkeypatch.setenv("PGAPPNAME", app)
-    project(pg_table=slow_table)
+    pg = project(pg_table=slow_table)
     stop = search.Stop()
     timer = threading.Timer(1.0, stop.stop)
     timer.start()
     started = time.monotonic()
     with pytest.raises(search.SearchCancelled):
-        search.search_pg_exact(np.ones((2, D)), 0.0, stop=stop)
+        search.search_pg_exact(pg, np.ones((2, D)), 0.0, stop=stop)
     assert time.monotonic() - started < 6
     time.sleep(0.3)
     active = admin.execute(
@@ -536,9 +551,9 @@ def test_stop_cancels_the_running_query(admin, slow_table, project, monkeypatch)
 
 
 def test_statement_timeout_gives_the_hint(slow_table, project):
-    project(pg_table=slow_table, pg_statement_timeout_s=1)
+    pg = project(pg_table=slow_table, pg_statement_timeout_s=1)
     with pytest.raises(RuntimeError) as e:
-        search.search_pg_exact(np.ones((2, D)), 0.0)
+        search.search_pg_exact(pg, np.ones((2, D)), 0.0)
     assert "canceling statement due to statement timeout" in str(e.value)
     assert "Fix: raise statement_timeout for this role" in str(e.value)
     assert os.environ["HUNCHES_PG_URL"] not in str(e.value)

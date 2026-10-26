@@ -1,13 +1,11 @@
-import hashlib
 import json
+import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 import numpy as np
-
-from hunches import keys, system
-from hunches.files import PG_DEFAULTS, Config, pg_setting, read_config
 
 # Max results per QueryVectors request: 10,000 (100 per page, followed via nextToken).
 # Source: https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors-limitations.html
@@ -24,13 +22,70 @@ PG_ROW_OVERHEAD = 128
 MB = 1024 * 1024
 
 
+@dataclass(frozen=True)
+class LocalCorpus:
+    """vectors.npy, items.jsonl and meta.json in `dir`."""
+
+    dir: str | Path
+
+
+@dataclass(frozen=True)
+class S3Corpus:
+    bucket: str
+    index: str
+    region: str | None = None  # None: boto3's default resolution
+
+    def __post_init__(self):
+        if not (self.bucket and self.index):
+            raise ValueError("S3Corpus: bucket and index are required")
+
+
+@dataclass(frozen=True)
+class PgCorpus:
+    """A pgvector table. The database URL is read from the environment variable `url_env`,
+    never stored. With `text_table` the text lives in a second table joined on
+    `text_id_column` (default: `id_column`) = `id_column`."""
+
+    table: str
+    id_column: str = "id"
+    text_column: str = "text"
+    vector_column: str = "embedding"
+    text_table: str | None = None
+    text_id_column: str | None = None
+    url_env: str = "HUNCHES_PG_URL"
+    search: str = "exact"  # "exact" or "index"
+    statement_timeout_s: int | None = None  # None: the server's own; 0: no limit
+    auth: str = "url"  # "url" or "rds_iam"
+    aws_region: str | None = None
+    aws_profile: str | None = None
+    max_result_mb: int = 512  # 0: no limit
+
+    def __post_init__(self):
+        if not self.table:
+            raise ValueError("PgCorpus: table is required")
+        if not self.url_env:
+            raise ValueError("PgCorpus: url_env is required")
+        if self.search not in ("exact", "index"):
+            raise ValueError('PgCorpus: search must be "exact" or "index"')
+        if self.auth not in ("url", "rds_iam"):
+            raise ValueError('PgCorpus: auth must be "url" or "rds_iam"')
+        if self.max_result_mb < 0:
+            raise ValueError("PgCorpus: max_result_mb must be 0 or more")
+        if self.statement_timeout_s is not None and self.statement_timeout_s < 0:
+            raise ValueError("PgCorpus: statement_timeout_s must be 0 or more")
+
+    def check(self, seeds: int | None = None) -> dict:
+        """Read-only report on the table (see _check); does not raise."""
+        return _check(self, seeds)
+
+
 class SearchCancelled(Exception):
     """The search was stopped with Stop.stop()."""
 
 
 class Stop:
     """Handle for stopping a search from another thread: pass it to search_pg_exact and call
-    stop(). Cancelling the Textual worker alone would leave the driver blocked in the query."""
+    stop(). Cancelling the calling thread alone would leave the driver blocked in the query."""
 
     def __init__(self):
         self.conn = None
@@ -50,7 +105,7 @@ def _cancel(conn):
 def _too_large(text: str, limit_mb: int) -> RuntimeError:
     return RuntimeError(
         f"{text} which exceeds the result limit of {limit_mb} MB. "
-        "Use fewer seeds or raise the limit in System settings (F5)."
+        "Use fewer seeds or raise the limit in PgCorpus(max_result_mb=...)."
     )
 
 
@@ -61,53 +116,10 @@ IAM_CHECK = (
 )
 
 
-def pg_url_id(url: str) -> str:
-    """16 hex characters naming a database URL: a hash of host, port, database and user.
-
-    The password is left out, so the id (written to config.toml) reveals nothing secret and
-    survives a password change; the same database and user always get the same id."""
-    try:
-        from psycopg.conninfo import conninfo_to_dict
-
-        parts = conninfo_to_dict(url)
-    except ImportError as e:
-        raise ImportError(
-            "The pgvector backend needs psycopg: pip install hunches[pg]"
-        ) from e
-    except Exception:  # noqa: BLE001  the driver's text could quote the password
-        raise ValueError(
-            "not a PostgreSQL URL (postgresql://user:password@host:port/database)"
-        ) from None
-    if not parts.get("host"):
-        raise ValueError("the URL has no host")
-    user = str(parts.get("user") or "")
-    where = [
-        str(parts["host"]).lower(),
-        str(parts.get("port") or 5432),
-        str(parts.get("dbname") or user),  # libpq's default database is the user name
-        user,
-    ]
-    return hashlib.sha256(json.dumps(where).encode()).hexdigest()[:16]
-
-
-def pg_url_name(url_id: str | None, url_var: str | None) -> str:
-    """The environment variable / keyring entry holding the URL: an explicit pg_url_var,
-    else one per pg_url_id, else the default HUNCHES_PG_URL."""
-    if url_var:
-        return url_var
-    if url_id:
-        return f"HUNCHES_PG_URL_{url_id.upper()}"
-    return PG_DEFAULTS["pg_url_var"]
-
-
-def _url_name(config: Config) -> str:
-    return pg_url_name(config.pg_url_id, config.pg_url_var)
-
-
-def pg_message(e: Exception, config: Config, token: str | None = None) -> str:
+def pg_message(e: Exception, corpus: PgCorpus, token: str | None = None) -> str:
     """An exception's text with the URL, password and IAM token replaced by ***, plus a hint."""
     text = str(e)
-    url = keys.resolve(_url_name(config)) or ""
+    url = os.environ.get(corpus.url_env) or ""
     password = urlsplit(url).password or ""
     secrets = [url, password, unquote(password), token or ""]
     for secret in sorted(set(secrets), key=len, reverse=True):
@@ -122,19 +134,16 @@ def pg_message(e: Exception, config: Config, token: str | None = None) -> str:
     elif "statement timeout" in text:
         hint = (
             "Fix: raise statement_timeout for this role, or set "
-            "pg_statement_timeout_s in config.toml"
+            "PgCorpus(statement_timeout_s=...)"
         )
     elif re.search(r"different \w+ dimensions", text):
-        hint = (
-            "Fix: embedding_model in .hunches/config.toml must be the model the "
-            "table was embedded with."
-        )
+        hint = "Fix: the embedder must be the model the table was embedded with."
     elif token and "authentication failed" in text:
         hint = IAM_CHECK
     return f"{text}\n{hint}" if hint else text
 
 
-def pg_connect(config: Config):
+def pg_connect(corpus: PgCorpus):
     """Open a read-only connection; the caller owns it and the one transaction it starts."""
     try:
         import psycopg
@@ -142,23 +151,16 @@ def pg_connect(config: Config):
         raise ImportError(
             "The pgvector backend needs psycopg: pip install hunches[pg]"
         ) from e
-    if not config.pg_table:
-        raise ValueError("config.toml: pg_table is required for pgvector")
-    var = _url_name(config)
-    url = keys.resolve(var)
-    if not url and config.pg_url_id and not config.pg_url_var:
-        raise ValueError(
-            "The database URL is not saved on this computer: paste it in Project "
-            f"settings (F3), or set {var} in the environment"
-        )
+    url = os.environ.get(corpus.url_env)
     if not url:
         raise ValueError(
-            f"config.toml: pg_url_var {var} is not set (environment or keyring)"
+            "The database URL is not set: set the environment variable "
+            f"{corpus.url_env}"
         )
     kwargs: dict = {"prepare_threshold": None}
     token = None
-    if pg_setting(config, "pg_auth") == "rds_iam":
-        token = _iam_token(config, url)
+    if corpus.auth == "rds_iam":
+        token = _iam_token(corpus, url)
         kwargs["password"] = token  # a keyword, never inside the URL string
         if "sslmode" not in url:
             kwargs["sslmode"] = "require"
@@ -166,17 +168,17 @@ def pg_connect(config: Config):
         conn = psycopg.connect(url, **kwargs)
         conn.read_only = True
         conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
-        if config.pg_statement_timeout_s is not None:  # 0 is a value: no limit
+        if corpus.statement_timeout_s is not None:  # 0 is a value: no limit
             with conn.cursor() as cur:
                 cur.execute(  # ty: ignore[no-matching-overload]  int() cast, not user text
-                    f"SET LOCAL statement_timeout = {int(config.pg_statement_timeout_s) * 1000}"
+                    f"SET LOCAL statement_timeout = {int(corpus.statement_timeout_s) * 1000}"
                 )
     except Exception as e:  # noqa: BLE001  the driver's own classes are not imported here
-        raise RuntimeError(pg_message(e, config, token)) from None
+        raise RuntimeError(pg_message(e, corpus, token)) from None
     return conn
 
 
-def _iam_token(config: Config, url: str) -> str:
+def _iam_token(corpus: PgCorpus, url: str) -> str:
     try:
         import boto3
         from botocore.exceptions import BotoCoreError, ClientError
@@ -186,14 +188,12 @@ def _iam_token(config: Config, url: str) -> str:
         ) from e
     parts = urlsplit(url)
     if not (parts.hostname and parts.username):
-        raise ValueError("config.toml: the rds_iam URL needs a host and a user")
+        raise ValueError("the rds_iam URL needs a host and a user")
     try:
-        session = boto3.Session(profile_name=config.pg_aws_profile)
-        region = config.pg_aws_region or session.region_name
+        session = boto3.Session(profile_name=corpus.aws_profile)
+        region = corpus.aws_region or session.region_name
         if not region:
-            raise ValueError(
-                "pg_aws_region is not set and boto3 found no default region"
-            )
+            raise ValueError("aws_region is not set and boto3 found no default region")
         return session.client("rds", region_name=region).generate_db_auth_token(
             DBHostname=parts.hostname,
             Port=parts.port or 5432,
@@ -211,22 +211,21 @@ def _regclass(table: str) -> str:
     return ".".join('"' + p.replace('"', '""') + '"' for p in parts)
 
 
-def text_source(config: Config) -> tuple[str, str]:
-    """(table, id column) the text is read from: pg_text_table in the two-table layout."""
-    id_column = pg_setting(config, "pg_id_column")
-    if config.pg_text_table:
-        return config.pg_text_table, config.pg_text_id_column or id_column
-    return config.pg_table or "", id_column
+def text_source(corpus: PgCorpus) -> tuple[str, str]:
+    """(table, id column) the text is read from: text_table in the two-table layout."""
+    if corpus.text_table:
+        return corpus.text_table, corpus.text_id_column or corpus.id_column
+    return corpus.table, corpus.id_column
 
 
-def _texts_query(config: Config):
+def _texts_query(corpus: PgCorpus):
     """SELECT id, text for a list of ids (the one parameter), from the text table."""
     from psycopg import sql
 
-    table, id_column = text_source(config)
+    table, id_column = text_source(corpus)
     return sql.SQL("SELECT {id}, {text} FROM {table} WHERE {id} = ANY(%s)").format(
         id=sql.Identifier(id_column),
-        text=sql.Identifier(pg_setting(config, "pg_text_column")),
+        text=sql.Identifier(corpus.text_column),
         table=sql.Identifier(*table.split(".", 1)),
     )
 
@@ -253,9 +252,9 @@ def extension_version(conn) -> tuple[tuple[int, int, int], str]:
 def require_index_mode_version(version: tuple[int, int, int], mode: str) -> None:
     if mode == "index" and version < (0, 8, 0):
         raise RuntimeError(
-            f'pg_search = "index" needs pgvector 0.8.0 or newer (found '
+            f'search="index" needs pgvector 0.8.0 or newer (found '
             f"{'.'.join(map(str, version))}). "
-            'Use pg_search = "exact", or upgrade the extension.'
+            'Use search="exact", or upgrade the extension.'
         )
 
 
@@ -303,22 +302,20 @@ def table_estimates(
 
 
 def search_pg_exact(
-    vectors, floor: float, progress=None, stop: Stop | None = None
+    corpus: PgCorpus, vectors, floor: float, progress=None, stop: Stop | None = None
 ) -> tuple[list[list[tuple[str, str, float]]], bool]:
     """One pass over the table for every seed: ([hits per seed], capped), best first.
 
     Runs in the one read-only REPEATABLE READ transaction pg_connect opened. Step 1 returns
     ids only (a narrow sort), step 2 the text of the distinct ids. `capped` is True when some
-    seed has exactly PG_TOP_K hits. The result size is limited by system.pg_max_result_mb
+    seed has exactly PG_TOP_K hits. The result size is limited by corpus.max_result_mb
     (0 = none): refused up front from the planner statistics, or aborted while streaming.
     `progress(received, 0, "")` is called per row received (a zero total is unknown); `stop`
     is a Stop whose stop() cancels the running query, after which SearchCancelled is raised.
     """
-    config = read_config()
-    sys_ = system.read_system()
-    limit_mb = sys_.pg_max_result_mb if sys_ else 512
+    limit_mb = corpus.max_result_mb
     limit = limit_mb * MB
-    conn = pg_connect(config)
+    conn = pg_connect(corpus)
     if stop:
         stop.conn = conn
     received = rows_in = 0
@@ -343,13 +340,11 @@ def search_pg_exact(
         if stop and stop.stopped:
             raise SearchCancelled
         extension_version(conn)  # for its "not installed" error
-        table_name = config.pg_table or ""  # pg_connect has checked it
+        table_name = corpus.table
         table = sql.Identifier(*table_name.split(".", 1))
-        id_col = sql.Identifier(pg_setting(config, "pg_id_column"))
-        vec_col = sql.Identifier(pg_setting(config, "pg_vector_column"))
-        typename, type_schema, _ = column_type(
-            conn, table_name, pg_setting(config, "pg_vector_column")
-        )
+        id_col = sql.Identifier(corpus.id_column)
+        vec_col = sql.Identifier(corpus.vector_column)
+        typename, type_schema, _ = column_type(conn, table_name, corpus.vector_column)
         step1 = sql.SQL(
             "WITH seeds AS MATERIALIZED (SELECT u.i - 1 AS i, u.q::{vtype} AS q "
             "FROM unnest(%s::text[]) WITH ORDINALITY AS u(q, i)), "
@@ -368,9 +363,7 @@ def search_pg_exact(
             schema=sql.Identifier(type_schema),
         )
         if limit:
-            _, width = table_estimates(
-                conn, text_source(config)[0], pg_setting(config, "pg_text_column")
-            )
+            _, width = table_estimates(conn, text_source(corpus)[0], corpus.text_column)
             if width is not None:  # no statistics: nothing to check
                 per_row = width + PG_ROW_OVERHEAD
                 worst = len(vectors) * PG_TOP_K * per_row
@@ -393,7 +386,7 @@ def search_pg_exact(
         if ids:
             with conn.cursor(name="hunches_texts") as cur:
                 cur.itersize = PG_BATCH
-                cur.execute(_texts_query(config), (ids,))
+                cur.execute(_texts_query(corpus), (ids,))
                 for id_, text in cur:
                     count(id_, text)
                     texts[id_] = text
@@ -410,45 +403,43 @@ def search_pg_exact(
     except Exception as e:  # noqa: BLE001  the driver's own classes are not imported here
         if stop and stop.stopped:
             raise SearchCancelled from None
-        raise RuntimeError(pg_message(e, config)) from None
+        raise RuntimeError(pg_message(e, corpus)) from None
     finally:
         conn.close()
 
 
-def is_approximate(config: Config) -> bool:
+def is_approximate(corpus) -> bool:
     """True when the pgvector search may hide hits above the floor (index mode)."""
-    return config.backend == "pgvector" and pg_setting(config, "pg_search") == "index"
+    return isinstance(corpus, PgCorpus) and corpus.search == "index"
 
 
 def _search_pg_index(
-    config: Config, query_vector: list[float], floor: float
+    corpus: PgCorpus, query_vector: list[float], floor: float
 ) -> tuple[list[tuple[str, str, float]], bool]:
     """One ANN-index query for one seed; the caller (search) has checked the mode."""
-    conn = pg_connect(config)
+    conn = pg_connect(corpus)
     try:
         from psycopg import sql
 
         version, _ = extension_version(conn)
         require_index_mode_version(version, "index")  # before any SET
-        table_name = config.pg_table or ""  # pg_connect has checked it
-        vec_name = pg_setting(config, "pg_vector_column")
+        table_name = corpus.table
+        vec_name = corpus.vector_column
         typename, type_schema, _ = column_type(conn, table_name, vec_name)
         dist = sql.SQL("1 - ({vec} OPERATOR({schema}.<=>) %s::{vtype})").format(
             vec=sql.Identifier(vec_name),
             schema=sql.Identifier(type_schema),
             vtype=sql.Identifier(type_schema, typename),
         )
-        two_tables = bool(config.pg_text_table)
+        two_tables = bool(corpus.text_table)
         query = sql.SQL(
             "SELECT {id}, {text}, {dist} AS sim FROM {table} "
             "WHERE {dist} >= %s AND {dist} <> 'NaN' "
             "ORDER BY {vec} OPERATOR({schema}.<=>) %s::{vtype} LIMIT %s"
         ).format(
-            id=sql.Identifier(pg_setting(config, "pg_id_column")),
+            id=sql.Identifier(corpus.id_column),
             # two tables: the text comes from a second query, as in exact step 2
-            text=sql.SQL("NULL")
-            if two_tables
-            else sql.Identifier(pg_setting(config, "pg_text_column")),
+            text=sql.SQL("NULL") if two_tables else sql.Identifier(corpus.text_column),
             dist=dist,
             table=sql.Identifier(*table_name.split(".", 1)),
             vec=sql.Identifier(vec_name),
@@ -462,7 +453,7 @@ def _search_pg_index(
             cur.execute(query, (literal, literal, floor, literal, literal, PG_TOP_K))
             rows = cur.fetchall()
             if two_tables and rows:
-                cur.execute(_texts_query(config), ([r[0] for r in rows],))
+                cur.execute(_texts_query(corpus), ([r[0] for r in rows],))
                 texts = dict(cur.fetchall())
                 missing = [r[0] for r in rows if r[0] not in texts]
                 if missing:
@@ -474,43 +465,44 @@ def _search_pg_index(
         )
         return hits, len(rows) == PG_TOP_K
     except Exception as e:  # noqa: BLE001  the driver's own classes are not imported here
-        raise RuntimeError(pg_message(e, config)) from None
+        raise RuntimeError(pg_message(e, corpus)) from None
     finally:
         conn.close()
 
 
-def search(
-    query_vector: list[float], floor: float
+def search_vectors(
+    corpus: LocalCorpus | S3Corpus | PgCorpus,
+    vector: list[float],
+    floor: float,
+    *,
+    embedding_model: str,
 ) -> tuple[list[tuple[str, str, float]], bool]:
     """Return ([(id, text, similarity)], capped), best first, all with similarity >= floor.
 
     `capped` is True when the S3 per-query topK limit may have hidden hits above the floor
-    (the highest-scoring hits are returned); the UI must show a warning. Local is never capped.
+    (the highest-scoring hits are returned); show a warning. Local is never capped.
+    `embedding_model` is only checked against a local corpus's meta.json. pgvector `exact`
+    search answers every seed at once: use search_pg_exact.
     """
-    config = read_config()
-    if config.backend == "local":
-        if config.corpus_dir is None:
-            raise ValueError(
-                "config.toml: corpus_dir is required for the local backend"
-            )
-        corpus = Path(config.corpus_dir)
-        meta_model = json.loads((corpus / "meta.json").read_text())["embedding_model"]
-        if meta_model != config.embedding_model:
+    if isinstance(corpus, LocalCorpus):
+        folder = Path(corpus.dir)
+        meta_model = json.loads((folder / "meta.json").read_text())["embedding_model"]
+        if meta_model != embedding_model:
             raise ValueError(
                 f"embedding model mismatch: corpus uses {meta_model!r}, "
-                f"config.toml has {config.embedding_model!r}"
+                f"the embedder is {embedding_model!r}"
             )
-        vectors = np.load(corpus / "vectors.npy").astype(np.float32)
+        vectors = np.load(folder / "vectors.npy").astype(np.float32)
         items = [
             json.loads(line)
-            for line in (corpus / "items.jsonl").read_text().splitlines()
+            for line in (folder / "items.jsonl").read_text().splitlines()
             if line.strip()
         ]
         if len(items) != len(vectors):
             raise ValueError(
                 f"items.jsonl has {len(items)} rows but vectors.npy has {len(vectors)}"
             )
-        query = np.asarray(query_vector, dtype=np.float32)
+        query = np.asarray(vector, dtype=np.float32)
         norms = np.linalg.norm(vectors, axis=1)
         norms[norms == 0] = 1
         sims = (vectors / norms[:, None]) @ (query / np.linalg.norm(query))
@@ -521,24 +513,22 @@ def search(
             if sims[i] >= floor
         ], False
 
-    if config.backend == "pgvector":
-        if pg_setting(config, "pg_search") != "index":
+    if isinstance(corpus, PgCorpus):
+        if corpus.search != "index":
             raise RuntimeError(
-                "search() runs pg_search = 'index' only; exact search is search_pg_exact"
+                'search_vectors() runs search="index" only; exact search is search_pg_exact'
             )
-        return _search_pg_index(config, query_vector, floor)
+        return _search_pg_index(corpus, vector, floor)
 
     try:
         import boto3
     except ImportError as e:
         raise ImportError("The S3 backend needs boto3: pip install hunches[s3]") from e
-    if not (config.s3_bucket and config.s3_index):
-        raise ValueError("config.toml: s3_bucket and s3_index are required for s3")
-    client = boto3.client("s3vectors", region_name=config.s3_region)
+    client = boto3.client("s3vectors", region_name=corpus.region)
     params = {
-        "vectorBucketName": config.s3_bucket,
-        "indexName": config.s3_index,
-        "queryVector": {"float32": [float(x) for x in query_vector]},
+        "vectorBucketName": corpus.bucket,
+        "indexName": corpus.index,
+        "queryVector": {"float32": [float(x) for x in vector]},
         "topK": S3_TOP_K,
         "returnDistance": True,
         "returnMetadata": True,
@@ -567,8 +557,8 @@ POOLER_HINT = (
 )
 
 
-def check_store(config: Config, seeds: int | None = None) -> dict:
-    """Read-only report on the configured table for Check store; does not raise.
+def _check(corpus: PgCorpus, seeds: int | None = None) -> dict:
+    """Read-only report on the table (PgCorpus.check); does not raise.
 
     Each piece runs in its own savepoint, so a failing query (its scrubbed text goes in
     "errors" under the piece's name) does not hide the others. No count(*)."""
@@ -588,15 +578,15 @@ def check_store(config: Config, seeds: int | None = None) -> dict:
         "errors": {},
     }
     try:
-        conn = pg_connect(config)
+        conn = pg_connect(corpus)
     except Exception as e:  # noqa: BLE001  pg_connect has already scrubbed the text
         out["errors"]["connect"] = str(e)
         return out
-    table = config.pg_table or ""
-    column = pg_setting(config, "pg_vector_column")
-    text_column = pg_setting(config, "pg_text_column")
-    mode = pg_setting(config, "pg_search")
-    parts = urlsplit(keys.resolve(_url_name(config)) or "")
+    table = corpus.table
+    column = corpus.vector_column
+    text_column = corpus.text_column
+    mode = corpus.search
+    parts = urlsplit(os.environ.get(corpus.url_env) or "")
     if parts.port == 6543 or "pooler." in (parts.hostname or ""):
         out["notes"].append(POOLER_HINT)
 
@@ -645,11 +635,11 @@ def check_store(config: Config, seeds: int | None = None) -> dict:
             out["indexes"] = [tuple(r) for r in cur.fetchall()]
 
     def sample():
-        id_column = sql.Identifier(pg_setting(config, "pg_id_column"))
+        id_column = sql.Identifier(corpus.id_column)
         vectors = sql.Identifier(*table.split(".", 1))
-        if config.pg_text_table:
+        if corpus.text_table:
             # one joined row proves both tables, all four columns and comparable id types
-            text_table, text_id = text_source(config)
+            text_table, text_id = text_source(corpus)
             query = sql.SQL(
                 "SELECT v.{}, left(t.{}, 60) FROM {} v JOIN {} t ON t.{} = v.{} LIMIT 1"
             ).format(
@@ -682,11 +672,11 @@ def check_store(config: Config, seeds: int | None = None) -> dict:
                 with conn.transaction():
                     fn()
             except Exception as e:  # noqa: BLE001  whatever the driver raises
-                out["errors"][name] = pg_message(e, config)
+                out["errors"][name] = pg_message(e, corpus)
     finally:
         conn.close()
 
-    if config.pg_text_table and out["sample"] is None and "sample" not in out["errors"]:
+    if corpus.text_table and out["sample"] is None and "sample" not in out["errors"]:
         out["warnings"].append(
             "No row of the table has a matching row in the text table: check the "
             "id col and text id col."
@@ -696,7 +686,7 @@ def check_store(config: Config, seeds: int | None = None) -> dict:
         cosine = f"{out['type'] or 'vector'}_cosine_ops"  # halfvec has its own class
         if mode == "index" and not any(i[2] == cosine for i in out["indexes"]):
             out["warnings"].append(
-                f'pg_search = "index" but no index on "{column}" uses {cosine}; '
+                f'search="index" but no index on "{column}" uses {cosine}; '
                 "the search orders by <=> (cosine), so Postgres would not use it."
             )
         if mode == "exact" and not out["indexes"]:

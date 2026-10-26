@@ -10,8 +10,22 @@ from datetime import UTC, datetime
 from pydantic_ai import Embedder
 
 from hunches.cost import cache_get, cache_key, cache_put, embedding_dollars, record
-from hunches.files import read_config, read_text, write_jsonl, write_text
-from hunches.search import search, search_pg_exact
+from hunches.files import (
+    PG_DEFAULTS,
+    Config,
+    pg_setting,
+    read_config,
+    read_text,
+    write_jsonl,
+    write_text,
+)
+from hunches.search import (
+    LocalCorpus,
+    PgCorpus,
+    S3Corpus,
+    search_pg_exact,
+    search_vectors,
+)
 
 FLOOR = 0.60
 # Lower edges of the similarity bands; the last band (0.75+) is open-ended.
@@ -77,6 +91,36 @@ def top_seeds(rows: list[dict], threshold: float, n: int = 10) -> list[tuple[str
     return won.most_common(n)
 
 
+def corpus_from_config(config: Config) -> LocalCorpus | S3Corpus | PgCorpus:
+    """The corpus config.toml describes. Goes with build_candidates in task 06."""
+    if config.backend == "local":
+        if config.corpus_dir is None:
+            raise ValueError(
+                "config.toml: corpus_dir is required for the local backend"
+            )
+        return LocalCorpus(config.corpus_dir)
+    if config.backend == "s3":
+        if not (config.s3_bucket and config.s3_index):
+            raise ValueError("config.toml: s3_bucket and s3_index are required for s3")
+        return S3Corpus(config.s3_bucket, config.s3_index, config.s3_region)
+    if not config.pg_table:
+        raise ValueError("config.toml: pg_table is required for pgvector")
+    return PgCorpus(
+        config.pg_table,
+        id_column=pg_setting(config, "pg_id_column"),
+        text_column=pg_setting(config, "pg_text_column"),
+        vector_column=pg_setting(config, "pg_vector_column"),
+        text_table=config.pg_text_table,
+        text_id_column=config.pg_text_id_column,
+        url_env=config.pg_url_var or PG_DEFAULTS["pg_url_var"],
+        search=pg_setting(config, "pg_search"),
+        statement_timeout_s=config.pg_statement_timeout_s,
+        auth=pg_setting(config, "pg_auth"),
+        aws_region=config.pg_aws_region,
+        aws_profile=config.pg_aws_profile,
+    )
+
+
 async def build_candidates(
     embedder: Embedder | None = None,
     progress: Callable[[int, int, str], None] | None = None,
@@ -93,14 +137,17 @@ async def build_candidates(
     capped = False
     vectors = await embed_seeds(seeds, embedder)
     config = read_config()
-    if config.backend == "pgvector" and config.pg_search != "index":
+    corpus = corpus_from_config(config)
+    if isinstance(corpus, PgCorpus) and corpus.search == "exact":
         per_seed, capped = await asyncio.to_thread(
-            search_pg_exact, vectors, FLOOR, progress=progress, stop=stop
+            search_pg_exact, corpus, vectors, FLOOR, progress=progress, stop=stop
         )
     else:
         per_seed = []
         for done, (seed, vector) in enumerate(zip(seeds, vectors), 1):
-            hits, seed_capped = search(vector, FLOOR)
+            hits, seed_capped = search_vectors(
+                corpus, vector, FLOOR, embedding_model=config.embedding_model
+            )
             capped = capped or seed_capped
             per_seed.append(hits)
             if progress:

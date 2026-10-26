@@ -12,7 +12,7 @@ import pytest
 from pydantic_ai.models.function import FunctionModel
 
 from hunches import candidates, classifier, cost, files
-from hunches.search import search
+from hunches.search import LocalCorpus, search_vectors
 
 FIXTURES = Path(__file__).parent / "fixtures" / "pre006"
 
@@ -122,7 +122,10 @@ async def test_old_cache_entry_is_a_hit(project, expected):
 
 def test_local_search_matches_recorded(project, expected):
     want = expected["search"]
-    hits, capped = search(want["query"], want["floor"])
+    corpus = LocalCorpus(project / ".hunches" / "corpus")
+    hits, capped = search_vectors(
+        corpus, want["query"], want["floor"], embedding_model="fake-embed"
+    )
     assert [list(h) for h in hits] == want["hits"]
     assert capped is want["capped"]
     assert [h[0] for h in hits] == ["a1", "a2"]
