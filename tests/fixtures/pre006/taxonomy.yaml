@@ -1,0 +1,6 @@
+mode: multi
+labels:
+- name: alpha
+  description: about alpha
+- name: beta
+  description: about beta
