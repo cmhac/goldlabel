@@ -197,7 +197,7 @@ def test_error_types_stay_compatible(tmp_path):
     bad = tmp_path / "bad.jsonl"
     bad.write_text("nope\n")
     with pytest.raises(ValueError, match="bad.jsonl:1: not a gold row") as r:
-        Gold(bad).all
+        len(Gold(bad).all)
     assert SHORT in str(r.value)
 
 
