@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-26
 
-**Status**: Draft (revised 2026-10-26 after review: regex flags, ranked keyword hits, a limit argument, server-side SQL filtering)
+**Status**: Draft, all questions resolved 2026-10-26 (ready for `/speckit-clarify` if wanted, else `/speckit-plan`)
 
 **Input**: User description: "Non-search candidate sources for the hunches library: let a user build a Candidates list without semantic seed search. (1) a keyword/regex candidate list over a corpus, and (2) the whole corpus with no filtering. Today `Candidates` rows assume `max_similarity` and `best_seed`, so its repr, bands, above, top_seeds and band_sample break on rows without them; the corpus classes (LocalCorpus, S3Corpus, PgCorpus) have no plain item reader, only the search code reads items. Proposed shape (to be refined in the spec): make similarity fields optional on Candidates with plain-count fallbacks in repr/_repr_html_, record a `source` ("seeds", "keywords", "all"), and add `hn.keywords(corpus, terms, regex=False)` and `hn.everything(corpus)` with a streaming item reader for all three corpus types (pgvector tables can be larger than memory). Must keep: no I/O on import, async+sync forms, polars+pandas export, unknown cost shown as `?`, never touch gold labels, minimal implementation with no abstractions."
 
@@ -74,7 +74,8 @@ expectation.
    matches.
 5. **Given** items that match different numbers of the terms, **When** the result is shown,
    **Then** the items are in rank order, best first, with ties kept in corpus order, and each row
-   carries the value it was ranked by. *(The ranking rule is the first open question below.)*
+   carries the values it was ranked by: the number of distinct terms it matched, then its total
+   number of matches.
 6. **Given** a limit of three and ten matching items, **When** the search runs, **Then** the result
    holds the three best-ranked items; with no limit it holds all ten.
 7. **Given** a term that matches nothing, **When** the search runs, **Then** the result is empty
@@ -135,9 +136,13 @@ returns the rows the fake answers with, ranked and limited like a Python-side se
    vector extension installed), **When** a keyword search or a whole-corpus request runs, **Then**
    it works; a seed search against the same table fails with a message that says the table has no
    embedding column to search.
-4. **Given** a regular expression with flags that the database's regular-expression language
-   cannot express, **When** the server-side option is on, **Then** the call refuses and names the
-   flag instead of silently matching differently. *(The flag mapping is the second open question.)*
+4. **Given** a compiled Python regular expression, **When** the server-side option is on, **Then**
+   the call refuses, naming the term and saying that server-side regular expressions are written
+   as strings with the regex option, in the database's own syntax.
+7. **Given** a string with the regex option and the server-side option on, **When** the search
+   runs, **Then** the string is sent to the database unchanged as a bound parameter and matched in
+   the database's regular-expression syntax, where an inline option such as `(?i)` sets
+   case-insensitivity; the documentation says this syntax can differ from Python's.
 5. **Given** the same corpus read both ways, **When** the terms are plain text, **Then** the
    server-side and the Python-side searches return the same ids in the same order.
 
@@ -266,8 +271,10 @@ same ids in the same order.
   flags MUST NOT affect another's. An invalid pattern MUST fail before the corpus is read, naming
   the pattern.
 - **FR-004**: Keyword results MUST be ranked, best first, and every row MUST carry the value it
-  was ranked by. Ties MUST keep the corpus's order. [NEEDS CLARIFICATION: the ranking rule; see
-  question 1.]
+  was ranked by. Ranking MUST be by the number of distinct terms
+  the item matched, then its total number of matches (non-overlapping occurrences, summed over
+  terms), both descending, then the corpus's order; both numbers are shown as columns. Each term
+  counts at most once toward the distinct-term number however many times it matches.
 - **FR-005**: Both calls MUST accept a `limit` (default none, meaning no limit). A limit keeps the
   best-ranked items for keywords, and the first items in corpus order for the whole corpus. A limit
   below one MUST be refused.
@@ -275,8 +282,11 @@ same ids in the same order.
   server with an option on the keyword call. The statement MUST be read-only, MUST pass every user
   term as a bound parameter and every identifier through the existing identifier quoting, and MUST
   return the same ids in the same order as the Python-side match for plain-text terms. Asking for
-  it on a non-Postgres corpus MUST fail with a clear message. [NEEDS CLARIFICATION: how regular
-  expressions and their flags behave server-side; see question 2.]
+  it on a non-Postgres corpus MUST fail with a clear message. Server-side, plain-text terms are
+  matched literally and case-insensitively (a user's `%` and `_` are not wildcards); strings with
+  the regex option are matched in the database's own regular-expression syntax; compiled Python
+  patterns MUST be refused, naming the term, because their flags do not exist there. Ranking and
+  the limit are applied in the library to the rows the server returns, so both backends rank alike.
 - **FR-007**: Both calls MUST have an async and a sync form, the sync form working inside a running
   notebook event loop, and both MUST write the result like a seed search does (`out`: default
   location, a path, or nothing).
@@ -340,7 +350,7 @@ same ids in the same order.
 
 - **Candidate list**: the items proposed for classification, each with `id` and `text`. A list built
   from seeds also carries, per item, its best similarity and the seed that won it, plus the cutoff
-  and embedding model. A list built from keywords carries, per item, its rank value. A list built
+  and embedding model. A list built from keywords carries, per item, its distinct-terms-matched and total-matches numbers. A list built
   from the whole corpus carries neither. Every list records its source.
 - **Corpus**: a table, an S3 Vectors index or a Postgres table. This feature gives each of them
   one thing they lack: a way to read their items one batch at a time, without vectors, and, for
@@ -357,8 +367,8 @@ same ids in the same order.
 - Stemming, lemmatising, accent folding and fuzzy matching: literal case-insensitive text or a
   regular expression covers it; users who need more write the regex.
 - "All terms" or boolean (AND/NOT) matching: any-term only; a user filters further with polars.
-- A relevance model beyond the one rule chosen in question 1 (no BM25, no tf-idf, no
-  database full-text ranking) and any user-supplied scoring function.
+- A relevance model beyond distinct-terms-then-total-matches (no BM25, no tf-idf, no database
+  full-text ranking) and any user-supplied scoring function.
 - Merging several corpora, or a list per corpus inside one call: one corpus per call, merging is
   upstream of the library.
 - A registry of sources, saved connections or any system-wide storage.
@@ -443,17 +453,16 @@ same ids in the same order.
 - **Verification**: everything runs against hand-built tables, the fake `psycopg` and a
   stubbed S3 client; a real database or bucket is a human step, recorded as such.
 
-## Open questions *(for the user; resolve with `/speckit-clarify`)*
+## Decisions *(resolved by the user, 2026-10-26)*
 
-1. **Ranking rule for keyword hits.** Semantic hits are ranked by a similarity score. A keyword has
-   no such score, so one must be chosen. Options: **A (recommended)** the number of distinct terms
-   that matched, then the total number of matches, then corpus order, shown as two columns; **B** a
-   single weighted score such as total matches only; **C** a relevance model such as BM25 (new
-   behaviour, needs corpus-wide statistics, so a second pass over the corpus).
-2. **Regular expressions on the database server.** Python and PostgreSQL differ: a compiled
-   pattern's flags are Python's, while the database takes its own option letters, and its default
-   treatment of line breaks is the opposite of Python's. Options: **A (recommended)** server-side
-   supports plain text and the case-insensitive flag only, and refuses any other flag or a pattern
-   it cannot translate, naming it; **B** server-side regular expressions are written in the
-   database's own language and are documented as such, so results may differ from the Python side;
-   **C** no regular expressions server-side, plain text only.
+1. **Ranking of keyword hits**: distinct terms matched, then total matches, then corpus order,
+   shown as two columns. No BM25 or other relevance model.
+2. **Regular expressions on the Postgres server**: compiled Python patterns are refused
+   server-side; strings with the regex option are sent as-is in Postgres's own syntax with flags
+   inline (for example `(?i)`), and the docs say it can differ from Python's. No translator.
+
+**Consequence to settle in the plan**: ranking counts are computed in the library from the text of
+the rows the server returns. For a server-side regex string whose Postgres and Python readings
+differ, a returned row may count zero matches in Python; it must still be kept (never silently
+dropped) and ranks last. The plan decides how that is reported, for example a warning naming the
+term, and the tests cover it with the fake database.
