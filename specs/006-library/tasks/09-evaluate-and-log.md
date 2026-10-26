@@ -1,0 +1,14 @@
+# 09 — `evaluate`, `Evaluation`, the evaluation log, `band_sample`
+
+Spec: "`evaluate`", "Evaluation log", "`band_sample`", FR-15, FR-20, SC-3.
+
+**Do**
+- `evaluate(clf, gold_set, *, metric=None, target=None, log=None) -> Evaluation` and `aevaluate`: classify the labelled rows through `clf` (cached), skip and count pending rows, then `metrics.compute_metrics` unchanged. `metric` defaults per mode with `metrics.default_target_metric`; `target` adds a PASS/FAIL line. `Evaluation`: `.metrics`, `.score(name)`, `.n`, `.skipped_pending`, `.sources` (counts by `labelled_by`), `.digest`, `.disagreements` (rows `{id, text, gold, predicted, reasoning}`; an item with a classification `error` is a disagreement with `predicted=None`), `.write(path)`, plain `__repr__` (metrics table as text, PASS/FAIL, the per-source counts). Rows whose gold labels are invalid for the taxonomy raise with the ids (point to `gold.orphaned`). Nothing is refused on provenance (FR-15).
+- **Evaluation log**: every call appends one JSON line to `resolve(log, "evals.jsonl")` (`log=False`: none) with the fields listed in the spec (time, split(s), n, gold path, model, digest, prompt text, taxonomy, metric, target, score, full metrics, dollars or `null`, live and cached calls, hunches version from package metadata). Append-only, flushed per line, created with parent directories. A `GoldSet` that spans both splits records `split: "mixed"`.
+- `hn.eval_log(path=None) -> EvalLog`: `.rows`, plain `__repr__` table (time, split, n, score, 8-char digest, model) and the line "test split evaluated N times (M distinct prompts)" (counts `split == "test"` rows and distinct `digest`).
+- `band_sample(clf, candidates, *, per_band=30, seed=None) -> BandReport`: for each band, up to `per_band` random candidates (fewer if the band is smaller), classified through `clf`; off-topic means predicted labels exactly `{off_topic}`. `BandReport`: `.rows` (band, n, off_topic count, rate), `.cost`, plain `__repr__`. No file is written.
+- Delete the remaining old stage-5/6/7 helpers that nothing uses.
+
+**Tests (red first, `FunctionModel`)**: metrics for a hand-built gold/prediction set equal hand-computed numbers (reuse the cases in `tests/test_metrics.py`); disagreements list exactly the differing items; pending rows skipped and counted; `target` PASS and FAIL; an error item; second `evaluate` with the same classifier makes zero live calls and changing the prompt makes one live call per item (SC-3); log: one line per call, fields present, append-only across calls, `log=False` writes nothing, a custom path, `eval_log` counts (3 test evaluations with 2 distinct prompts); `band_sample` rates match hand-computed ones with a scripted `FunctionModel`, bands smaller than `per_band`, determinism for a seed; evaluate works on a gold file with unstamped and imported rows (FR-15).
+
+**Not in this task**: `save`/`load`, HTML, thresholds persisted to a file (there is none).

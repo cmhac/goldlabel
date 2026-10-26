@@ -1,6 +1,6 @@
 # 006 — Library, not TUI
 
-Status: **draft for Chris's review** (2026-10-26). Supersedes the interface of 001–005: the Textual TUI, projects, system settings, stage tracking and history are removed; the search, classifier, metrics and cost logic they were built on are kept and re-exposed as a Python library. Where this spec and 001–005 disagree about anything user-facing, this spec wins. Behaviour of the kept logic (similarity floor, bands, cache key, metrics definitions, pgvector read-only rules) is **unchanged** unless said otherwise.
+Status: **approved by Chris 2026-10-26** (decisions at the end); tasks in `tasks/`. Supersedes the interface of 001–005: the Textual TUI, projects, system settings, stage tracking and history are removed; the search, classifier, metrics and cost logic they were built on are kept and re-exposed as a Python library. Where this spec and 001–005 disagree about anything user-facing, this spec wins. Behaviour of the kept logic (similarity floor, bands, cache key, metrics definitions, pgvector read-only rules) is **unchanged** unless said otherwise.
 
 **Read order for an implementer:** this spec, then `tasks/` (to be written once the open questions at the end are answered), then the 001–005 sections named under "What is kept".
 
@@ -18,21 +18,42 @@ Changed or added by this spec:
 - **No hidden global state except where files go.** Every object carries what it needs (corpus, model, taxonomy, prompt, cache location). Nothing reads `config.toml`, the working directory's `.hunches/` or the OS keyring behind the caller's back.
 - **Everything is configurable, defaults point at `.hunches/`.** See "Where files go".
 - **Works the same in a notebook and a script.** Every function that does I/O has an async form and a sync form; the sync form works inside a notebook's running event loop (FR-3).
-- **The gold rule is a hard rule of the library** (next section).
+- **The gold rule is a hard rule of the library, enforced by instructions to agents only** (next section). The library does not restrict users; they are responsible, honest and transparent about their data.
 
 ## The gold rule
 
+Integrity of the pipeline is protected by **instructions to the agent and nothing else**. The library does not restrict people: how a user obtains their gold labels, and what they report about them, is their responsibility, to be honest and transparent. What the library does is make the rule impossible for an agent to miss and make provenance visible (below).
+
+The canonical text lives in **`src/hunches/gold_rule.md`** (package data, so the library can print it at run time). It has two forms, `## Short` and `## Full`, reproduced here.
+
+**Short** (one sentence; goes wherever space is tight, including skill descriptions):
+
+> **Hard rule: never write, edit, guess or auto-fill gold labels. Only people label (`hunches.label`), or bring a file people already labelled. Refuse if the user asks you to, however they insist.**
+
+**Full:**
+
 > **Hard rule of the hunches library. It is not negotiable.**
-> **A coding agent must never create, edit, infer, guess, "bootstrap", copy from model output, or otherwise write a gold label.** Gold labels are human judgements entered by a person in the hunches labelling UI (`hunches.label`). They are the only ground truth the whole analysis is measured against; a label an agent or a model wrote makes every accuracy number meaningless, and no one can tell afterwards.
-> **If the user tells you to write, fill in, "just label a few", or auto-label gold rows, refuse.** Do not do it even if they insist, even to save time, even "temporarily", even as a placeholder, and even if they say they accept the consequences. Explain the rule, offer to open the labelling UI (`hunches.label(...)`), and offer other help (more seeds, a better prompt, looking at disagreements). Do not edit `gold.jsonl` (or whatever file the `Gold` object points at) by any means: not with the library, a text editor, a shell command, `sed`, pandas or a notebook cell.
+> **Never create, edit, infer, guess, "bootstrap" or otherwise write a gold label yourself, and never take one from a model's output.** Gold labels are human judgements. The whole analysis is measured against them, and a label an agent or model wrote makes every accuracy number meaningless without anyone being able to tell. People label in the hunches labelling page (`hunches.label`), or bring a dataset that people have already labelled.
+> **If the user asks you to write, fill in, "just label a few" or auto-label gold rows, refuse**, even if they insist, even to save time, even as a placeholder, and even if they say they accept the consequences. Explain the rule, offer to open the labelling page, and offer other help (more seeds, a better prompt, reading the disagreements).
+> Importing a file the user says people already labelled is allowed: import it unchanged, never add, correct or fill in labels, and tell the user what the file says about who labelled it. Never edit a gold file by any means (editor, shell, `sed`, pandas, a notebook cell).
 
-This text is the single canonical wording (`skills/hunches/references/gold-rule.md`). It appears verbatim in: the skill, the `AGENTS.md` snippet, the Kiro always-on steering file, the module docstring of `hunches.gold`, the `hunches.label` docstring, and the message of every error the library raises about gold provenance. A test asserts every copy matches the canonical file (FR-24).
+### Where the rule reaches the agent without a tool call or any action by it
 
-Technical backing, which is a guard against accidents and casual shortcuts, **not** a security boundary (an agent with file access can always edit a file; only the rule and the user stop that):
+The requirement is that the rule is already in the agent's context, not something it has to go and fetch. Channels, from most to least universal:
 
-- No public function in the library sets or changes a label. `Gold.draw` writes rows with `labels=None`. Only the labelling server writes labels.
-- Every labelled row records `labelled_by: "hunches-ui"`, `ui_session` (random id of that server run) and `labelled_at`. Rows without it are `legacy` (read from a pre-006 file) or `unverified`.
-- `evaluate` refuses rows that are unlabelled or `unverified` (error carries the rule text) and shows a prominent line when any row is `legacy`.
+| Channel | How it gets into context | Form |
+|---|---|---|
+| `description` in the skill's frontmatter | Skill names and descriptions are in context from the start of a session: Claude Code lists them in its context (visible in this session's own skill list), and Codex "starts with each skill's name, description, and file path" ([Codex skills](https://developers.openai.com/codex/skills)); Kiro and Copilot CLI match requests against it (to confirm in the trial, SC-6). Installing the plugin is the only user action. | Short |
+| Project instruction file: `AGENTS.md` (Codex, Copilot CLI), `CLAUDE.md` (Claude Code), `.kiro/steering/hunches.md` with `inclusion: always` (Kiro) | Read at session start. The user pastes a block from the README once per project; the library offers it as `hunches.GOLD_RULE_FULL`. | Full |
+| What the library prints when the agent runs code that touches gold: `repr(Gold)`/`repr(GoldSet)`, the return of `Gold.draw`, the text `hunches.label` prints, and the message of any error raised about gold | Cell and command output goes straight back to the agent. | Short |
+| `SKILL.md` body | Loaded when the skill triggers. | Full |
+
+A plugin is installed from the repo without the Python package, so the skill files hold literal copies of the text. A test (FR-24) fails when any copy drifts from `src/hunches/gold_rule.md`, printing the text to paste.
+
+### What the library does and does not do about gold
+
+- Does: `Gold.draw` writes pending rows (`labels=None`); the labelling page stamps the labels it writes with `labelled_by: "hunches-ui"` and `labelled_at`; imported rows are stamped `labelled_by: "imported"`; `Evaluation` and the evaluation log show how many rows came from each source (and how many have no stamp), so a reader of the notebook can see what the numbers rest on.
+- Does not: refuse any gold file or any rows, require stamps, verify who labelled what, or try to stop a person (or an agent with file access) from editing a file. Those are choices for the user and the instructions to the agent.
 
 ## Where files go
 
@@ -40,7 +61,7 @@ One rule everywhere: **a path argument beats the setting beats the default.**
 
 - `hunches.settings.root` (a `pathlib.Path`): default `.hunches` in the current directory; the environment variable `HUNCHES_DIR` sets the initial value; assigning to it changes it for the process. Read at call time, so a notebook can change it mid-session.
 - Cache: `Classifier(cache=...)` and `search(..., cache=...)`: a directory, default `<root>/cache`, or `False` for none (no resume, no repeat-call savings). Cache entry layout and key are exactly today's (`<dir>/<sha256>.json`, `sha256(json([model, system_prompt, text]))`), so existing caches keep hitting. The cost and timing ledger is one file inside the cache directory.
-- Artifacts: each function that produces one takes `out=` (`path`, or `False` to keep it in memory only). Defaults, because a notebook build-out should leave files behind: `search` → `<root>/candidates.jsonl` (with `.meta.json` beside it), `Gold()` → `<root>/gold.jsonl`. `Classifier.classify` writes only when `out=` is given (an automated pipeline must name its output). `evaluate` and `band_sample` return values; their results have `.write(path)`.
+- Artifacts: each function that produces one takes `out=` (`path`, or `False` to keep it in memory only). Defaults, because a notebook build-out should leave files behind: `search` → `<root>/candidates.jsonl` (with `.meta.json` beside it), `Gold()` → `<root>/gold.jsonl`. `Classifier.classify` writes only when `out=` is given (an automated pipeline must name its output). `evaluate` returns a value and appends one line to the evaluation log, default `<root>/evals.jsonl` (`log=` to move it, `log=False` to turn it off); `band_sample` returns a value. Result objects have `.write(path)`.
 - Inputs are always explicit paths or objects: `read_seeds("seeds.csv")`, `Taxonomy.read("taxonomy.yaml")`, `Candidates.read("candidates.jsonl")`.
 
 ## The pieces
@@ -103,15 +124,18 @@ Today's model (`mode: single|multi`, labels with descriptions, `off_topic` built
 
 ### `Gold`, `GoldSet`, `label`
 
-- `Gold(path=None)` loads or creates the file (default `<root>/gold.jsonl`). Row: `id, text, labels, split ("dev"|"test"), labelled_by, ui_session, labelled_at` (`labels` is `null` while pending).
+- `Gold(path=None)` loads or creates the file (default `<root>/gold.jsonl`). Row: `id, text, labels, split ("dev"|"test")` plus optional informational `labelled_by` (`"hunches-ui"`, `"imported"`, or absent) and `labelled_at`; `labels` is `null` while pending. Any file in this schema works, so an existing human-labelled dataset can be used by pointing `Gold` at it.
+- `gold.import_rows(rows, split)`: adds already-labelled rows (dicts with `id`, `text`, `labels`) from a dataset people labelled elsewhere, stamping `labelled_by: "imported"`. Labels are validated against the taxonomy at `evaluate` time, so a mismatch is reported there (`gold.orphaned`), not refused here. The gold rule tells agents when this may be used.
 - `gold.draw(candidates, n=50, split="dev", seed=None)`: appends `n` pending rows sampled without replacement from candidates not already anywhere in gold (so dev and test stay disjoint). Never writes labels.
 - `gold.dev`, `gold.test`, `gold.pending`: `GoldSet` views of the file. `GoldSet.counts(taxonomy)` (per-label counts, so under-represented labels are visible), `.rows`, HTML repr.
 - `gold.orphaned(taxonomy)`: rows whose labels are no longer in the taxonomy. `gold.remove(ids)` moves rows to `<gold>.removed.jsonl` (never deletes); this is a destructive act the agent must ask the user about.
 - `hn.label(gold, taxonomy, *, split=None, block=True, open_browser=True, port=None)`: starts the labelling server (below) on `127.0.0.1`, prints the URL, opens the browser, and (by default) returns when the person presses **Done**. With `block=False` it returns a handle with `.url`, `.wait()` and `.stop()`. A second server on the same file is refused (lock file).
 
-### `evaluate(clf, gold_set, *, metric=None, target=None) -> Evaluation`
+### `evaluate(clf, gold_set, *, metric=None, target=None, log=None) -> Evaluation`
 
-Classifies the labelled rows (cached) and computes today's `compute_metrics` unchanged: exact-match accuracy, per-label precision/recall/F1, macro-F1, micro-F1, with `off_topic` a label like any other. `metric` defaults per mode as today (`accuracy` for `single`, `macro_f1` for `multi`); `target` adds PASS/FAIL beside the number (never colour alone). `Evaluation`: `.metrics`, `.score(name)`, `.disagreements` (rows with `id, text, gold, predicted, reasoning`), `.digest`, `.n`, `.write(path)`, HTML repr with the metrics table, per-label table and a browsable disagreement list. Refuses unlabelled or `unverified` rows (see the gold rule). Each evaluation of the **test** split appends one line (`digest`, metrics, time) to `<gold>.test_evals.jsonl`; the Evaluation repr shows "test split evaluated N times (M distinct prompts)" so reuse of the test set is visible, not hidden.
+Classifies the labelled rows (cached) and computes today's `compute_metrics` unchanged: exact-match accuracy, per-label precision/recall/F1, macro-F1, micro-F1, with `off_topic` a label like any other. `metric` defaults per mode as today (`accuracy` for `single`, `macro_f1` for `multi`); `target` adds PASS/FAIL beside the number (never colour alone). `Evaluation`: `.metrics`, `.score(name)`, `.disagreements` (rows with `id, text, gold, predicted, reasoning`), `.digest`, `.n`, `.write(path)`, HTML repr with the metrics table, per-label table and a browsable disagreement list. Pending (unlabelled) rows are skipped and counted in the repr. The repr also shows how many rows came from each source (`hunches-ui`, `imported`, unstamped). Nothing else is refused.
+
+**Evaluation log.** Every `evaluate` call, for any split, appends one JSON line to the log (default `<root>/evals.jsonl`): `time`, `split`, `n`, `gold` (path), `model`, `digest`, `prompt` (the full text, so the history of the prompt is self-contained), `taxonomy` (mode and labels with descriptions), `metric`, `target`, `score`, the full `metrics` (overall and per label), `dollars` (`null` if unknown), `live_calls`, `cached_calls`, `hunches` version. The file is append-only and never rewritten. `hn.eval_log(path=None) -> EvalLog` reads it: `.rows`, a repr table (time, split, n, score, short digest, model) and a line such as "test split evaluated 3 times (2 distinct prompts)", so reuse of the test set is visible. Classification runs and band samples are not evaluations and are not logged here.
 
 ### `band_sample(clf, candidates, *, per_band=30, seed=None) -> BandReport`
 
@@ -143,9 +167,9 @@ Started only by `hn.label`. Requirements:
 
 The skills are the replacement for the in-app assistant. They contain **guidance, not a state machine**.
 
-- `skills/hunches/SKILL.md` (frontmatter `name: hunches`, a `description` that triggers on content analysis / classifying a corpus / gold labels) and `skills/hunches/references/`: `gold-rule.md` (canonical), `workflow.md` (the idiom above and what to ask the user at each point: the brief, which seeds are true of a match, single vs multi label, what makes a good label description), `tuning.md` (read `ev.disagreements`, change one thing, re-evaluate, stop at the target; never tune on the test split), `running.md` (estimate, show cost, ask, `max_cost`), `reuse.md` (bundles, importing in a pipeline). Reference files load on demand.
+- `skills/hunches/SKILL.md` (frontmatter `name: hunches`; a `description` that triggers on content analysis / classifying a corpus / gold labels and **ends with the Short gold rule**, within the 1024-character description limit Kiro documents ([Kiro skills](https://kiro.dev/docs/skills/)); the body opens with the Full rule) and `skills/hunches/references/`: `workflow.md` (the idiom above and what to ask the user at each point: the brief, which seeds are true of a match, single vs multi label, what makes a good label description), `tuning.md` (read `ev.disagreements`, change one thing, re-evaluate, stop at the target; never tune on the test split), `running.md` (estimate, show cost, ask, `max_cost`), `reuse.md` (bundles, importing in a pipeline). Reference files load on demand.
 - Hard rules in the skill besides the gold rule: never run the full classification without showing the estimate and getting a yes; never evaluate the test split to guide edits; never put API keys or database URLs in a notebook, script or file (environment variables only); never edit a gold file.
-- `AGENTS.md` snippet for projects whose agent has no skills (Copilot in the editor, others): the gold rule plus pointers.
+- Project instruction block (README, also `hunches.GOLD_RULE_FULL`): the Full gold rule plus pointers, to paste into `AGENTS.md` / `CLAUDE.md` / `.github/copilot-instructions.md`. Covers agents without skills (Copilot in the editor, others).
 - **Packaging per harness** (from the research in this session; each must be installed and exercised in the real harness before release, see "Needs a human"):
   - Claude Code and Codex: `.claude-plugin/marketplace.json` + `.claude-plugin/plugin.json`. Claude Code installs with `/plugin marketplace add owner/repo` and `/plugin install hunches@hunches`; Codex reads `.claude-plugin/marketplace.json` as a legacy marketplace location and installs with `codex plugin marketplace add owner/repo` then `codex plugin add hunches@hunches` ([Claude Code](https://code.claude.com/docs/en/plugins-reference), [Codex](https://developers.openai.com/plugins/build/plugins)).
   - Copilot CLI and Kiro: a root `plugin.json` per the Agent Plugins 1.0 spec (skills under `skills/`), which Copilot CLI documents ([GitHub](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/plugins-creating)) and Kiro Powers use ([Kiro](https://kiro.dev/docs/powers/)); Kiro also via `npx skills add <owner/repo> -a kiro-cli -g` ([Kiro skills](https://kiro.dev/docs/skills/)).
@@ -167,9 +191,9 @@ The skills are the replacement for the in-app assistant. They contain **guidance
 
 Changed: functions take explicit arguments instead of reading `Config` and `Path(".hunches")` globally; `search.search` and friends take a corpus object; `cost` takes a cache directory; module-level `_MEMO` caches go.
 
-Removed: `app.py`, `screens/`, `theme.py`, `hunches.tcss`, `history.py`, `keys.py`, `system.py`, the model pickers, `files.py`'s state/approval/staleness/versions/chat/pipeline-status code, the `hunches` console script, and the dependencies `textual`, `keyring`, `platformdirs`, `python-dotenv`, `pytest-textual-snapshot`. All TUI tests and the `ui` test marker go. Specs 001–005 stay in the repo as history, each marked superseded in its header.
+Removed (the TUI is pulled out completely, with no deprecation period): `app.py`, `screens/`, `theme.py`, `hunches.tcss`, `history.py`, `keys.py`, `system.py`, the model pickers, `files.py`'s state/approval/staleness/versions/chat/pipeline-status code, the `hunches` console script, and the dependencies `textual`, `keyring`, `platformdirs`, `python-dotenv`, `pytest-textual-snapshot`. All TUI tests and the `ui` test marker go. Specs 001–005 stay in the repo as history, each marked superseded in its header.
 
-Not read any more, left alone if present in an old project: `config.toml`, `state.json`, `brief.md`, `chat/`, `history/`, `versions/`, `threshold.json`, `test_result.json`. Still readable: `seeds.csv`, `candidates.jsonl`, `taxonomy.yaml`, `prompt.md`, `gold.jsonl` (rows without provenance are `legacy`), `results.jsonl`, `cache/`.
+Not read any more, left alone if present in an old project: `config.toml`, `state.json`, `brief.md`, `chat/`, `history/`, `versions/`, `threshold.json`, `test_result.json`. Still readable: `seeds.csv`, `candidates.jsonl`, `taxonomy.yaml`, `prompt.md`, `gold.jsonl`, `results.jsonl`, `cache/`.
 
 ## Requirements
 
@@ -193,13 +217,13 @@ Not read any more, left alone if present in an old project: `config.toml`, `stat
 - FR-13 Reprs of large objects are bounded (a row cap with a "N more" line).
 
 **Gold and the labelling page**
-- FR-14 No public API sets or edits a label; `Gold.draw` writes `labels=None`; only the server writes labels and stamps provenance.
-- FR-15 `evaluate` refuses unlabelled/`unverified` rows with the gold-rule message and flags `legacy` rows in its repr.
+- FR-14 `Gold.draw` writes `labels=None`. Labels enter a gold file only through the labelling server (stamped `hunches-ui`) or `import_rows` (stamped `imported`); no other public function sets or edits a label.
+- FR-15 `evaluate` skips and counts pending rows, accepts any other well-formed rows (including a file produced elsewhere or by hand), and shows the per-source counts in its repr. It refuses nothing on provenance.
 - FR-16 `draw` never returns an id already in the gold file; dev and test are disjoint.
 - FR-17 The server meets every item in "The labelling web page": local-only, tokened, offline, autosave, resume, no prediction shown, `single`/`multi`/`off_topic` rules identical to `files.validate_labels`.
-- FR-18 The page follows `prefers-color-scheme` in both directions (tested by emulating both schemes in a headless browser; an HTTP-level test covers the API and validation).
+- FR-18 The page follows the system colour scheme. Tested without a browser: the served page has `<meta name="color-scheme" content="light dark">`, the served CSS contains `prefers-color-scheme: dark` rules, and the page contains no JavaScript that forces a scheme. The real rendering check is manual (see "Needs a human"). No Playwright or other browser automation dependency is added.
 - FR-19 A second `label` on the same gold file is refused while the first runs; a crashed server's stale lock is detected and replaced.
-- FR-20 The test-split ledger line is written on every test evaluation and shown in the repr.
+- FR-20 Every `evaluate` call appends exactly one line to the evaluation log with the fields listed under `evaluate`; the log is append-only; `log=False` writes nothing; `eval_log` reads it back and counts test-split evaluations and distinct prompts correctly.
 
 **Reuse**
 - FR-21 `save`/`load` round-trips a classifier; `load` warns when the digest differs from the recorded evaluation.
@@ -207,7 +231,7 @@ Not read any more, left alone if present in an old project: `config.toml`, `stat
 
 **Agent integration**
 - FR-23 The skill, references, `AGENTS.md` snippet, Kiro steering file and plugin manifests exist and validate (`claude plugin validate` for the Claude/Codex manifest).
-- FR-24 A test asserts the canonical gold-rule text appears verbatim in every location listed under "The gold rule" and in the provenance error message.
+- FR-24 `src/hunches/gold_rule.md` is the canonical text, exposed as `hunches.GOLD_RULE_SHORT` and `hunches.GOLD_RULE_FULL`. A test asserts the Short form appears verbatim in the skill `description`, and in the output of `repr(Gold)`, `Gold.draw` and `hn.label`; and the Full form in the `SKILL.md` body, the README instruction block and the Kiro steering file. On a mismatch it prints the text to paste.
 - FR-25 Docs: the README is rewritten around the notebook flow and the install commands for each harness; `AGENTS.md`/`CLAUDE.md` of this repo are updated (stack, commands, layout, principles) and no longer mention Textual.
 
 ## Success criteria
@@ -221,19 +245,19 @@ Not read any more, left alone if present in an old project: `config.toml`, `stat
 
 ## Edge cases to cover in tests
 
-Empty candidates; a capped search; `n` larger than available candidates in `draw`; taxonomy changed after labelling (orphans); two prompts evaluated back to back; kernel restart mid-run; `out=` file with rows from a different `run`; unknown model price; a pending gold row in `evaluate`; a gold file hand-edited by a person (shows as `unverified`, with the message explaining how to relabel it in the UI); a browser tab closed mid-label; a port already in use.
+Empty candidates; a capped search; `n` larger than available candidates in `draw`; taxonomy changed after labelling (orphans); two prompts evaluated back to back; kernel restart mid-run; `out=` file with rows from a different `run`; unknown model price; a pending gold row in `evaluate`; a gold file produced elsewhere or edited by hand (accepted; unstamped rows are counted in the repr and the log); imported rows whose labels are not in the taxonomy (reported as orphans); a browser tab closed mid-label; a port already in use.
 
 ## Out of scope
 
-A CLI; MCP server; hooks; a persisted status or approval system; undo/redo (use git); web pages for thresholds, results browsing or settings (notebook reprs cover them); multi-annotator labelling and agreement scores; hosting the labelling page for remote people; embedding the corpus; writing to the corpus; a keyring or any key storage.
+Technical enforcement of gold integrity (provenance checks that refuse data); a CLI; MCP server; hooks; a persisted status or approval system; undo/redo (use git); web pages for thresholds, results browsing or settings (notebook reprs cover them); multi-annotator labelling and agreement scores; hosting the labelling page for remote people; embedding the corpus; writing to the corpus; a keyring or any key storage.
 
-## Open questions for Chris
+## Decisions recorded (Chris, 2026-10-26)
 
-1. **[NEEDS CLARIFICATION] Remove the TUI in this branch?** Recommendation: yes, in the last task of 006, since `v0.1.0` has not been tagged or published (so no released version loses it) and keeping both doubles the maintenance this spec exists to remove. The old code stays in git history.
-2. **[NEEDS CLARIFICATION] Importing existing human-labelled gold** (e.g. a spreadsheet labelled elsewhere). Recommendation: no importer; a person who wants this can place a file by hand, rows then show as `unverified` and `evaluate` refuses them until relabelled in the UI, or the person accepts `legacy` treatment. An importer is exactly the tool an agent would misuse.
-3. **[NEEDS CLARIFICATION] Test-split ledger** (`.test_evals.jsonl`, FR-20). Recommendation: keep; it is a log, not status, and it makes test-set reuse visible. Drop it if you read it as tracking.
-4. **[NEEDS CLARIFICATION] Headless browser in CI** for FR-18. Recommendation: add Playwright as a dev dependency and run the dark/light test in CI only. Alternative: assert only that the served CSS contains the `prefers-color-scheme` rules and the meta tag.
-5. **[NEEDS CLARIFICATION] Where the gold rule's canonical text lives.** Recommendation: `skills/hunches/references/gold-rule.md`, copied into the package data at build time so `hunches.gold` can show it at runtime and the consistency test (FR-24) has one source.
+1. **The TUI is removed completely**, in this spec, with no deprecation period. `v0.1.0` was never tagged or published.
+2. **Existing human-labelled gold datasets are allowed** (`Gold(path)` reads any file in the row schema; `Gold.import_rows`). No restrictive checks; instructions to the agent are the only enforcement, users are responsible, honest and transparent.
+3. **Every evaluation run is logged** (all splits), as a history, not a status.
+4. **No Playwright.** The dark/light behaviour is covered by HTTP-level tests of the served page and CSS, plus the manual browser check under "Needs a human".
+5. **Canonical gold-rule text:** `src/hunches/gold_rule.md` (judgement call, see "The gold rule"): it is package data the library prints at run time, and the copies that must reach agents automatically (skill description, instruction-file block, steering file, skill body) are held in sync by a test.
 
 ## Needs a human (stop and report, don't fake)
 

@@ -1,0 +1,16 @@
+# 07 — `Classifier`, `Predictions`, `Estimate`
+
+Spec: "`Classifier`", FR-4, FR-6, FR-7, FR-8, FR-9, "Notebooks and scripts" (progress).
+
+**Do** in `classifier.py`:
+- `Classifier(model, taxonomy, prompt, *, cache=None)` as a frozen dataclass; `with_prompt(text)`, `with_taxonomy(t)`; `.digest` is today's `run_digest(prompt, taxonomy, model)`. `system_prompt`, `Prediction` (with `cached`, `error`, `reasoning`) and the per-call logic (a fresh `Agent` per call, `Literal` output type from the taxonomy, output validator with `ModelRetry`, cache read/write, cost record) are kept exactly; only their inputs change from globals to the object. The cache key and entry format must equal the task-01 fixture's.
+- `classify(items, *, out=None, max_cost=None, concurrency=8, progress=True) -> Predictions` and `aclassify(...)`. `items`: `list[str]` (id = position), rows with `id` and `text`, or any object with `.rows`. `Predictions`: `.rows`, `.errors`, `.labels`, `.cost`, plain `__repr__` (counts, cached vs live, errors, cost or `cost ?`). Per-item failures are returned, never raised, never cached.
+- `out`: append `{id, text, labels, reasoning, run, ...other input fields}` as each item completes (flush per line); ids that already have a successful row under the same `run` in `out` are skipped; rows under another `run` are re-classified (the old row stays in the file; readers take the last one per id: say so in the docstring).
+- `estimate(items) -> Estimate`: `n`, `cached`, `live`, `dollars` (`None` if unknown), `seconds` (`None` if no timing recorded), using the cache, `per_call_dollars` and `items_per_second` as stage 8 did. Plain `__repr__`; `cost ?` plus a warning when `dollars is None`. Calls no model (prove by counting).
+- `max_cost`: raise `CostLimit` before starting when `estimate.dollars > max_cost`; stop with `CostLimit` mid-run when live spend crosses it, leaving every finished row in `out`; if the price is unknown and `max_cost` is set, raise `CostLimit` with that explanation. Never treat unknown as 0.
+- `progress`: one updating line on a terminal/notebook (done/total, live vs cached, running cost); `False` silences; a callable gets `(done, total, info)`. Keep it a few lines; no new dependency.
+- Delete the old module-level `classify`, `classify_many`, `is_cached`; remove `candidates` and `files` imports that are no longer needed.
+
+**Tests (red first, `FunctionModel`, counting calls)**: the fixture's cached item is a hit with zero model calls; a prompt change makes exactly one live call per item (SC-3); an identical rerun makes zero; killing a run after k rows (raise from the model on item k+1) then rerunning makes only the missing live calls (FR-7); a validation failure after retries is an `error` row and is not cached; `estimate` makes zero model calls and its numbers match hand-computed ones, including `None` with an unknown-price model; `max_cost` refusal before start, stop mid-run with rows kept, and refusal on unknown price; `with_prompt` leaves the original unchanged and changes `digest`; same code from sync, async and inside a running loop; `out` resume with rows of another `run`.
+
+**Not in this task**: gold, metrics, `save`/`load` (task 10), HTML.
