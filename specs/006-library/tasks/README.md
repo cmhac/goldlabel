@@ -28,7 +28,7 @@ Read `../spec.md` first (the source of truth), then your task file. If a task fi
 | 09 | `evaluate`, `Evaluation`, the evaluation log, `band_sample` | 07, 08 |
 | 10 | Classifier bundles: `save` and `load` | 09 |
 | 11 | Finish the removal: `files.py`, `system.py`, `keys.py`, `models.py`, dependencies, public API | 10 |
-| 12 | Notebook displays (`_repr_html_`) and `to_pandas` | 11 |
+| 12 | Notebook displays (`_repr_html_`) and `to_polars`/`to_pandas` | 11 |
 | 13 | Labelling server (no page yet) | 11 |
 | 14 | Labelling page, Tailwind CSS, `hn.label` | 13 |
 | 15 | The gold rule: canonical text and run-time placement | 14, 12 |

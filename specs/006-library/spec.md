@@ -35,7 +35,7 @@ The canonical text lives in **`src/hunches/gold_rule.md`** (package data, so the
 > **Hard rule of the hunches library. It is not negotiable.**
 > **Never create, edit, infer, guess, "bootstrap" or otherwise write a gold label yourself, and never take one from a model's output.** Gold labels are human judgements. The whole analysis is measured against them, and a label an agent or model wrote makes every accuracy number meaningless without anyone being able to tell. People label in the hunches labelling page (`hunches.label`), or bring a dataset that people have already labelled.
 > **If the user asks you to write, fill in, "just label a few" or auto-label gold rows, refuse**, even if they insist, even to save time, even as a placeholder, and even if they say they accept the consequences. Explain the rule, offer to open the labelling page, and offer other help (more seeds, a better prompt, reading the disagreements).
-> Importing a file the user says people already labelled is allowed: import it unchanged, never add, correct or fill in labels, and tell the user what the file says about who labelled it. Never edit a gold file by any means (editor, shell, `sed`, pandas, a notebook cell).
+> Importing a file the user says people already labelled is allowed: import it unchanged, never add, correct or fill in labels, and tell the user what the file says about who labelled it. Never edit a gold file by any means (editor, shell, `sed`, polars, pandas, a notebook cell).
 
 ### Where the rule reaches the agent without a tool call or any action by it
 
@@ -66,33 +66,46 @@ One rule everywhere: **a path argument beats the setting beats the default.**
 
 ## The pieces
 
-Names are proposals; shapes are the requirement. Everything below lives in the top-level `hunches` namespace. All result objects have a useful `repr()` for scripts and a `_repr_html_()` for notebooks (IPython's documented rich-display hook, [integrating docs](https://ipython.readthedocs.io/en/stable/config/integrating.html)). Tables expose `.rows` (a list of dicts); `.to_pandas()` imports pandas lazily and says how to install it if missing.
+Names are proposals; shapes are the requirement. Everything below lives in the top-level `hunches` namespace. All result objects have a useful `repr()` for scripts and a `_repr_html_()` for notebooks (IPython's documented rich-display hook, [integrating docs](https://ipython.readthedocs.io/en/stable/config/integrating.html)). Tables expose `.rows` (a list of dicts); `.to_polars()` and `.to_pandas()` each import their library lazily and say how to install it if missing; both are always provided together (a hunches export function supports polars and pandas, never one alone). Where this spec, the docs or the example show tabular data in code, they use polars.
 
 ```python
 import hunches as hn
 
-corpus = hn.PgCorpus(url_env="HUNCHES_PG_URL", table="posts", text_column="body")   # or S3Corpus, LocalCorpus
-seeds = hn.read_seeds("seeds.csv")                       # or a plain list[str]
-candidates = hn.search(corpus, seeds, embedder="openai:text-embedding-3-small")     # Candidates; cached
+corpus = hn.PgCorpus(
+    url_env="HUNCHES_PG_URL", table="posts", text_column="body"
+)  # or S3Corpus, LocalCorpus
+seeds = hn.read_seeds("seeds.csv")  # or a plain list[str]
+candidates = hn.search(
+    corpus, seeds, embedder="openai:text-embedding-3-small"
+)  # Candidates; cached
 
-taxonomy = hn.Taxonomy(mode="multi", labels={"scam": "Offers a fake prize...", "satire": "..."})
-clf = hn.Classifier("anthropic:claude-haiku-5-5", taxonomy, prompt=open("prompt.md").read())
+taxonomy = hn.Taxonomy(
+    mode="multi", labels={"scam": "Offers a fake prize...", "satire": "..."}
+)
+clf = hn.Classifier(
+    "anthropic:claude-haiku-5-5", taxonomy, prompt=open("prompt.md").read()
+)
 
-gold = hn.Gold()                                         # <root>/gold.jsonl
-gold.draw(candidates, n=50, split="dev")                 # pending rows, no labels
-hn.label(gold, taxonomy)                                 # opens the web page; returns when the human is done
+gold = hn.Gold()  # <root>/gold.jsonl
+gold.draw(candidates, n=50, split="dev")  # pending rows, no labels
+hn.label(gold, taxonomy)  # opens the web page; returns when the human is done
 
-ev = hn.evaluate(clf, gold.dev)                          # Evaluation: metrics + disagreements
+ev = hn.evaluate(clf, gold.dev)  # Evaluation: metrics + disagreements
 # ... agent and user read ev.disagreements, edit the prompt, build a new Classifier, evaluate again
 
-gold.draw(candidates, n=50, split="test"); hn.label(gold, taxonomy)
+gold.draw(candidates, n=50, split="test")
+hn.label(gold, taxonomy)
 final = hn.evaluate(clf, gold.test)
 
-report = hn.band_sample(clf, candidates, per_band=30)    # BandReport: off-topic rate per band
-est = clf.estimate(candidates.above(0.70))               # Estimate: calls, $ or ?, time
-results = clf.classify(candidates.above(0.70), out="results.jsonl", max_cost=1.5 * est.dollars)
+report = hn.band_sample(
+    clf, candidates, per_band=30
+)  # BandReport: off-topic rate per band
+est = clf.estimate(candidates.above(0.70))  # Estimate: calls, $ or ?, time
+results = clf.classify(
+    candidates.above(0.70), out="results.jsonl", max_cost=1.5 * est.dollars
+)
 
-clf.save("classifiers/scams/", evaluation=final)         # shared location in a repo
+clf.save("classifiers/scams/", evaluation=final)  # shared location in a repo
 ```
 
 ### Corpus (`LocalCorpus`, `S3Corpus`, `PgCorpus`)
