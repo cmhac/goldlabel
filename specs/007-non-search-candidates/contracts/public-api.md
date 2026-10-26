@@ -37,7 +37,7 @@ def get_candidates(
 | `regex=True` or `server_side=True` without `keywords` | refused |
 | `limit` below 1 | refused |
 | a blank term, or a pattern with `p.match("")` | refused, names the term |
-| invalid regex (client side) | `re.error` message naming the pattern, raised before the corpus is read |
+| invalid regex (Python side) | `re.error` message naming the pattern, raised before the corpus is read; not applied to the regex strings of a `server_side=True` call, where the database rejects an invalid one and the error names the term |
 | `server_side=True` on a `Table` or `S3Corpus` | refused: only a `PgCorpus` can filter on the server |
 | `server_side=True` with a compiled `re.Pattern` | refused, names the term |
 | seeds on a `Table` with no `vector_column` | refused: the table has no embedding column; keywords and the whole corpus need none |
@@ -48,7 +48,10 @@ def get_candidates(
 - No filter: all items in corpus order; `limit` keeps the first N.
 - `keywords`: items matching any term, ranked (data model); `limit` keeps the best N; memory is
   bounded by `limit` (streaming `nsmallest`).
-- `seeds`: as `search` did, plus `limit` keeps the N most similar.
+- `seeds`: as `search` did, plus `limit` keeps the N most similar. A `Table` is read once for all
+  seeds (`search_table`), not once per seed.
+- Async: every blocking read runs in one `asyncio.to_thread` call; the sync form works inside a
+  running notebook loop.
 - `source` on the result is `"seeds"`, `"keywords"` or `"all"`.
 - Output file: `out` a path writes it (all sources); `out is None` writes
   `<settings.root>/candidates.jsonl` for seeds only; `out=False` writes nothing.
@@ -59,12 +62,12 @@ def get_candidates(
 One named-cursor statement per call, read-only transaction from `pg_connect`:
 
 ```sql
-SELECT {id}, {text} FROM {table} WHERE {text} ILIKE ANY(%s) ORDER BY {id}     -- plain text
-SELECT {id}, {text} FROM {table} WHERE {text} ~ ANY(%s)     ORDER BY {id}     -- regex strings
+SELECT {id}, {text} FROM {table} WHERE {text} ILIKE ANY(%s::text[]) ORDER BY {id}     -- plain text
+SELECT {id}, {text} FROM {table} WHERE {text} ~ ANY(%s::text[])     ORDER BY {id}     -- regex strings
 -- two-table layout: ... FROM {table} t JOIN {text_table} x ON x.{text_id} = t.{id} WHERE x.{text} ...
 ```
 
-The single parameter is a `text[]`. For plain text each element is `%` + term with `\`, `%`, `_`
+The single parameter is a list of strings, cast to `text[]` in the statement. For plain text each element is `%` + term with `\`, `%`, `_`
 escaped by a backslash + `%`. For regex strings the elements are the strings unchanged. Identifiers
 only ever come from `psycopg.sql.Identifier`. The returned rows are matched again in Python to
 compute `terms_matched` and `matches`; a row that counts zero is kept and ranks last, and one

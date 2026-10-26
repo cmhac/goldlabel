@@ -93,9 +93,9 @@ specs/007-non-search-candidates/
 ```text
 src/hunches/
 ├── __init__.py          # exports: -LocalCorpus -search -asearch  +Table +get_candidates +aget_candidates
-├── search.py            # -LocalCorpus  +Table, table_rows(), iter_items() per corpus kind (Table, Pg
-│                        #   incl. two-table and server-side filter, S3 list_vectors); search_vectors
-│                        #   reads a Table's vectors instead of a local folder
+├── search.py            # -LocalCorpus  +Table, table_rows(), readers per corpus kind (Table, Pg
+│                        #   incl. two-table and server-side filter, S3 list_vectors),
+│                        #   search_table() (one pass for all seeds); search_vectors loses its local branch
 ├── candidates.py        # Candidates.source + guards + repr branches + read/write meta;
 │                        #   get_candidates/aget_candidates (seeds branch = the old asearch body)
 └── evaluation.py        # band_sample: reject non-seed lists
@@ -111,7 +111,8 @@ tests/
 └── fixtures/pre006/corpus → a single table file
 
 examples/sample/         # corpus/ folder → corpus.jsonl; walkthrough.py and .ipynb together
-README.md, docs/agent-instructions.md, AGENTS.md, skills/hunches/**, .kiro/steering/hunches.md
+README.md, docs/agent-instructions.md, AGENTS.md, skills/hunches/**, .kiro/steering/hunches.md,
+pyproject.toml + plugin.json + .claude-plugin/*.json (descriptions), examples/sample/README.md
 ```
 
 **Structure Decision**: the existing single-package layout. Corpus descriptors and all reading code
@@ -127,6 +128,12 @@ them (shortcut: `search.py` is already about 700 lines; split only if a reviewer
 - **S3 order is the service's**: documented in the contract; a `limit` there is not repeatable.
 - **Ranking recount on server-side regexes can disagree with Postgres**: kept rows rank last with a
   single warning (contract).
+- **The constitution calls the library "already embedded"** (its first sentence). FR-019 and FR-024
+  make that wrong, and only the user can amend it (`/speckit-constitution`, a wording-only PATCH).
+  Gated task; documentation changes proceed meanwhile and `AGENTS.md` carries a note until approved.
+- **Seed search over a `Table`** reads the table once for all seeds (`search_table`), not once per
+  seed as the old local branch did (research R11).
+- **Async**: blocking reads run in one `asyncio.to_thread` call (research R12).
 - **Breaking rename**: all callers found by grep (research R9); `test_public_api.py` pins the new
   names; `test_docs.py` and `test_skills.py` fail on any doc block that still uses a removed name.
 - **The "not run here" paths**: Parquet through pandas needs pyarrow, which is not installed in

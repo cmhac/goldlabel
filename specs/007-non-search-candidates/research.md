@@ -62,7 +62,9 @@ marks what only a human with a real service can check.
   case-insensitive matching; the spec now says "Python's simple case-insensitive matching").
   Flags are per pattern, so one pattern's flags cannot leak into another
   ([`re`](https://docs.python.org/3/library/re.html): `Pattern.flags` carries them).
-- **Validation**: a bare `str` instead of a list is a `TypeError` (as `seeds` today); an empty list,
+- **Validation**: Python compiles the patterns before any read, except the regex strings of a
+  `server_side=True` call, whose syntax is the database's (Python must not reject valid Postgres
+  syntax); there the database's error is the check. A bare `str` instead of a list is a `TypeError` (as `seeds` today); an empty list,
   an empty/blank term, or a pattern for which `p.match("")` succeeds is a `ValueError` naming it.
   The last check misses zero-width patterns such as `\b` (it does not match `""`), marked in code
   `# shortcut: only patterns matching the empty string are refused, zero-width ones like \b still
@@ -92,9 +94,12 @@ marks what only a human with a real service can check.
     row is detected only on the unfiltered read; stated in the contract.
   - identifiers through `psycopg.sql.Identifier(*name.split(".", 1))` as the existing code does.
 - **Filter** (only with `server_side=True`; never user text in the statement):
-  - plain-text terms: `{text} ILIKE ANY(%s)` with the parameter a `text[]` of `%term%` where each
-    term has `\`, `%`, `_` escaped with a backslash (backslash is `LIKE`'s default escape);
-  - regex strings: `{text} ~ ANY(%s)` with the strings unchanged (case-sensitive; flags inline).
+  - plain-text terms: `{text} ILIKE ANY(%s::text[])` with the parameter a list of `%term%` where
+    each term has `\`, `%`, `_` escaped with a backslash (backslash is `LIKE`'s default escape);
+  - regex strings: `{text} ~ ANY(%s::text[])` with the strings unchanged (case-sensitive; flags
+    inline).
+  - the explicit `::text[]` cast copies what `search_pg_exact` already does (`unnest(%s::text[])`,
+    `search.py:350`), so the statement does not depend on how the driver types a list of strings.
 - **Verified** against the PostgreSQL documentation
   ([pattern matching](https://www.postgresql.org/docs/current/functions-matching.html),
   [`ANY`](https://www.postgresql.org/docs/current/functions-comparisons.html)): `ILIKE` is
@@ -161,17 +166,29 @@ Grep of the working tree (excluding `.venv` and `specs/001`-`006`, which stay as
   `test_docs.py`, `test_search_pg_*.py`, `tests/fixtures/pre006/README.md`. The `importlib.import_module("hunches.search")`
   workaround in the pg tests stays valid (the module is importable by name either way) and can be
   simplified later.
+- **Wording that calls the library "already embedded"** (spec FR-019): `pyproject.toml` (the
+  `description`), `src/hunches/__init__.py` (docstring), `plugin.json`,
+  `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` (two descriptions),
+  `skills/hunches/SKILL.md` (description and first paragraph), `skills/hunches/references/workflow.md`
+  ("The corpus is already embedded"), `README.md` (first paragraph and the agent block),
+  `docs/agent-instructions.md`, `.kiro/steering/hunches.md`, `AGENTS.md` ("What this repo is").
+  **`.specify/memory/constitution.md` line 3 says the same**; the constitution wins over
+  `AGENTS.md` and only the user can amend it, so this is a gated task (see R12).
 - **Docs**: `README.md` (and the block that must equal `docs/agent-instructions.md`),
   `AGENTS.md` (layout line, package quirk paragraph, "What this repo is"), `skills/hunches/SKILL.md`,
   `skills/hunches/references/workflow.md` (and the other references that show `hn.search`),
   `.kiro/steering/hunches.md` if it names them.
-- **Example**: `examples/sample/corpus/{items.jsonl,vectors.npy,meta.json}` becomes
+- **Example**: `examples/sample/README.md` (describes `corpus/`) changes with it.
+  `examples/sample/corpus/{items.jsonl,vectors.npy,meta.json}` becomes
   `examples/sample/corpus.jsonl` (one JSON object per line: `id`, `text`, `embedding`), used as
   `hn.Table("corpus.jsonl", vector_column="embedding", embedding_model="hand-built-2d")`;
   `walkthrough.py` and `walkthrough.ipynb` change together (a test enforces they match).
-- `tests/fixtures/pre006/corpus` is read by `test_pre006_fixtures.py` through `LocalCorpus`; the
-  fixture directory is converted the same way, keeping the pre-006 candidate, gold, cache and ledger
-  files untouched (they do not depend on the corpus format).
+- `tests/test_pre006_fixtures.py` reads `tests/fixtures/pre006/corpus` through `LocalCorpus` and
+  `search_vectors`, and `test_corpus_is_well_formed` asserts the three-file layout
+  (`meta.json`, `items.jsonl`, `vectors.npy` shape). Both tests are rewritten against a single
+  `corpus.jsonl` and `search_table` (R11), with the same hand-computed numbers from
+  `expected.json`; the pre-006 candidate, gold, cache and ledger files are untouched (they do not
+  depend on the corpus format).
 
 ## R10. Package-name shadowing
 
@@ -179,6 +196,36 @@ Grep of the working tree (excluding `.venv` and `specs/001`-`006`, which stay as
 `search` is no longer exported the attribute is the submodule again; `hunches.cost` and
 `hunches.settings` still shadow theirs. `AGENTS.md`'s quirk paragraph is rewritten to name only
 those two. `tests/test_public_api.py` pins `__all__`; it is updated, not loosened.
+
+## R11. Seed search over a `Table` reads the table once
+
+- **Problem found in review**: `asearch` calls `search_vectors` once per seed, and the old local
+  branch re-read `vectors.npy` and `items.jsonl` on every call. That was cheap for `.npy`; for a
+  JSONL or CSV table with embeddings, every seed would re-parse and re-validate the whole file.
+- **Decision**: a new `search_table(table, vectors, floor, embedding_model) -> (per_seed, capped)`
+  in `search.py`, shaped like `search_pg_exact` (one pass for all seeds). It reads the table once,
+  builds the float32 matrix once, normalises once, and does one matrix product for all seeds with
+  the same cosine arithmetic as before (ties by earlier seed are decided later, in the unchanged
+  merge loop). `capped` is always `False`. `get_candidates` calls it with a plain `if` for a
+  `Table`, as it does for `search_pg_exact` today. The `LocalCorpus` branch of `search_vectors` is
+  deleted; the function keeps its S3 and pgvector-index branches.
+- **Rejected**: caching the parsed table on the `Table` object (hidden state, Principle V);
+  keeping per-seed calls (the slowdown above).
+
+## R12. Async form, and the constitution's description line
+
+- **Blocking reads**: the new readers are blocking (file reads, `psycopg`, `boto3`). The async
+  `aget_candidates` runs each whole read-and-match as a single `asyncio.to_thread(...)` call, as
+  the pgvector exact branch already does (`candidates.py:203`), so the event loop is never blocked
+  and no generator crosses a thread. Cancelling a running read is out of scope (no `Stop` handle,
+  as the spec asks for none).
+- **Constitution wording (needs the user)**: the constitution's opening sentence calls the library
+  one "for content analysis over an already-embedded corpus". Spec FR-019 and FR-024 make that
+  untrue. `AGENTS.md` may not disagree with the constitution, and amending it needs the user's
+  approval through `/speckit-constitution` (a PATCH: wording only, no principle changes). The task
+  list holds this as a gated task: the documentation tasks proceed, the constitution line is
+  changed only after the user approves the new sentence, and the plan records it as a known
+  mismatch until then.
 
 ## Open items carried to tasks (none block the design)
 
