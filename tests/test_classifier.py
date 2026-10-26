@@ -3,6 +3,7 @@ import json
 from dataclasses import FrozenInstanceError
 
 import pytest
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.usage import RequestUsage
@@ -473,6 +474,102 @@ def test_failed_items_are_not_written_and_are_retried_next_time(tmp_path):
     assert not path.exists() or path.read_text() == ""
     good, _ = scripted(["a"])
     assert clf(good).classify(["x"], out=path).labels == [["a"]]
+
+
+# --- model API errors (FR-8) ---------------------------------------------------------------------
+
+
+def flaky(fail, exc, name="m"):
+    """FunctionModel that raises `exc()` when the text is in `fail` and answers ["a"] otherwise."""
+    calls = []
+
+    def fn(messages, info: AgentInfo):
+        text = messages[-1].parts[-1].content
+        calls.append(text)
+        if text in fail:
+            raise exc()
+        return ModelResponse(
+            parts=[ToolCallPart(info.output_tools[0].name, out(["a"]))]
+        )
+
+    return FunctionModel(fn, model_name=name), calls
+
+
+def http(code):
+    return lambda: ModelHTTPError(code, "m", body="nope")
+
+
+def test_http_429_and_5xx_become_error_rows_not_a_crash(tmp_path):
+    path = tmp_path / "res.jsonl"
+    model, _ = flaky({"t1", "t2"}, http(429))
+    model2, _ = flaky({"t2"}, http(503))
+    p = clf(model).classify(["t0", "t1", "t2", "t3"], out=path, progress=False)
+    assert p.labels == [["a"], None, None, ["a"]]
+    assert [e["id"] for e in p.errors] == [1, 2]
+    assert "429" in p.errors[0]["error"] and "reasoning" not in p.errors[0]
+    assert "503" in clf(model2).classify(["t2"], progress=False).errors[0]["error"]
+    # failed items are not written to out and not cached
+    written = [json.loads(line)["id"] for line in path.read_text().splitlines()]
+    assert sorted(written) == [0, 3]
+    ok, calls = flaky(set(), http(500))
+    p = clf(ok).classify(["t0", "t1", "t2", "t3"], out=path, progress=False)
+    assert sorted(calls) == ["t1", "t2"] and p.labels == [["a"]] * 4 and p.resumed == 2
+
+
+def test_timeout_and_connection_errors_become_error_rows():
+    exc = lambda: ModelAPIError("m", "Connection error.")
+    model, _ = flaky({"x"}, exc)
+    p = clf(model).classify(["x", "y"], progress=False)
+    assert p.labels == [None, ["a"]]
+    assert p.errors[0]["error"] == "Connection error."
+    assert p.live == 2
+
+
+def test_api_error_is_never_cached():
+    model, calls = flaky({"x"}, http(500))
+    clf(model).classify(["x"], progress=False)
+    clf(model).classify(["x"], progress=False)
+    assert calls == ["x", "x"]
+
+
+def test_authentication_error_stops_the_run_at_once(tmp_path):
+    path = tmp_path / "res.jsonl"
+    model, calls = flaky({"t2"}, http(401))
+    with pytest.raises(ModelHTTPError, match="401"):
+        clf(model).classify(
+            [f"t{i}" for i in range(8)], out=path, concurrency=1, progress=False
+        )
+    assert calls == ["t0", "t1", "t2"]  # nothing after the first 401
+    assert [json.loads(line)["id"] for line in path.read_text().splitlines()] == [0, 1]
+    model, calls = flaky({"x"}, http(403))
+    with pytest.raises(ModelHTTPError, match="403"):
+        clf(model).classify(["x", "y"], concurrency=1, progress=False)
+
+
+def test_five_api_errors_in_a_row_stop_the_run_and_keep_finished_rows(tmp_path):
+    path = tmp_path / "res.jsonl"
+    texts = ["ok0", "ok1"] + [f"bad{i}" for i in range(8)]
+    model, calls = flaky({t for t in texts if t.startswith("bad")}, http(429))
+    with pytest.raises(ModelAPIError, match="5 model API errors in a row") as e:
+        clf(model).classify(texts, out=path, concurrency=1, progress=False)
+    assert "429" in str(e.value)
+    assert calls == ["ok0", "ok1", "bad0", "bad1", "bad2", "bad3", "bad4"]
+    assert [json.loads(line)["id"] for line in path.read_text().splitlines()] == [0, 1]
+
+
+def test_a_success_resets_the_run_of_api_errors():
+    texts = ["b0", "b1", "b2", "b3", "ok", "b4", "b5", "b6", "b7", "ok2"]
+    model, calls = flaky({t for t in texts if t.startswith("b")}, http(500))
+    p = clf(model).classify(
+        texts, concurrency=1, progress=False
+    )  # 4 + 4 in a row: fine
+    assert len(p.errors) == 8 and len(calls) == 10
+
+
+def test_programming_errors_in_the_model_call_still_propagate():
+    model, _ = flaky({"x"}, lambda: ZeroDivisionError("bug"))
+    with pytest.raises(ZeroDivisionError):
+        clf(model).classify(["x"], progress=False)
 
 
 # --- Predictions and progress --------------------------------------------------------------------

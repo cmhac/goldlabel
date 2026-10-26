@@ -9,7 +9,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 from pydantic_ai import Agent, ModelRetry
-from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.exceptions import (
+    ModelAPIError,
+    ModelHTTPError,
+    UnexpectedModelBehavior,
+)
 from pydantic_ai.models import Model
 
 from hunches import _sync
@@ -35,6 +39,14 @@ class Prediction:
     dollars: float | None = (
         0.0  # what this call cost; 0.0 for a cache hit, None if unpriced
     )
+    api_error: bool = False  # `error` is a model API error (not a validation failure)
+
+
+# Stop a run after this many model API errors in a row (completion order, cache hits ignored): an
+# outage or a bad setting would otherwise fail, and bill the retries of, every remaining item.
+MAX_API_ERRORS_IN_A_ROW = 5
+# These statuses mean every item would fail the same way, so the run stops at the first one.
+FATAL_STATUSES = (401, 403)
 
 
 class CostLimit(Exception):
@@ -235,6 +247,10 @@ class Classifier:
             result = await agent.run(text)
         except UnexpectedModelBehavior as e:
             return Prediction(None, error=e.message)
+        except ModelAPIError as e:
+            if isinstance(e, ModelHTTPError) and e.status_code in FATAL_STATUSES:
+                raise
+            return Prediction(None, error=e.message, api_error=True)
         usage = result.usage
         dollars = messages_dollars(result.new_messages())
         record(self.cache, name, usage, dollars)
@@ -269,7 +285,9 @@ class Classifier:
         classified again and the old row stays in the file, so readers must take the last row per id.
         `max_cost`: raise `CostLimit` before starting when the estimate is over it or the price is
         unknown; stop with `CostLimit` mid-run when live spend crosses it (finished rows are kept).
-        `progress`: True prints one updating line on a terminal or in a notebook, False is silent,
+        A model API error (HTTP 429/5xx, timeout, connection error) is an error row too, but 401/403
+        raise at once and `MAX_API_ERRORS_IN_A_ROW` of them in a row raise `ModelAPIError`; finished
+        rows are kept. `progress`: True prints one updating line on a terminal or in a notebook, False is silent,
         a callable gets `(done, total, info)` with `info` = live, cached, errors, cost.
         """
         run = self.digest
@@ -310,6 +328,7 @@ class Classifier:
         start = time.monotonic()
         last_live = start
         finished = len(rows) - len(todo)
+        api_errors = 0  # model API errors in a row
         try:
             for waiting in asyncio.as_completed(tasks):
                 i, prediction = await waiting
@@ -337,6 +356,10 @@ class Classifier:
                         counts["cost"] = None
                     else:
                         counts["cost"] += prediction.dollars
+                if prediction.api_error:
+                    api_errors += 1
+                elif not prediction.cached:
+                    api_errors = 0
                 if prediction.error:
                     counts["errors"] += 1
                 elif path is not None:
@@ -346,6 +369,12 @@ class Classifier:
                         f.flush()
                 if report:
                     report(finished, len(rows), dict(counts))
+                if api_errors >= MAX_API_ERRORS_IN_A_ROW:
+                    raise ModelAPIError(
+                        _model_name(self.model),
+                        f"stopped: {api_errors} model API errors in a row; last: "
+                        f"{prediction.error}",
+                    )
                 if max_cost is not None and not prediction.cached:
                     if counts["cost"] is None:
                         raise CostLimit(
