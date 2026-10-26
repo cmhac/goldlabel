@@ -11,7 +11,6 @@ requires-python = ">=3.12"
 # The full `pydantic-ai` metapackage would also work but installs all providers.
 dependencies = [
     "pydantic-ai-slim[anthropic,openai]",
-    "textual[syntax]",
     "numpy",
     "genai-prices",
     "pyyaml",
@@ -26,9 +25,6 @@ pg = ["psycopg[binary]"]
 rds = ["psycopg[binary]", "boto3"]
 local = ["pydantic-ai-slim[sentence-transformers]"]
 
-[project.scripts]
-hunches = "hunches.app:main"
-
 [build-system]
 requires = ["uv_build>=0.8.17,<0.9.0"]
 build-backend = "uv_build"
@@ -38,7 +34,6 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-xdist",
-    "pytest-textual-snapshot",
     "ruff",
     "ty",
     "pre-commit",
@@ -48,5 +43,4 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = "-n auto"
-markers = ["ui: drives a Textual app with Pilot (slow); pre-commit skips these, CI runs them"]
 testpaths = ["tests"]

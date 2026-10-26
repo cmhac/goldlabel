@@ -30,7 +30,6 @@ def project(tmp_path, monkeypatch):
     files.write_config(
         files.Config(
             embedding_model="fake-embed",
-            assistant_model="test",
             classifier_model="fake-classifier",
             corpus_dir=str(corpus),
         )

@@ -6,7 +6,6 @@ from hunches.files import Config
 MODELS = {
     "backend": "pgvector",
     "embedding_model": "m",
-    "assistant_model": "a:b",
     "classifier_model": "a:b",
 }
 URL = "postgresql://alice:s3cr%40t@db.example.com:5432/mydb"

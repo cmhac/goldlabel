@@ -53,7 +53,6 @@ def setup(monkeypatch, conn, **fields):
     files.write_config(
         files.Config.model_validate(
             {
-                "assistant_model": "anthropic:claude-sonnet-5-5",
                 "classifier_model": "anthropic:claude-haiku-4-5",
                 "backend": "pgvector",
                 "embedding_model": "m",
@@ -194,9 +193,7 @@ def test_exact_through_search_is_an_internal_error(monkeypatch):
 
 def test_is_approximate():
     def cfg(**f):
-        return files.Config.model_validate(
-            {"assistant_model": "a:b", "classifier_model": "a:b", **f}
-        )
+        return files.Config.model_validate({"classifier_model": "a:b", **f})
 
     assert search.is_approximate(cfg(backend="pgvector", pg_search="index"))
     assert not search.is_approximate(cfg(backend="pgvector", pg_search="exact"))

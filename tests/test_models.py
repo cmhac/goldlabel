@@ -48,45 +48,6 @@ def test_embedding_list_holds_openai_small():
     assert "openai:text-embedding-3-small" in known_models(embedding=True)
 
 
-def test_rows_filter_by_provider_and_mark_recommended(monkeypatch):
-    from hunches import models
-
-    monkeypatch.setattr(
-        models,
-        "known_models",
-        lambda embedding=False: [
-            "anthropic:claude-haiku-4-5",
-            "openai:gpt-6-sol",
-            "openai:no-such-model",
-            "gateway/openai:gpt-6-sol",
-        ],
-    )
-    rows = models.model_rows("openai")
-    assert [r.model for r in rows] == ["openai:gpt-6-sol", "openai:no-such-model"]
-    assert [r.recommended for r in rows] == [True, False]
-    assert rows[0].price.startswith("$2.00 in / $10.00 out")
-    assert rows[1].price == "no price: cost will show ?"
-    assert [r.model for r in models.model_rows("anthropic")] == [
-        "anthropic:claude-haiku-4-5"
-    ]
-
-
-def test_rows_flag_deprecated(monkeypatch):
-    from types import SimpleNamespace
-
-    from hunches import models
-
-    monkeypatch.setattr(models, "known_models", lambda embedding=False: ["openai:old"])
-    monkeypatch.setattr(
-        models,
-        "_info",
-        lambda model: SimpleNamespace(
-            deprecated=True, get_prices=lambda now: SimpleNamespace(input_mtok=None)
-        ),
-    )
-    assert models.model_rows("openai")[0].deprecated is True
-
-
 def test_snapshot_date_is_the_library_timestamp():
     from genai_prices import data_snapshot
 

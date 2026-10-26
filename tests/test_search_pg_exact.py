@@ -66,7 +66,6 @@ def setup(monkeypatch, conn, **fields):
     files.write_config(
         files.Config.model_validate(
             {
-                "assistant_model": "anthropic:claude-sonnet-5-5",
                 "classifier_model": "anthropic:claude-haiku-4-5",
                 "backend": "pgvector",
                 "embedding_model": "m",

@@ -1,5 +1,4 @@
 import asyncio
-import json
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -10,7 +9,7 @@ from pydantic_ai import Agent, ModelRetry
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.models import Model
 
-from hunches import candidates, cost, files
+from hunches import cost
 from hunches.files import Taxonomy, all_labels, validate_labels
 
 
@@ -139,67 +138,3 @@ async def classify_many(
             task.cancel()
         if live:
             cost.record_timing("classify", live, last_live - start)
-
-
-def redo_plan(from_stage: int = 1) -> list[dict]:
-    """One row per stale or incomplete stage: how many model calls redoing it makes live and how many
-    come from the cache, and what the live ones cost. Calls nothing.
-
-    Stages are counted in order, as a user redoing them would run them: an item an earlier stage
-    classifies live is a cache hit for a later one. Stages without model calls have None counts.
-    Dollars is None with price_unknown set when there are live calls and no known price, never 0.
-    """
-    status = files.stage_status()
-    todo = [n for n in range(1, 10) if status[n][0] in ("stale", "incomplete")]
-    if not todo:
-        return []
-    config = files.read_config()
-    taxonomy = files.read_taxonomy() if files.read_text("taxonomy.yaml") else None
-    prompt = files.read_text("prompt.md") or ""
-    gold = files.read_gold()
-    by_id = {c["id"]: c["text"] for c in files.read_jsonl("candidates.jsonl")}
-    sample = json.loads(files.read_text("threshold_sample.json") or "{}")
-    has_threshold = files.read_text("threshold.json") is not None
-    texts = {  # what each stage sends to the classifier
-        5: [r.text for r in gold if r.split == "dev" and r.labels],
-        6: [r.text for r in gold if r.split == "test" and r.labels],
-        7: [by_id[i] for band in sample.get("ids", []) for i in band if i in by_id],
-        8: [c["text"] for c in files.pending()] if has_threshold else [],
-    }
-    rows = []
-    done: set[str] = set()  # texts an earlier stage of this plan classifies live
-    for n in todo:
-        live = cached = model = None
-        if n == 2:
-            model = config.embedding_model
-            hits = [
-                cost.cache_get(cost.cache_key(model, "embed_query", seed)) is not None
-                for seed in candidates.read_seeds()
-            ]
-            live, cached = hits.count(False), hits.count(True)
-        elif n in texts and taxonomy is not None:
-            model = config.classifier_model
-            hits = [
-                t in done or is_cached(t, prompt, taxonomy, model) for t in texts[n]
-            ]
-            live, cached = hits.count(False), hits.count(True)
-            done |= {t for t, hit in zip(texts[n], hits) if not hit}
-        dollars, unknown = (0.0, False) if live == 0 else (None, False)
-        if live and model:
-            per_call, _ = cost.per_call_dollars(model)
-            dollars, unknown = (
-                (None, True) if per_call is None else (per_call * live, False)
-            )
-        if n >= from_stage:
-            rows.append(
-                {
-                    "stage": n,
-                    "status": status[n][0],
-                    "reason": status[n][1],
-                    "live_calls": live,
-                    "cached_calls": cached,
-                    "dollars": dollars,
-                    "price_unknown": unknown,
-                }
-            )
-    return rows

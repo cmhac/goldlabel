@@ -41,7 +41,6 @@ def project(tmp_path, monkeypatch):
     (corpus / "meta.json").write_text(json.dumps({"embedding_model": "m"}))
     files.write_config(
         files.Config(
-            assistant_model="anthropic:claude-sonnet-5-5",
             classifier_model="anthropic:claude-haiku-4-5",
             corpus_dir=str(corpus),
             embedding_model="m",

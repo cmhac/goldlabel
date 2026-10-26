@@ -90,7 +90,6 @@ def project(tmp_path, monkeypatch):
 
     def use(**fields):
         base = {
-            "assistant_model": "anthropic:claude-sonnet-5-5",
             "classifier_model": "anthropic:claude-haiku-4-5",
             "embedding_model": "m",
             "backend": "pgvector",
@@ -494,12 +493,6 @@ def test_check_store_reports_a_real_table(admin, schema, project):
     assert (plain["type"], plain["dimension"]) == ("vector", D)
     assert plain["sample"] == ("r00000", "text of r00000")
     assert plain["version"] == version_of(admin)
-    from hunches.screens.pg import report
-
-    shown = report(
-        plain
-    )  # the screen renders the real result (it once expected a string)
-    assert f"pgvector {'.'.join(map(str, version_of(admin)))} in schema" in shown[0]
     indexed = search.check_store(project(pg_table=f"{schema}.indexed"))
     assert [i[1:] for i in indexed["indexes"]] == [("hnsw", "vector_cosine_ops")]
     assert not any(n.startswith("No index:") for n in indexed["notes"])

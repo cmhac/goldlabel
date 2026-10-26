@@ -1,3 +1,7 @@
+> **006 in progress:** the Textual TUI, its screens, projects, history and the `hunches` console script are removed; `hunches` is becoming a Python library.
+> The sections below still describe the pre-006 TUI and are stale until the rewrite in 006 task 17.
+> Source of truth now: `specs/006-library/spec.md`; the tasks are in `specs/006-library/tasks/`.
+
 # AGENTS.md
 
 ## What this repo is
@@ -34,13 +38,11 @@ uv sync --all-extras
 uv run ruff check
 uv run ruff format --check
 uv run ty check
-uv run pytest                 # everything (CI runs this); parallel via pytest-xdist
-uv run pytest -m "not ui"     # fast tier; this is what pre-commit runs
-uv run pytest tests/test_x.py # targeted UI tests
-uv run hunches          # run from a directory containing (or to create) .hunches/
+uv run pytest                 # everything (CI and pre-commit run this); parallel via pytest-xdist
+uv run pytest tests/test_x.py # targeted tests
 ```
 
-Ruff, ty and the fast tests (`pytest -m "not ui"`) must pass before every commit (pre-commit enforces this). The slow Pilot UI tests (marked `ui` automatically in `tests/conftest.py` for any module that calls `run_test(`) are a CI requirement in GitHub Actions, not a pre-commit one. Locally, whenever a change touches a screen, modal, `app.py`, `theme.py`, `hunches.tcss` or anything a screen reads, run the relevant UI test files (targeted, e.g. `uv run pytest tests/test_tune_screen.py tests/test_sizes.py`) during development; run the full suite only when the change is broad. Do not wait on the full suite for every small change. If these commands don't exist yet, task 01 hasn't been done; do it first.
+Ruff, ty and pytest must pass before every commit (pre-commit enforces this). There is no `ui` marker any more: the TUI was removed in 006 task 02.
 
 ## Layout (target)
 

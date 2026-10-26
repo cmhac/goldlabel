@@ -24,7 +24,6 @@ def local_corpus(tmp_path, model="m"):
     (d / "meta.json").write_text(json.dumps({"embedding_model": model}))
     files.write_config(
         files.Config(
-            assistant_model="anthropic:claude-sonnet-5-5",
             classifier_model="anthropic:claude-haiku-4-5",
             corpus_dir=str(d),
             embedding_model="m",
@@ -71,7 +70,6 @@ def vec(key, distance):
 def s3_setup(monkeypatch, pages):
     files.write_config(
         files.Config(
-            assistant_model="anthropic:claude-sonnet-5-5",
             classifier_model="anthropic:claude-haiku-4-5",
             backend="s3",
             s3_bucket="b",
