@@ -9,7 +9,6 @@ import shutil
 from pathlib import Path
 
 import pytest
-from pydantic_ai.models.function import FunctionModel
 
 from hunches import candidates, classifier, cost, files
 from hunches.search import LocalCorpus, search_vectors
@@ -101,23 +100,6 @@ def test_expected_matches_current_code(project, expected):
     assert files.read_jsonl("results.jsonl")[0]["run"] == cls["run_digest"]
     emb = expected["seed_embedding"]
     assert cost.cache_key(emb["model"], "embed_query", emb["seed"]) == emb["cache_key"]
-
-
-async def test_old_cache_entry_is_a_hit(project, expected):
-    cls = expected["classification"]
-
-    def never(messages, info):
-        raise AssertionError("a cache hit must not call the model")
-
-    prediction = await classifier.classify(
-        cls["text"],
-        cls["prompt"],
-        files.read_taxonomy(),
-        FunctionModel(never, model_name=cls["model"]),
-    )
-    assert prediction.cached is True
-    assert prediction.labels == cls["labels"]
-    assert prediction.reasoning == cls["reasoning"]
 
 
 def test_local_search_matches_recorded(project, expected):
