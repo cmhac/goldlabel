@@ -128,7 +128,7 @@ returns the rows the fake answers with, ranked and limited like a Python-side se
 1. **Given** a Postgres corpus and the server-side option, **When** a keyword search runs, **Then**
    one read-only statement per search is sent, only matching rows are received, and the terms
    reach the database as bound parameters.
-2. **Given** a user term containing `%`, `_`, quotes or `;`, **When** the search runs with literal
+2. **Given** a user term containing `%`, `_`, a backslash, quotes or `;`, **When** the search runs with literal
    matching, **Then** it is matched as the literal characters and cannot alter the statement.
 3. **Given** a corpus that is not a Postgres corpus, **When** the server-side option is asked for,
    **Then** the call fails with a message saying only a Postgres corpus can filter on the server.
@@ -143,8 +143,13 @@ returns the rows the fake answers with, ranked and limited like a Python-side se
    runs, **Then** the string is sent to the database unchanged as a bound parameter and matched in
    the database's regular-expression syntax, where an inline option such as `(?i)` sets
    case-insensitivity; the documentation says this syntax can differ from Python's.
-5. **Given** the same corpus read both ways, **When** the terms are plain text, **Then** the
-   server-side and the Python-side searches return the same ids in the same order.
+8. **Given** a Postgres corpus whose text is in a second table, **When** a whole-corpus, a
+   Python-side keyword or a server-side keyword search runs, **Then** the text is read from, and
+   filtered in, that second table, and an id with no text row fails naming the id.
+5. **Given** the same corpus read both ways, **When** the terms are plain ASCII text, **Then** the
+   server-side and the Python-side searches return the same ids in the same order. With the fake
+   database this checks only that the library builds the right statement and ranks what comes
+   back; the comparison on a real database is a human check.
 
 ---
 
@@ -220,6 +225,8 @@ same ids in the same order.
 - An empty list of terms is refused. A bare string instead of a list of terms is refused with the
   same message style as seeds.
 - A limit of zero or less is refused; `None` (the default) means no limit.
+- Calling `get_candidates(corpus, limit=5)` after a seed search leaves the seed result's default
+  file untouched.
 - An empty corpus returns an empty result, not an error.
 - Items with the same text but different ids stay separate rows; ids are never merged.
 - Text that contains regular-expression characters is matched literally when the term is a plain
@@ -260,11 +267,13 @@ same ids in the same order.
 
 ### Functional Requirements
 
-- **FR-001**: Users MUST be able to get a candidate list holding every item of a table, a S3 Vectors index
+- **FR-001**: Users MUST be able to get a candidate list holding every item of a table, an S3 Vectors index
   or a Postgres corpus, without seeds, an embedder or a cutoff, and MUST NOT need embeddings to do
-  so where the storage allows it (tables and Postgres; an S3 Vectors index always holds vectors).
+  so where the storage allows it (tables and Postgres; an S3 Vectors index always holds vectors,
+  but these calls never ask for them).
 - **FR-002**: Users MUST be able to get a candidate list of the items that match any of a list of
-  terms. A term is a plain string (matched as literal text without regard to case, unless the
+  terms. A term is a plain string (matched as literal text without regard to case (simple lower-casing, not full case folding, so
+  `strasse` does not match `Straße`), unless the
   regex option is on) or a compiled regular expression (always matched as a pattern, carrying its
   own flags).
 - **FR-003**: Each term MUST be applied to every item independently of the others; one term's
@@ -276,20 +285,25 @@ same ids in the same order.
   terms), both descending, then the corpus's order; both numbers are shown as columns. Each term
   counts at most once toward the distinct-term number however many times it matches.
 - **FR-005**: The candidate call MUST accept a `limit` (default none, meaning no limit). A limit keeps the
-  best-ranked items for keywords, and the first items in corpus order for the whole corpus. A limit
-  below one MUST be refused.
+  best-ranked items for keywords, the most similar items for seeds (best first), and the first
+  items in corpus order for the whole corpus. A limit below one MUST be refused.
 - **FR-006**: Users MUST be able to ask a Postgres corpus to do the matching on the database
   server with an option on the keyword call. The statement MUST be read-only, MUST pass every user
-  term as a bound parameter and every identifier through the existing identifier quoting, and MUST
-  return the same ids in the same order as the Python-side match for plain-text terms. Asking for
+  term as a bound parameter and every identifier through the existing identifier quoting. For
+  plain-text terms made of ASCII characters it MUST return the same ids in the same order as the
+  Python-side match; for other characters the database's own locale decides case-insensitivity,
+  and the documentation says so. Asking for
   it on a non-Postgres corpus MUST fail with a clear message. Server-side, plain-text terms are
-  matched literally and case-insensitively (a user's `%` and `_` are not wildcards); strings with
+  matched literally and case-insensitively (a user's `%`, `_` and backslash are not wildcards or
+  escapes); strings with
   the regex option are matched in the database's own regular-expression syntax; compiled Python
   patterns MUST be refused, naming the term, because their flags do not exist there. Ranking and
   the limit are applied in the library to the rows the server returns, so both backends rank alike.
 - **FR-007**: The candidate call MUST have an async and a sync form, the sync form working inside a
-  running notebook event loop, and MUST write the result like a seed search does (`out`: default
-  location, a path, or nothing).
+  running notebook event loop. A seed search writes its result as it does today (`out`: default
+  location, a path, or nothing). A keyword or whole-corpus call MUST write nothing unless `out` is
+  given a path, so that a quick look at the corpus never overwrites a paid seed result in the
+  default file and never copies a whole corpus to disk unasked.
 - **FR-008**: Every candidate MUST keep its corpus `id` and `text`; each item MUST appear at most
   once; whole-corpus order MUST be the corpus's own order (row order for a table, ascending id for a Postgres
   table).
@@ -338,13 +352,25 @@ same ids in the same order.
   neither is available. No new dependency is added to the project.
 - **FR-023**: A seed search over a table MUST compare the embedding model the table declares with
   the embedder's, refusing on a difference and refusing when none was declared.
+- **FR-027**: For an S3 Vectors index, the whole-corpus and keyword reads MUST page through the
+  service's list operation asking for each item's key and metadata only (never the vectors), take
+  the text from the same metadata field a seed search uses, and treat a missing text field as an
+  error. Their order is the order the service lists the items, which it does not document as
+  sorted; so a limit on such a read keeps the first items listed, and repeating it is not
+  guaranteed to give the same items. A 403 for lack of the permission to read metadata MUST be
+  reported with that permission's name.
+- **FR-026**: For a Postgres corpus whose text lives in a second table joined on the id (the
+  two-table layout `PgCorpus` already supports), the whole-corpus read, the Python-side keyword
+  read and the server-side filter MUST all read and filter the text in that second table, order by
+  the id, honour the corpus's result-size limit, and fail naming the id when an id has no text row,
+  as seed search does.
 - **FR-025**: There MUST be one public entry point for building candidates, `get_candidates` (sync)
   with `aget_candidates` (async), replacing `search` and `asearch` with no alias. Called with only
   a corpus it returns the whole corpus. `seeds` (with an embedder and optional floor) and
   `keywords` (with the regex and server-side options) are its optional filters. At most one filter
   may be given: seeds together with keywords MUST be refused, saying so. An empty list for either
   filter MUST be refused rather than read as "no filter" (absent and empty differ). An option that
-  belongs to a filter that was not given (a floor or embedder without seeds, the regex or
+  belongs to a filter that was not given (a floor, embedder or cache without seeds, the regex or
   server-side option without keywords) MUST fail with a message naming it. Because the function
   named `search` leaves the package, the package-level name `hunches.search` is again the
   submodule, and the agent documentation's note about names that shadow submodules is corrected.
@@ -419,30 +445,36 @@ same ids in the same order.
   word "floor"; every one states its count and source.
 - **SC-005**: Every similarity-only operation on a non-seed list fails with one message that names
   the list's source; none returns a wrong or empty answer silently.
-- **SC-006**: A keyword search over a stubbed remote corpus of at least ten times the batch size
-  returns only the matching rows and issues no write; with a limit it never holds more than that
+- **SC-006**: A keyword search over a stubbed remote corpus (Postgres, including the two-table
+  layout, and S3 Vectors) of at least ten times the batch size returns only the matching rows,
+  requests no vectors and issues no write; with a limit it never holds more than that
   many ranked matches.
 - **SC-008**: A table with no embedding column, and a stubbed Postgres table
   with only id and text columns, each produce a keyword list and a whole-corpus list with no error
   and no read of a vector.
 - **SC-009**: The same five rows given as CSV, Parquet, JSONL, a polars DataFrame, a pandas
   DataFrame and a list of dicts produce identical keyword and whole-corpus results.
-- **SC-007**: On a fixture of plain-text terms, the server-side and Python-side searches return
-  identical ids in identical order; no user term appears inside the statement text.
+- **SC-007**: With the fake database, no user term (including one with `%`, `_` or a backslash)
+  appears inside the statement text, and the statement is read-only. That a real database returns
+  the same ids as the Python side for ASCII plain-text terms is a human check on a real database.
 
 ## Assumptions
 
 - **Matching rule**: terms are checked against the item's text only; any term suffices. Plain
-  strings are matched case-insensitively with ordinary Unicode case folding, not locale-aware.
+  strings are matched case-insensitively by simple lower-casing, not full Unicode case folding and
+  not locale-aware.
 - **Regular expressions**: compiled patterns are the way to give a term its own flags; the regex
   option applies to plain strings and gives them no flags (inline flags written in the pattern
   still work). Flag behaviour is Python's for the Python-side search.
 - **Scope**: the whole-corpus list is held in memory like every other candidate list. For Postgres
   the existing result-size limit is the guard; a truly larger-than-memory whole-corpus
   classification is out of scope (keyword-filter, limit or sample first).
-- **S3 Vectors**: the corpus's text is read from item metadata the same way a search reads it, and
-  a missing text field is an error, as it is today. Whether the service can list a whole index
-  with that metadata is checked against its current docs in the plan, not assumed here.
+- **S3 Vectors**: the service documents a list operation that pages through an index returning each
+  item's key and, when asked, its metadata (default page 500, at most 1,000; reading metadata needs
+  the get-vectors permission as well as the list permission) and says nothing about order. The
+  text is read from item metadata the same way a search reads it. The plan confirms the operation
+  and parameter names against the installed boto3 (not installed in the development environment
+  when this was written) and records the stub's response shape from the documented response.
 - **Naming and exports**: the entry point is provisionally `hn.get_candidates(corpus, *,
   seeds=None, embedder=None, floor=None, keywords=None, regex=False, server_side=False,
   limit=None, out=None, cache=None)` with the async form `aget_candidates`, replacing
@@ -466,7 +498,9 @@ same ids in the same order.
 - **Semantic mode from tables**: supported when the table carries the embeddings. Embedding the
   text inside hunches is not part of this feature.
 - **Verification**: everything runs against hand-built tables, the fake `psycopg` and a
-  stubbed S3 client; a real database or bucket is a human step, recorded as such.
+  stubbed S3 client; a real database or bucket is a human step, recorded as such. Human checks
+  added here: server-side and Python-side keyword results compared on a real Postgres, including
+  the two-table layout, and a keyword read of a real S3 Vectors index.
 
 ## Decisions *(resolved by the user, 2026-10-26)*
 

@@ -38,8 +38,12 @@
 - Both clarification questions resolved 2026-10-26 (ranking: distinct terms then total matches;
   server-side regex: strings in Postgres syntax, compiled patterns refused). The whole-corpus-larger-than-memory question keeps its default
   (use the existing result-size limit and refuse beyond it).
-- Open item for the plan, not the spec: whether S3 Vectors can list a whole index with metadata
-  (check against current AWS docs before planning that reader).
+- S3 Vectors: its documented list operation can return keys and metadata, so S3 is supported
+  (FR-027). Left for the plan: confirm the names against the installed boto3.
+- 2026-10-26 Ponytail review fixes applied: no default file write for keyword and whole-corpus
+  calls (FR-007), the two-table Postgres layout (FR-026), S3 listing (FR-027), the server-side
+  equality claim limited to ASCII with a human check (FR-006, SC-007), `limit` with seeds and the
+  `cache` option (FR-005, FR-025). Nice-to-haves 6 and 7 of the review are not yet applied.
 - Ponytail was applied: the spec carries a "Deliberately skipped" list and asks for no option,
   abstraction or format beyond the two calls and an optional-similarity candidate list.
 - 2026-10-26: `LocalCorpus` is removed in favour of `Table` (FR-024). This is a hard break to a
