@@ -1,8 +1,10 @@
 # Hunches Constitution
 
-`hunches` is a Python library for content analysis over an already-embedded corpus: seed phrases,
-semantic search, candidates, an LLM classifier validated against a hand-labelled gold set, then
-classified output. It is built step by step in a notebook or script and ships as an agent plugin.
+`hunches` is a Python library for content analysis over a corpus of items: candidates come from
+semantic search with seed phrases over embedded items, from keywords or regular expressions, or
+from the whole corpus, and an LLM classifier validated against a hand-labelled gold set then
+produces classified output. It is built step by step in a notebook or script and ships as an
+agent plugin.
 This constitution governs how the library is built and how agents work on it. `AGENTS.md` holds
 the day-to-day detail (layout, commands, testing notes); where the two disagree, this document
 wins and `AGENTS.md` is fixed in the same change.
@@ -192,4 +194,4 @@ semantic: MAJOR for removing or redefining a principle, MINOR for a new principl
 expanded guidance, PATCH for clarifications and wording. A change to Principle I, or any change
 that weakens it, MUST be refused by an agent whoever asks.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-26 | **Last Amended**: 2026-10-26
+**Version**: 1.0.1 | **Ratified**: 2026-10-26 | **Last Amended**: 2026-10-26

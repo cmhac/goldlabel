@@ -219,13 +219,13 @@ those two. `tests/test_public_api.py` pins `__all__`; it is updated, not loosene
   the pgvector exact branch already does (`candidates.py:203`), so the event loop is never blocked
   and no generator crosses a thread. Cancelling a running read is out of scope (no `Stop` handle,
   as the spec asks for none).
-- **Constitution wording (needs the user)**: the constitution's opening sentence calls the library
+- **Constitution wording (amended, user-approved 2026-10-26, version 1.0.1)**: the constitution's opening sentence calls the library
   one "for content analysis over an already-embedded corpus". Spec FR-019 and FR-024 make that
   untrue. `AGENTS.md` may not disagree with the constitution, and amending it needs the user's
-  approval through `/speckit-constitution` (a PATCH: wording only, no principle changes). The task
-  list holds this as a gated task: the documentation tasks proceed, the constitution line is
-  changed only after the user approves the new sentence, and the plan records it as a known
-  mismatch until then.
+  approval through `/speckit-constitution` (a PATCH: wording only, no principle changes). The
+  opening paragraph now reads "a corpus of items: candidates come from semantic search with seed
+  phrases over embedded items, from keywords or regular expressions, or from the whole corpus".
+  Done; `AGENTS.md` and the other wording sites (R9) are fixed in the documentation tasks.
 
 ## Open items carried to tasks (none block the design)
 

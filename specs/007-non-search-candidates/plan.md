@@ -128,9 +128,9 @@ them (shortcut: `search.py` is already about 700 lines; split only if a reviewer
 - **S3 order is the service's**: documented in the contract; a `limit` there is not repeatable.
 - **Ranking recount on server-side regexes can disagree with Postgres**: kept rows rank last with a
   single warning (contract).
-- **The constitution calls the library "already embedded"** (its first sentence). FR-019 and FR-024
-  make that wrong, and only the user can amend it (`/speckit-constitution`, a wording-only PATCH).
-  Gated task; documentation changes proceed meanwhile and `AGENTS.md` carries a note until approved.
+- **The constitution called the library "already embedded"** (its first sentence). Amended by the
+  user's approval to version 1.0.1 (wording-only PATCH, no principle touched). `AGENTS.md` and the
+  other wording sites (research R9) are fixed in the documentation tasks.
 - **Seed search over a `Table`** reads the table once for all seeds (`search_table`), not once per
   seed as the old local branch did (research R11).
 - **Async**: blocking reads run in one `asyncio.to_thread` call (research R12).
