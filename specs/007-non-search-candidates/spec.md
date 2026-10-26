@@ -226,9 +226,8 @@ same ids in the same order.
 - Embedding values can come from Parquet, JSONL, a DataFrame or a list of rows. A CSV cannot hold a
   list of numbers, so a CSV with an embedding column named is refused with a message that points to
   Parquet or JSONL.
-- `LocalCorpus` no longer exists: using it raises the ordinary Python error for a missing name. No
-  alias or warning shim is kept; the README carries a short migration note showing how to turn the
-  old three-file folder into a table.
+- `LocalCorpus` no longer exists: using it raises the ordinary Python error for a missing name. The
+  library is unpublished, so nothing is kept for it: no alias, shim, warning or migration note.
 - Postgres rows have no inherent order, so "the corpus's own order" for a Postgres table is ascending
   by its id column. This is what makes server-side and Python-side results comparable and a limit
   repeatable.
@@ -329,11 +328,13 @@ same ids in the same order.
   neither is available. No new dependency is added to the project.
 - **FR-023**: A seed search over a table MUST compare the embedding model the table declares with
   the embedder's, refusing on a difference and refusing when none was declared.
-- **FR-024**: `LocalCorpus` MUST be removed from the public names, the code, the documentation (README, `AGENTS.md`), the
-  agent skill and references, the example and the tests, replaced by `Table`; no alias or
-  deprecation shim is kept. Seed search, its bands, candidate files and everything downstream keep
-  their behaviour. The README MUST show how to turn an old `vectors.npy` + `items.jsonl` folder
-  into a table.
+- **FR-024**: `LocalCorpus` MUST be removed from the public names, the code, the documentation
+  (README, `AGENTS.md`), the agent skill and references, the example and the tests, replaced by
+  `Table`; no alias or deprecation shim is kept. Seed search, its bands, candidate files and
+  everything downstream keep their behaviour. The documentation MUST describe only the format a
+  table should have (the text column, the optional id column, the embedding column and model for
+  seed search, which file types and DataFrames are accepted) and MUST NOT mention the removed
+  corpus or its folder layout.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -364,9 +365,9 @@ same ids in the same order.
 - Server-side filtering for S3 Vectors or a table; S3 Vectors metadata filters.
 - A non-vector S3 corpus (plain objects or a different store): an S3 Vectors index is the only S3
   kind.
-- A converter, a shim or a deprecation period for `LocalCorpus` (a short README note replaces it),
-  and a replacement for its compact `vectors.npy` storage (embedding columns in Parquet are the
-  supported way).
+- A converter, a shim, a deprecation period or a migration note for `LocalCorpus` (the library is
+  unpublished), and a replacement for its compact `vectors.npy` storage (embedding columns in
+  Parquet are the supported way).
 - Renaming `PgCorpus` or adding a second Postgres descriptor for tables without embeddings; and
   reworking `PgCorpus.check`, which keeps reporting on the vector setup (its use on a table with no
   embedding column is noted in the docs, not redesigned).
