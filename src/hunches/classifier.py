@@ -3,10 +3,13 @@ import hashlib
 import json
 import sys
 import time
-from dataclasses import dataclass, replace
+import warnings
+from dataclasses import asdict, dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+import yaml
 from pydantic import BaseModel
 from pydantic_ai import Agent, ModelRetry
 from pydantic_ai.exceptions import (
@@ -171,6 +174,58 @@ class Classifier:
     taxonomy: Taxonomy
     prompt: str
     cache: object = None
+    evaluation = (
+        None  # set by `load` from evaluation.json; not a field, so `replace` drops it
+    )
+
+    def save(self, dir, evaluation=None) -> None:
+        """Write the bundle: classifier.yaml (model), taxonomy.yaml, prompt.md, and evaluation.json.
+
+        Only these files are written; anything else in `dir` is left alone. The cache location is
+        runtime, not part of the bundle.
+        """
+        dir = Path(dir)
+        dir.mkdir(parents=True, exist_ok=True)
+        (dir / "classifier.yaml").write_text(
+            yaml.safe_dump({"model": _model_name(self.model)}, sort_keys=False)
+        )
+        self.taxonomy.write(dir / "taxonomy.yaml")
+        (dir / "prompt.md").write_text(self.prompt.rstrip("\n") + "\n")
+        if evaluation is not None:
+            data = {
+                "split": evaluation.split,
+                "n": evaluation.n,
+                "score": evaluation.score(),
+                "metric": evaluation.metric,
+                "metrics": asdict(evaluation.metrics),
+                "digest": evaluation.digest,
+                "date": datetime.now(UTC).isoformat(),
+                "sources": evaluation.sources,
+            }
+            (dir / "evaluation.json").write_text(json.dumps(data, indent=2) + "\n")
+
+    @classmethod
+    def load(cls, dir, *, cache=None) -> "Classifier":
+        """Read a bundle written by `save`; warns if its recorded evaluation is for other settings."""
+        dir = Path(dir)
+        spec = yaml.safe_load((dir / "classifier.yaml").read_text())
+        clf = cls(
+            spec["model"],
+            Taxonomy.read(dir / "taxonomy.yaml"),
+            (dir / "prompt.md").read_text(),
+            cache=cache,
+        )
+        path = dir / "evaluation.json"
+        evaluation = json.loads(path.read_text()) if path.exists() else None
+        if evaluation is not None and evaluation["digest"] != clf.digest:
+            warnings.warn(
+                f"the evaluation recorded in {path} no longer matches this prompt, model and "
+                "taxonomy (the bundle was edited after it was evaluated)",
+                UserWarning,
+                stacklevel=2,
+            )
+        object.__setattr__(clf, "evaluation", evaluation)
+        return clf
 
     def with_prompt(self, text: str) -> "Classifier":
         return replace(self, prompt=text)

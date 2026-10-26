@@ -42,6 +42,7 @@ class Evaluation:
     labels: list[str] = field(
         default_factory=list
     )  # every label incl. off_topic, for the table
+    split: str = ""  # "dev", "test", or "mixed" when the rows span both
 
     def score(self, name: str | None = None) -> float:
         return target_value(self.metrics, name or self.metric)
@@ -127,6 +128,8 @@ async def aevaluate(
     sources = {"hunches-ui": 0, "imported": 0, "unstamped": 0}
     for r in rows:
         sources[r.labelled_by if r.labelled_by in sources else "unstamped"] += 1
+    splits = {r.split for r in rows}
+    split = "mixed" if len(splits) > 1 else (splits.pop() if splits else gold_set.name)
     evaluation = Evaluation(
         metrics=metrics,
         metric=metric,
@@ -146,14 +149,12 @@ async def aevaluate(
             for i in metrics.disagreements
         ],
         labels=taxonomy.names,
+        split=split,
     )
     if log is not False:
-        splits = {r.split for r in rows}
         line = {
             "time": datetime.now(UTC).isoformat(),
-            "split": "mixed"
-            if len(splits) > 1
-            else (splits.pop() if splits else gold_set.name),
+            "split": split,
             "n": evaluation.n,
             "gold": None if gold_set.path is None else str(gold_set.path),
             "model": _model_name(clf.model),
