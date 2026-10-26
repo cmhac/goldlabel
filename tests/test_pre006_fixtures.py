@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from hunches import candidates, classifier, cost, files
+from hunches.gold import Gold
 from hunches.search import LocalCorpus, search_vectors
 
 FIXTURES = Path(__file__).parent / "fixtures" / "pre006"
@@ -50,12 +51,12 @@ def test_files_are_well_formed(project):
         "embedding_model": "fake-embed",
     }
     assert [c["id"] for c in files.read_jsonl("candidates.jsonl")] == ["a1", "a2"]
-    gold = files.read_gold()
+    gold = Gold(project / ".hunches" / "gold.jsonl").all.rows
     assert [(g.id, g.split, g.labels) for g in gold] == [
         ("a1", "dev", ["alpha"]),
         ("b1", "dev", ["beta"]),
         ("a2", "test", ["alpha"]),
-        ("c1", "test", []),  # the pending-looking row: no labels yet
+        ("c1", "test", []),  # no labels yet (pre-006 wrote [] for pending)
     ]
     results = files.read_jsonl("results.jsonl")
     assert [("run" in r) for r in results] == [True, False]

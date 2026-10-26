@@ -68,13 +68,6 @@ def pg_setting(config: Config, name: str):
     return PG_DEFAULTS.get(name) if value is None else value
 
 
-class GoldRow(BaseModel):
-    id: str
-    text: str
-    labels: list[str]
-    split: Literal["dev", "test"]
-
-
 def root() -> Path:
     return Path(".hunches")
 
@@ -172,37 +165,3 @@ def read_taxonomy() -> Taxonomy:
 
 def write_taxonomy(taxonomy: Taxonomy) -> None:
     taxonomy.write(ensure_root() / "taxonomy.yaml")
-
-
-def read_gold() -> list[GoldRow]:
-    return [GoldRow.model_validate(r) for r in read_jsonl("gold.jsonl")]
-
-
-def write_gold(rows: list[GoldRow]) -> None:
-    write_jsonl("gold.jsonl", [r.model_dump() for r in rows])
-
-
-def orphaned_gold(split: str | None = None) -> list[GoldRow]:
-    """Gold rows whose id is not in candidates.jsonl (spec 004 D2); they keep their labels."""
-    pool = {r["id"] for r in read_jsonl("candidates.jsonl")}
-    return [r for r in read_gold() if r.id not in pool and split in (None, r.split)]
-
-
-def gold_coverage() -> dict:
-    """Per split: rows, labelled rows, orphaned rows, orphaned labelled rows and their label counts."""
-    out = {}
-    for split in ("dev", "test"):
-        rows = [r for r in read_gold() if r.split == split]
-        orphans = orphaned_gold(split)
-        by_label: dict[str, int] = {}
-        for r in orphans:
-            for label in r.labels:
-                by_label[label] = by_label.get(label, 0) + 1
-        out[split] = {
-            "rows": len(rows),
-            "labelled": sum(bool(r.labels) for r in rows),
-            "orphaned": len(orphans),
-            "orphaned_labelled": sum(bool(r.labels) for r in orphans),
-            "orphaned_by_label": by_label,
-        }
-    return out

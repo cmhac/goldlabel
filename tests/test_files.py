@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from hunches import files
-from hunches.files import Config, GoldRow
+from hunches.files import Config
 from hunches.taxonomy import Label, Taxonomy
 
 
@@ -87,15 +87,6 @@ def test_taxonomy_round_trip_through_the_files_wrappers():
     files.write_text("placeholder", "")
     files.write_taxonomy(tax)
     assert files.read_taxonomy() == tax
-
-
-def test_gold_round_trip():
-    rows = [
-        GoldRow(id="1", text="t", labels=["a"], split="dev"),
-        GoldRow(id="2", text="u", labels=["a", "b"], split="test"),
-    ]
-    files.write_gold(rows)
-    assert files.read_gold() == rows
 
 
 def test_models_have_no_default_so_system_settings_is_the_only_source():
