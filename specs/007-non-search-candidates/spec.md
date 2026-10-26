@@ -8,7 +8,7 @@
 
 **Input**: User description: "Non-search candidate sources for the hunches library: let a user build a Candidates list without semantic seed search. (1) a keyword/regex candidate list over a corpus, and (2) the whole corpus with no filtering. Today `Candidates` rows assume `max_similarity` and `best_seed`, so its repr, bands, above, top_seeds and band_sample break on rows without them; the corpus classes (LocalCorpus, S3Corpus, PgCorpus) have no plain item reader, only the search code reads items. Proposed shape (to be refined in the spec): make similarity fields optional on Candidates with plain-count fallbacks in repr/_repr_html_, record a `source` ("seeds", "keywords", "all"), and add `hn.keywords(corpus, terms, regex=False)` and `hn.everything(corpus)` with a streaming item reader for all three corpus types (pgvector tables can be larger than memory). Must keep: no I/O on import, async+sync forms, polars+pandas export, unknown cost shown as `?`, never touch gold labels, minimal implementation with no abstractions."
 
-**Review decisions (user, 2026-10-26)**: a corpus with no embeddings is a valid input when no semantic search is used; data may come from a CSV, Parquet or JSONL file, a pandas or polars DataFrame, or a list of rows, for semantic search too when the rows already carry embeddings (story 6);  several regular expressions with their own flags, each searched separately; keyword hits ranked the way semantic hits are; a `limit` argument defaulting to no limit; one corpus per call, with merging corpora left to the user upstream and no source registry or system-wide storage; and server-side SQL filtering for Postgres as a real feature.
+**Review decisions (user, 2026-10-26)**: `LocalCorpus` is removed, because its folder layout (`vectors.npy` + `items.jsonl` + `meta.json`) was this tool's own invention while Postgres, S3 Vectors and tabular files are existing standards; `Table` replaces it, and a table needs an embedding column only when the user wants seed search; a corpus with no embeddings is a valid input when no semantic search is used; data may come from a CSV, Parquet or JSONL file, a pandas or polars DataFrame, or a list of rows, for semantic search too when the rows already carry embeddings (story 6);  several regular expressions with their own flags, each searched separately; keyword hits ranked the way semantic hits are; a `limit` argument defaulting to no limit; one corpus per call, with merging corpora left to the user upstream and no source registry or system-wide storage; and server-side SQL filtering for Postgres as a real feature.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -23,7 +23,7 @@ the labelling page, and can be handed to the classifier.
 matching logic, only a way to read a corpus's items and a candidate list that does not pretend its
 items have a similarity or a rank. Everything in the later stories needs the same two pieces.
 
-**Independent Test**: build a candidate list from a tiny local corpus with no seeds and no
+**Independent Test**: build a candidate list from a tiny table with no seeds and no
 embedder, check it holds every item exactly once, draw gold rows from it, and estimate a
 classification of it, all without any model call.
 
@@ -54,7 +54,7 @@ expression can carry its own flags.
 **Why this priority**: it is the most common "simple filter" and the reason the question was asked,
 but it needs story 1's reader and list first.
 
-**Independent Test**: on a tiny local corpus, ask for plain terms, then for several regular
+**Independent Test**: on a tiny table, ask for plain terms, then for several regular
 expressions with different flags, and check the exact ids and their order against a hand-written
 expectation.
 
@@ -120,7 +120,7 @@ and it cannot be verified against a real database from the test suite.
 
 **Independent Test**: with the fake database, a keyword search with server-side filtering sends a
 read-only query that contains the user's terms as parameters (never spliced into the SQL text) and
-returns the rows the fake answers with, ranked and limited like a local search.
+returns the rows the fake answers with, ranked and limited like a Python-side search.
 
 **Acceptance Scenarios**:
 
@@ -148,7 +148,7 @@ returns the rows the fake answers with, ranked and limited like a local search.
 A user with a corpus in a Postgres table or an S3 Vectors index, larger than memory, wants a
 keyword list from it. Only the matching items, or only the best `limit` of them, are kept.
 
-**Why this priority**: a local corpus covers the main need; the read-only remote readers are the
+**Why this priority**: a table covers the main need; the read-only remote readers are the
 same feature on bigger data and cannot be verified without a real database or bucket.
 
 **Independent Test**: with the fake database and a stubbed S3 client, a Python-side keyword search
@@ -196,8 +196,9 @@ same ids in the same order.
    **When** it is read, **Then** the call fails before any search, naming the column, or the first
    offending row and its value, and never drops or invents rows.
 5. **Given** a table with an embedding column, one list of numbers per row, and the embedding model
-   named, **When** a seed search runs with that model, **Then** it works like a seed search over a
-   local corpus, including the model-mismatch check.
+   named, **When** a seed search runs with that model, **Then** it returns the same similarities,
+   ranking and bands as before for the same vectors, and refuses an embedder whose model name
+   differs from the one the table declares.
 6. **Given** a table with no embedding column, **When** a seed search is asked for, **Then** it
    fails with a message that says the table has no embedding column and that keyword and
    whole-corpus calls need none.
@@ -218,10 +219,16 @@ same ids in the same order.
 - Items with the same text but different ids stay separate rows; ids are never merged.
 - Text that contains regular-expression characters is matched literally when the term is a plain
   string and the regex option is off.
-- A corpus with no embeddings at all is valid for whole-corpus and keyword calls: a local folder
-  with only `items.jsonl` (no `vectors.npy`, no `meta.json`), or a Postgres table with no embedding
-  column. These calls never read vectors, so a missing or mismatched vector file or column does not
-  fail them (a seed search still does, with a message naming what is missing).
+- A corpus with no embeddings at all is valid for whole-corpus and keyword calls: a table with no
+  embedding column, or a Postgres table with no embedding column. These calls never read vectors,
+  so a missing, malformed or mismatched embedding column does not fail them (a seed search still
+  does, with a message naming what is missing).
+- Embedding values can come from Parquet, JSONL, a DataFrame or a list of rows. A CSV cannot hold a
+  list of numbers, so a CSV with an embedding column named is refused with a message that points to
+  Parquet or JSONL.
+- `LocalCorpus` no longer exists: using it raises the ordinary Python error for a missing name. No
+  alias or warning shim is kept; the README carries a short migration note showing how to turn the
+  old three-file folder into a table.
 - Postgres rows have no inherent order, so "the corpus's own order" for a Postgres table is ascending
   by its id column. This is what makes server-side and Python-side results comparable and a limit
   repeatable.
@@ -249,10 +256,9 @@ same ids in the same order.
 
 ### Functional Requirements
 
-- **FR-001**: Users MUST be able to get a candidate list holding every item of a local, S3 or
-  Postgres corpus, without seeds, an embedder or a cutoff, and MUST NOT need embeddings to do so
-  where the storage allows it (local, Postgres and tables; an S3 Vectors index always holds
-  vectors).
+- **FR-001**: Users MUST be able to get a candidate list holding every item of a table, a S3 Vectors index
+  or a Postgres corpus, without seeds, an embedder or a cutoff, and MUST NOT need embeddings to do
+  so where the storage allows it (tables and Postgres; an S3 Vectors index always holds vectors).
 - **FR-002**: Users MUST be able to get a candidate list of the items that match any of a list of
   terms. A term is a plain string (matched as literal text without regard to case, unless the
   regex option is on) or a compiled regular expression (always matched as a pattern, carrying its
@@ -276,8 +282,8 @@ same ids in the same order.
   notebook event loop, and both MUST write the result like a seed search does (`out`: default
   location, a path, or nothing).
 - **FR-008**: Every candidate MUST keep its corpus `id` and `text`; each item MUST appear at most
-  once; whole-corpus order MUST be the corpus's own order (file order for a local corpus, row order for a
-  table, ascending id for a Postgres table).
+  once; whole-corpus order MUST be the corpus's own order (row order for a table, ascending id for a Postgres
+  table).
 - **FR-009**: A candidate list MUST record how it was built: from seeds, from keywords or from the
   whole corpus, and this MUST survive writing and reading the file.
 - **FR-010**: A list not built from seeds MUST NOT carry a similarity or a best seed, and MUST NOT
@@ -321,8 +327,13 @@ same ids in the same order.
   (importing the library stays free of both); a Parquet file MUST be readable with polars or a
   pandas that has a Parquet engine, and MUST fail with a message naming what to install when
   neither is available. No new dependency is added to the project.
-- **FR-023**: A seed search over a table MUST check the table's recorded embedding model against
-  the embedder, as a local corpus does, and MUST refuse when none was given.
+- **FR-023**: A seed search over a table MUST compare the embedding model the table declares with
+  the embedder's, refusing on a difference and refusing when none was declared.
+- **FR-024**: `LocalCorpus` MUST be removed from the public names, the code, the documentation (README, `AGENTS.md`), the
+  agent skill and references, the example and the tests, replaced by `Table`; no alias or
+  deprecation shim is kept. Seed search, its bands, candidate files and everything downstream keep
+  their behaviour. The README MUST show how to turn an old `vectors.npy` + `items.jsonl` folder
+  into a table.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -330,10 +341,11 @@ same ids in the same order.
   from seeds also carries, per item, its best similarity and the seed that won it, plus the cutoff
   and embedding model. A list built from keywords carries, per item, its rank value. A list built
   from the whole corpus carries neither. Every list records its source.
-- **Corpus**: the existing local, S3 and Postgres descriptors. This feature adds one thing they
-  lack: a way to read their items one batch at a time, without vectors, and, for Postgres, a way to
-  have the server do the matching. A local or Postgres corpus is valid without embeddings; the
-  Postgres corpus descriptor keeps its name, and its embedding column is only used by seed search.
+- **Corpus**: a table, an S3 Vectors index or a Postgres table. This feature gives each of them
+  one thing they lack: a way to read their items one batch at a time, without vectors, and, for
+  Postgres, a way to have the server do the matching. A table or Postgres corpus is valid without
+  embeddings; the Postgres descriptor keeps its name, and its embedding column is only used by seed
+  search. The previous local-folder corpus is gone.
 - **Table**: a corpus described from a CSV, Parquet or JSONL file, a pandas or polars DataFrame or a
   list of row dicts: the source, the text column, optionally the id column, optionally an embedding
   column and the embedding model's name. Held in memory.
@@ -349,9 +361,12 @@ same ids in the same order.
 - Merging several corpora, or a list per corpus inside one call: one corpus per call, merging is
   upstream of the library.
 - A registry of sources, saved connections or any system-wide storage.
-- Server-side filtering for S3 Vectors or a local corpus; S3 Vectors metadata filters.
+- Server-side filtering for S3 Vectors or a table; S3 Vectors metadata filters.
 - A non-vector S3 corpus (plain objects or a different store): an S3 Vectors index is the only S3
   kind.
+- A converter, a shim or a deprecation period for `LocalCorpus` (a short README note replaces it),
+  and a replacement for its compact `vectors.npy` storage (embedding columns in Parquet are the
+  supported way).
 - Renaming `PgCorpus` or adding a second Postgres descriptor for tables without embeddings; and
   reworking `PgCorpus.check`, which keeps reporting on the vector setup (its use on a table with no
   embedding column is noted in the docs, not redesigned).
@@ -383,7 +398,7 @@ same ids in the same order.
 - **SC-006**: A keyword search over a stubbed remote corpus of at least ten times the batch size
   returns only the matching rows and issues no write; with a limit it never holds more than that
   many ranked matches.
-- **SC-008**: A local corpus folder containing only `items.jsonl`, and a stubbed Postgres table
+- **SC-008**: A table with no embedding column, and a stubbed Postgres table
   with only id and text columns, each produce a keyword list and a whole-corpus list with no error
   and no read of a vector.
 - **SC-009**: The same five rows given as CSV, Parquet, JSONL, a polars DataFrame, a pandas
@@ -414,12 +429,17 @@ same ids in the same order.
   used through their own methods, not imported by the library; Parquet needs polars or pandas with
   pyarrow, which the user installs (polars reads Parquet natively; pandas' `read_parquet`
   requires pyarrow, per their documentation). The plan checks the installed versions.
+- **Local semantic corpora**: seed search over a table reads its embedding column into memory and
+  compares with the same cosine-similarity maths as before; it is not a compact binary format, so
+  very large embedded corpora belong in Postgres or S3 Vectors. The declared model name is the
+  user's statement: the check guards against searching with a different embedder than the one the
+  user declared, not against a wrong declaration.
 - **Table naming**: the descriptor is provisionally `hn.Table(source, text_column="text",
   id_column=None, vector_column=None, embedding_model=None)`, mirroring `PgCorpus`'s column
   arguments; the plan confirms it. It is one more corpus kind, not a base class.
 - **Semantic mode from tables**: supported when the table carries the embeddings. Embedding the
   text inside hunches is not part of this feature.
-- **Verification**: everything runs against hand-built local corpora, the fake `psycopg` and a
+- **Verification**: everything runs against hand-built tables, the fake `psycopg` and a
   stubbed S3 client; a real database or bucket is a human step, recorded as such.
 
 ## Open questions *(for the user; resolve with `/speckit-clarify`)*

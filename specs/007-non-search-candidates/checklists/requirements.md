@@ -42,3 +42,7 @@
   (check against current AWS docs before planning that reader).
 - Ponytail was applied: the spec carries a "Deliberately skipped" list and asks for no option,
   abstraction or format beyond the two calls and an optional-similarity candidate list.
+- 2026-10-26: `LocalCorpus` is removed in favour of `Table` (FR-024). This is a breaking change to a
+  public name (package version 0.1.0); the spec asks for no shim and a README migration note. The
+  plan must list every file that mentions it (code, tests, example corpus, README, `AGENTS.md`, skill
+  references) and convert the sample corpus into a table.
