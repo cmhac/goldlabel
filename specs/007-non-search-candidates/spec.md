@@ -4,9 +4,11 @@
 
 **Created**: 2026-10-26
 
-**Status**: Draft
+**Status**: Draft (revised 2026-10-26 after review: regex flags, ranked keyword hits, a limit argument, server-side SQL filtering)
 
 **Input**: User description: "Non-search candidate sources for the hunches library: let a user build a Candidates list without semantic seed search. (1) a keyword/regex candidate list over a corpus, and (2) the whole corpus with no filtering. Today `Candidates` rows assume `max_similarity` and `best_seed`, so its repr, bands, above, top_seeds and band_sample break on rows without them; the corpus classes (LocalCorpus, S3Corpus, PgCorpus) have no plain item reader, only the search code reads items. Proposed shape (to be refined in the spec): make similarity fields optional on Candidates with plain-count fallbacks in repr/_repr_html_, record a `source` ("seeds", "keywords", "all"), and add `hn.keywords(corpus, terms, regex=False)` and `hn.everything(corpus)` with a streaming item reader for all three corpus types (pgvector tables can be larger than memory). Must keep: no I/O on import, async+sync forms, polars+pandas export, unknown cost shown as `?`, never touch gold labels, minimal implementation with no abstractions."
+
+**Review decisions (user, 2026-10-26)**: several regular expressions with their own flags, each searched separately; keyword hits ranked the way semantic hits are; a `limit` argument defaulting to no limit; one corpus per call, with merging corpora left to the user upstream and no source registry or system-wide storage; and server-side SQL filtering for pgvector as a real feature.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -19,7 +21,7 @@ the labelling page, and can be handed to the classifier.
 
 **Why this priority**: it is the simplest case and the one with the least new behaviour: no
 matching logic, only a way to read a corpus's items and a candidate list that does not pretend its
-items have a similarity. Everything in story 2 needs the same two pieces.
+items have a similarity or a rank. Everything in the later stories needs the same two pieces.
 
 **Independent Test**: build a candidate list from a tiny local corpus with no seeds and no
 embedder, check it holds every item exactly once, draw gold rows from it, and estimate a
@@ -30,27 +32,31 @@ classification of it, all without any model call.
 1. **Given** a corpus of five items, **When** the user asks for the whole corpus, **Then** the
    result holds five candidates, each with its `id` and `text`, in the corpus's own order.
 2. **Given** that result, **When** it is shown, **Then** the text says it holds five candidates
-   and that it came from the whole corpus; it shows no similarity bands, no similarity column and
-   no seed column.
+   and that it came from the whole corpus; it shows no similarity bands, no similarity column, no
+   seed column and no rank.
 3. **Given** that result, **When** the user draws gold rows from it and estimates a classification
    of it, **Then** both work exactly as they do for a seed-search result.
 4. **Given** that result, **When** the user asks for the items above a similarity cutoff, for
    the top seeds, or for a per-band sample, **Then** the call fails at once with a message that
    says this list has no similarity because it was not built from seeds.
+5. **Given** a corpus of five items and a limit of two, **When** the user asks for the whole
+   corpus, **Then** the result holds the first two items in the corpus's order.
 
 ---
 
-### User Story 2 - A keyword or regex candidate list (Priority: P2)
+### User Story 2 - A ranked keyword and regex candidate list (Priority: P2)
 
-A user who already knows words that mark the items they care about (a name, a phrase, a hashtag)
-wants the items that contain them, without embedding anything and without paying for an embedding
-call.
+A user who already knows words or patterns that mark the items they care about (a name, a phrase,
+a hashtag) wants the items that match them, best first, without embedding anything and without
+paying for an embedding call. Terms can be plain text or regular expressions, and each regular
+expression can carry its own flags.
 
-**Why this priority**: it is the most common "simple filter" and it is the reason the question was
-asked, but it needs story 1's reader and list first.
+**Why this priority**: it is the most common "simple filter" and the reason the question was asked,
+but it needs story 1's reader and list first.
 
-**Independent Test**: on a tiny local corpus, ask for items containing a plain term, then for items
-matching a regular expression, and check the exact ids returned against a hand-written expectation.
+**Independent Test**: on a tiny local corpus, ask for plain terms, then for several regular
+expressions with different flags, and check the exact ids and their order against a hand-written
+expectation.
 
 **Acceptance Scenarios**:
 
@@ -58,23 +64,33 @@ matching a regular expression, and check the exact ids returned against a hand-w
    "ballot", **Then** the result holds exactly items 2 and 4, whatever their case ("Ballot",
    "BALLOT").
 2. **Given** two terms, **When** the user asks for items matching them, **Then** an item that
-   contains either term is included once.
-3. **Given** the term `r"vote[sd]?\b"` and the regex option on, **When** the search runs, **Then**
-   items matching the pattern are returned; with the option off the same string is matched as
-   literal text.
-4. **Given** a term that matches nothing, **When** the search runs, **Then** the result is empty
+   matches either term is included once.
+3. **Given** the same text passed as a plain string with the regex option off and with it on,
+   **When** the search runs, **Then** it is matched as literal text in the first case and as a
+   pattern in the second.
+4. **Given** three regular expressions, one case-insensitive, one case-sensitive and one with the
+   dot matching line breaks, **When** the search runs, **Then** each is applied to every item with
+   its own flags, independently of the others, so one expression's flags never change how another
+   matches.
+5. **Given** items that match different numbers of the terms, **When** the result is shown,
+   **Then** the items are in rank order, best first, with ties kept in corpus order, and each row
+   carries the value it was ranked by. *(The ranking rule is the first open question below.)*
+6. **Given** a limit of three and ten matching items, **When** the search runs, **Then** the result
+   holds the three best-ranked items; with no limit it holds all ten.
+7. **Given** a term that matches nothing, **When** the search runs, **Then** the result is empty
    and says so in words (0 candidates), not an error.
-5. **Given** an invalid regular expression, **When** the user asks for it, **Then** the call fails
+8. **Given** an invalid regular expression, **When** the user asks for it, **Then** the call fails
    before reading the corpus, with a message that names the pattern.
-6. **Given** the result, **When** it is shown, **Then** it says it came from keywords, gives the
-   count, and shows no similarity bands.
+9. **Given** the result, **When** it is shown, **Then** it says it came from keywords, gives the
+   count and the rank column, and shows no similarity bands.
 
 ---
 
 ### User Story 3 - Existing searches and saved files are unchanged (Priority: P1)
 
 A user with a seed-search result, a `candidates.jsonl` written by an earlier version, or a
-notebook using the band report must see exactly what they saw before.
+notebook using the band report must see exactly what they saw before. Semantic search keeps its
+ranking: best similarity first, ties by id.
 
 **Why this priority**: the change widens a type that every later stage uses. Breaking existing
 results or files would cost more than the feature gives.
@@ -89,27 +105,60 @@ unchanged, and a file written before this feature loads as a seed-search result.
 2. **Given** a seed-search result, **When** it is written and read back, **Then** it is equal to the
    original and still says it came from seeds.
 3. **Given** a keyword or whole-corpus result, **When** it is written and read back, **Then** it
-   keeps its source and shows no bands.
+   keeps its source and its rank values and shows no bands.
 
 ---
 
-### User Story 4 - Large pgvector and S3 corpora do not need to fit in memory to be keyword-searched (Priority: P3)
+### User Story 4 - Filter on the database server for a big pgvector table (Priority: P3)
 
-A user with a corpus in a pgvector table or an S3 Vectors index, larger than memory, wants a
-keyword list from it. Only the matching items are kept.
+A user whose corpus is a large pgvector table wants the database to do the keyword or regular
+expression filtering, so that only matching rows leave the server, instead of every row being
+downloaded and matched in Python.
 
-**Why this priority**: a matching local corpus covers the main need; the read-only remote readers
-are the same feature on bigger data and cannot be verified without a real database or bucket.
+**Why this priority**: it is an optimisation of story 2 for one backend, valuable on large tables,
+and it cannot be verified against a real database from the test suite.
 
-**Independent Test**: with the fake database and a stubbed S3 client, a keyword search over more
-rows than are held at once returns only the matches, and the number of rows held at any moment is
-bounded by a batch, not by the corpus.
+**Independent Test**: with the fake database, a keyword search with server-side filtering sends a
+read-only query that contains the user's terms as parameters (never spliced into the SQL text) and
+returns the rows the fake answers with, ranked and limited like a local search.
 
 **Acceptance Scenarios**:
 
-1. **Given** a pgvector or S3 corpus, **When** a keyword search runs, **Then** every item is read
-   once, only matches are kept, and nothing is written to the database or the bucket.
-2. **Given** a pgvector corpus and a request for the whole corpus, **When** the table is larger than
+1. **Given** a pgvector corpus and the server-side option, **When** a keyword search runs, **Then**
+   one read-only statement per search is sent, only matching rows are received, and the terms
+   reach the database as bound parameters.
+2. **Given** a user term containing `%`, `_`, quotes or `;`, **When** the search runs with literal
+   matching, **Then** it is matched as the literal characters and cannot alter the statement.
+3. **Given** a corpus that is not a pgvector corpus, **When** the server-side option is asked for,
+   **Then** the call fails with a message saying only a pgvector corpus can filter on the server.
+4. **Given** a regular expression with flags that the database's regular-expression language
+   cannot express, **When** the server-side option is on, **Then** the call refuses and names the
+   flag instead of silently matching differently. *(The flag mapping is the second open question.)*
+5. **Given** the same corpus read both ways, **When** the terms are plain text, **Then** the
+   server-side and the Python-side searches return the same ids in the same order.
+
+---
+
+### User Story 5 - Big remote corpora do not need to fit in memory to be keyword-searched (Priority: P3)
+
+A user with a corpus in a pgvector table or an S3 Vectors index, larger than memory, wants a
+keyword list from it. Only the matching items, or only the best `limit` of them, are kept.
+
+**Why this priority**: a local corpus covers the main need; the read-only remote readers are the
+same feature on bigger data and cannot be verified without a real database or bucket.
+
+**Independent Test**: with the fake database and a stubbed S3 client, a Python-side keyword search
+over many times more rows than one batch returns the right matches, issues no write, and never
+holds more than one batch of unmatched items plus the kept matches.
+
+**Acceptance Scenarios**:
+
+1. **Given** a pgvector or S3 corpus, **When** a keyword search runs without the server-side
+   option, **Then** every item is read once, only matches are kept, and nothing is written to the
+   database or the bucket.
+2. **Given** a limit of N, **When** a keyword search runs, **Then** the library never holds more
+   than N ranked matches at a time.
+3. **Given** a pgvector corpus and a request for the whole corpus, **When** the table is larger than
    the corpus's own result-size limit, **Then** the call refuses with a message that names the
    limit instead of exhausting memory.
 
@@ -119,12 +168,13 @@ bounded by a batch, not by the corpus.
 
 - A term that is empty, or only whitespace, is refused: it would match every item and the user
   meant `everything`.
-- An empty list of terms is refused.
-- A bare string instead of a list of terms is refused with the same message style as seeds.
+- An empty list of terms is refused. A bare string instead of a list of terms is refused with the
+  same message style as seeds.
+- A limit of zero or less is refused; `None` (the default) means no limit.
 - An empty corpus returns an empty result, not an error.
 - Items with the same text but different ids stay separate rows; ids are never merged.
-- Text that contains regular-expression characters is matched literally when the regex option is
-  off.
+- Text that contains regular-expression characters is matched literally when the term is a plain
+  string and the regex option is off.
 - A corpus whose item file and vector file disagree in length: whole-corpus and keyword reads do not
   use vectors, so they do not fail on it (a seed search still does).
 - Whole-corpus and keyword lists use no embedder, so they record no embedding model and ask for
@@ -132,6 +182,13 @@ bounded by a batch, not by the corpus.
   unknown price still shows as `?`.
 - Classifying a large whole-corpus list is the user's decision: the library shows the estimate
   first, as it already does, and never starts a run by itself.
+- One corpus per call. A user with several corpora calls once per corpus and combines the results
+  before the library sees them. Candidate and gold files identify an item by its `id` alone, so
+  ids that repeat across corpora would be treated as the same item; the library does not detect
+  this, and the documentation says so.
+- Connections are described in code by the corpus object (the database URL stays in the environment
+  variable the corpus names); nothing is read from or written to a shared registry or a
+  system-wide location.
 
 ## Requirements *(mandatory)*
 
@@ -139,63 +196,84 @@ bounded by a batch, not by the corpus.
 
 - **FR-001**: Users MUST be able to get a candidate list holding every item of a local, S3 or
   pgvector corpus, without seeds, an embedder or a cutoff.
-- **FR-002**: Users MUST be able to get a candidate list of the items whose text contains any of a
-  list of terms, matched without regard to case, as literal text by default.
-- **FR-003**: Users MUST be able to switch the terms to regular expressions with one option; an
-  invalid pattern MUST fail before the corpus is read, naming the pattern.
-- **FR-004**: Both calls MUST have an async and a sync form, the sync form working inside a running
+- **FR-002**: Users MUST be able to get a candidate list of the items that match any of a list of
+  terms. A term is a plain string (matched as literal text without regard to case, unless the
+  regex option is on) or a compiled regular expression (always matched as a pattern, carrying its
+  own flags).
+- **FR-003**: Each term MUST be applied to every item independently of the others; one term's
+  flags MUST NOT affect another's. An invalid pattern MUST fail before the corpus is read, naming
+  the pattern.
+- **FR-004**: Keyword results MUST be ranked, best first, and every row MUST carry the value it
+  was ranked by. Ties MUST keep the corpus's order. [NEEDS CLARIFICATION: the ranking rule; see
+  question 1.]
+- **FR-005**: Both calls MUST accept a `limit` (default none, meaning no limit). A limit keeps the
+  best-ranked items for keywords, and the first items in corpus order for the whole corpus. A limit
+  below one MUST be refused.
+- **FR-006**: Users MUST be able to ask a pgvector corpus to do the matching on the database
+  server with an option on the keyword call. The statement MUST be read-only, MUST pass every user
+  term as a bound parameter and every identifier through the existing identifier quoting, and MUST
+  return the same ids in the same order as the Python-side match for plain-text terms. Asking for
+  it on a non-pgvector corpus MUST fail with a clear message. [NEEDS CLARIFICATION: how regular
+  expressions and their flags behave server-side; see question 2.]
+- **FR-007**: Both calls MUST have an async and a sync form, the sync form working inside a running
   notebook event loop, and both MUST write the result like a seed search does (`out`: default
   location, a path, or nothing).
-- **FR-005**: Every candidate MUST keep its corpus `id` and `text`. Order MUST be the corpus's own
-  order, and each item MUST appear at most once.
-- **FR-006**: A candidate list MUST record how it was built: from seeds, from keywords or from the
+- **FR-008**: Every candidate MUST keep its corpus `id` and `text`; each item MUST appear at most
+  once; whole-corpus order MUST be the corpus's own order.
+- **FR-009**: A candidate list MUST record how it was built: from seeds, from keywords or from the
   whole corpus, and this MUST survive writing and reading the file.
-- **FR-007**: A list not built from seeds MUST NOT carry a similarity or a best seed, and MUST NOT
-  invent one. Its text and HTML display MUST state the count and the source in words and MUST show
-  no similarity bands, floor, similarity column or seed column.
-- **FR-008**: Operations that only mean something with a similarity (items above a cutoff, top
+- **FR-010**: A list not built from seeds MUST NOT carry a similarity or a best seed, and MUST NOT
+  invent one. Its text and HTML display MUST state the count and the source in words, MUST show the
+  rank where there is one, and MUST show no similarity bands, floor, similarity column or seed
+  column.
+- **FR-011**: Operations that only mean something with a similarity (items above a cutoff, top
   seeds, band counts, the per-band sample) MUST fail clearly on such a list, naming its source,
-  and MUST work unchanged on a seed-search list.
-- **FR-009**: Sampling, drawing gold rows, classifier estimate and classification, and the table
+  and MUST work unchanged on a seed-search list. Seed search MUST keep ranking by similarity, best
+  first.
+- **FR-012**: Sampling, drawing gold rows, classifier estimate and classification, and the table
   exports (`to_polars` and `to_pandas`, together) MUST work on every list regardless of source.
-- **FR-010**: Candidate files written before this feature (no recorded source) MUST load as
+- **FR-013**: Candidate files written before this feature (no recorded source) MUST load as
   seed-search results with identical behaviour.
-- **FR-011**: Reading a corpus for these calls MUST be read-only (no write to the database,
-  bucket or corpus files), MUST NOT hold more than one batch of unmatched items at a time for
-  keyword searches over pgvector and S3 corpora, and MUST refuse a whole-corpus pgvector request
-  that exceeds the corpus's own result-size limit.
-- **FR-012**: The feature MUST NOT write, infer or suggest a gold label, and MUST NOT add any way
+- **FR-014**: Reading a corpus for these calls MUST be read-only (no write to the database,
+  bucket or corpus files). Without the server-side option, keyword searches over pgvector and S3
+  MUST hold no more than one batch of unmatched items at a time, plus the kept matches (at most
+  `limit` of them when a limit is given). A whole-corpus pgvector request that exceeds the corpus's
+  own result-size limit MUST be refused.
+- **FR-015**: The feature MUST NOT write, infer or suggest a gold label, and MUST NOT add any way
   to set one.
-- **FR-013**: The public names, the agent skill and its references, the agent-instructions block
+- **FR-016**: The feature MUST NOT add a registry of sources, a shared or system-wide store, or a
+  second way to describe a connection; corpora are described in code as they are today.
+- **FR-017**: The public names, the agent skill and its references, the agent-instructions block
   and the README MUST describe the new calls and when to prefer seeds, keywords or the whole
   corpus; the existing drift tests MUST keep passing.
-- **FR-014**: Importing the library MUST still do no I/O and import no optional dependency.
+- **FR-018**: Importing the library MUST still do no I/O and import no optional dependency.
 
 ### Key Entities *(include if feature involves data)*
 
 - **Candidate list**: the items proposed for classification, each with `id` and `text`. A list built
   from seeds also carries, per item, its best similarity and the seed that won it, plus the cutoff
-  and embedding model. A list built from keywords or the whole corpus carries neither. Every list
-  records its source.
+  and embedding model. A list built from keywords carries, per item, its rank value. A list built
+  from the whole corpus carries neither. Every list records its source.
 - **Corpus**: the existing local, S3 and pgvector descriptors. This feature adds one thing they
-  lack: a way to read their items one batch at a time, without vectors.
-- **Terms**: the user's keywords or regular expressions, in a list, never a bare string.
+  lack: a way to read their items one batch at a time, without vectors, and, for pgvector, a way to
+  have the server do the matching.
+- **Term**: a plain string or a compiled regular expression with its own flags.
 
 ## Deliberately skipped *(Ponytail)*
 
 - Stemming, lemmatising, accent folding and fuzzy matching: literal case-insensitive text or a
   regular expression covers it; users who need more write the regex.
-- "All terms" or boolean (AND/NOT) matching: any-term only; `Candidates` rows can be filtered with
-  polars afterwards.
-- Recording which term matched each item: no stage uses it.
-- Server-side filtering in pgvector (`ILIKE`, `~`) and S3 metadata filters: the same client-side
-  match everywhere keeps one behaviour; upgrade only if reading a huge table is too slow.
-- A cap, sampling or `limit` argument on the whole-corpus call: `sample` and the existing
-  result-size limit already do that.
-- Mixing sources (keywords plus seeds, or union of lists): one source per list.
+- "All terms" or boolean (AND/NOT) matching: any-term only; a user filters further with polars.
+- A relevance model beyond the one rule chosen in question 1 (no BM25, no tf-idf, no
+  database full-text ranking) and any user-supplied scoring function.
+- Merging several corpora, or a list per corpus inside one call: one corpus per call, merging is
+  upstream of the library.
+- A registry of sources, saved connections or any system-wide storage.
+- Server-side filtering for S3 Vectors or a local corpus; S3 Vectors metadata filters.
+- Server-side ranking or limiting: the database only filters; ranking and limit are applied in the
+  library so that both backends rank alike.
 - Reading or writing vectors, or re-embedding, in the new calls.
-- A command-line entry point, a new file format, or a base class or registry of "sources".
-- Any similarity score or ranking for keyword hits (term counts, BM25): order is the corpus's.
+- A command-line entry point, a new file format, or a base class of "sources".
 
 ## Success Criteria *(mandatory)*
 
@@ -204,7 +282,8 @@ bounded by a batch, not by the corpus.
 - **SC-001**: A user can go from a corpus to a classification estimate in three calls with no
   seeds, no embedder and no embedding cost (estimate shows classifier cost only).
 - **SC-002**: For hand-written fixtures of at least five items, a keyword search and a whole-corpus
-  request return exactly the expected ids, in order, with no duplicates.
+  request return exactly the expected ids, in the expected order, with no duplicates, including a
+  fixture with three expressions carrying three different flags.
 - **SC-003**: 100% of the existing candidate, gold, evaluation and pre-006 compatibility tests pass
   without edits to their expectations.
 - **SC-004**: No keyword or whole-corpus display contains a similarity value, a band row or the
@@ -212,24 +291,46 @@ bounded by a batch, not by the corpus.
 - **SC-005**: Every similarity-only operation on a non-seed list fails with one message that names
   the list's source; none returns a wrong or empty answer silently.
 - **SC-006**: A keyword search over a stubbed remote corpus of at least ten times the batch size
-  keeps a result containing only the matching rows, and issues no write.
+  returns only the matching rows and issues no write; with a limit it never holds more than that
+  many ranked matches.
+- **SC-007**: On a fixture of plain-text terms, the server-side and Python-side searches return
+  identical ids in identical order; no user term appears inside the statement text.
 
 ## Assumptions
 
-- **Matching rule**: terms are checked against the item's text only, case-insensitively, any term
-  suffices. Case folding is plain Unicode case-insensitivity, not locale-aware.
-- **Scope**: the whole-corpus list is held in memory like every other candidate list. For a
-  pgvector corpus the existing result-size limit is the guard; for a local corpus the item file is
-  the memory the user already has. A truly larger-than-memory whole-corpus classification is out
-  of scope (the user should keyword-filter or sample first).
+- **Matching rule**: terms are checked against the item's text only; any term suffices. Plain
+  strings are matched case-insensitively with ordinary Unicode case folding, not locale-aware.
+- **Regular expressions**: compiled patterns are the way to give a term its own flags; the regex
+  option applies to plain strings and gives them no flags (inline flags written in the pattern
+  still work). Flag behaviour is Python's for the Python-side search.
+- **Scope**: the whole-corpus list is held in memory like every other candidate list. For pgvector
+  the existing result-size limit is the guard; a truly larger-than-memory whole-corpus
+  classification is out of scope (keyword-filter, limit or sample first).
 - **S3 Vectors**: the corpus's text is read from item metadata the same way a search reads it, and
   a missing text field is an error, as it is today. Whether the service can list a whole index
   with that metadata is checked against its current docs in the plan, not assumed here.
-- **Naming and exports**: the new calls are `hn.keywords(corpus, terms, regex=False, ...)` and
-  `hn.everything(corpus, ...)` with async forms `akeywords` and `aeverything`, following the
-  existing `search`/`asearch` pair; the plan confirms the names.
+- **Naming and exports**: the new calls are `hn.keywords(corpus, terms, regex=False, limit=None,
+  ...)` and `hn.everything(corpus, limit=None, ...)` with async forms `akeywords` and
+  `aeverything`, following the existing `search`/`asearch` pair; the server-side option's name and
+  the plan's other names are confirmed in the plan.
 - **Compatibility**: a seed-search result keeps its exact fields and display; only candidates built
   by the new calls omit the similarity fields.
-- **No new dependency**: matching uses what the library already ships with.
+- **No new dependency**: matching uses what the library already ships with and the standard
+  library.
 - **Verification**: everything runs against hand-built local corpora, the fake `psycopg` and a
   stubbed S3 client; a real database or bucket is a human step, recorded as such.
+
+## Open questions *(for the user; resolve with `/speckit-clarify`)*
+
+1. **Ranking rule for keyword hits.** Semantic hits are ranked by a similarity score. A keyword has
+   no such score, so one must be chosen. Options: **A (recommended)** the number of distinct terms
+   that matched, then the total number of matches, then corpus order, shown as two columns; **B** a
+   single weighted score such as total matches only; **C** a relevance model such as BM25 (new
+   behaviour, needs corpus-wide statistics, so a second pass over the corpus).
+2. **Regular expressions on the database server.** Python and PostgreSQL differ: a compiled
+   pattern's flags are Python's, while the database takes its own option letters, and its default
+   treatment of line breaks is the opposite of Python's. Options: **A (recommended)** server-side
+   supports plain text and the case-insensitive flag only, and refuses any other flag or a pattern
+   it cannot translate, naming it; **B** server-side regular expressions are written in the
+   database's own language and are documented as such, so results may differ from the Python side;
+   **C** no regular expressions server-side, plain text only.

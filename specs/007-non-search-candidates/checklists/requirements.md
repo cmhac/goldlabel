@@ -13,8 +13,8 @@
 
 ## Requirement Completeness
 
-- [x] No [NEEDS CLARIFICATION] markers remain
-- [x] Requirements are testable and unambiguous
+- [ ] No [NEEDS CLARIFICATION] markers remain (2 open: ranking rule, server-side regex)
+- [ ] Requirements are testable and unambiguous (FR-004 and FR-006 wait on the two questions)
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
 - [x] All acceptance scenarios are defined
@@ -35,8 +35,9 @@
   interface and appear in the spec; they are marked as provisional in Assumptions and confirmed in
   the plan. The mentions of the fake `psycopg` and stubbed S3 client are in Assumptions and
   Success Criteria only as how verification is done, per the constitution's testing rules.
-- Zero clarification markers: the one real scope question (whole corpus larger than memory) has a
-  reasonable default, stated in Assumptions: use the existing result-size limit and refuse beyond it.
+- Two clarification markers after the 2026-10-26 revision: the keyword ranking rule and how regular
+  expressions behave server-side. The whole-corpus-larger-than-memory question keeps its default
+  (use the existing result-size limit and refuse beyond it).
 - Open item for the plan, not the spec: whether S3 Vectors can list a whole index with metadata
   (check against current AWS docs before planning that reader).
 - Ponytail was applied: the spec carries a "Deliberately skipped" list and asks for no option,
