@@ -216,3 +216,24 @@ def test_an_unknown_price_costs_one_probe_call_and_then_refuses(tmp_path, monkey
             hn.Candidates(ROWS, source="all"), tmp_path, cache=tmp_path / "c"
         )
     assert len(calls) == 1
+
+
+# --- e2e/run_all.py ---------------------------------------------------------------------------------
+
+from e2e import run_all
+
+
+def test_run_all_reads_the_last_result_line_and_the_score():
+    out = "ok  a\nscore=0.8000\nelapsed 1s\nRESULT: skipped - no key\n"
+    assert run_all.parse(out) == ("skipped", "no key", 0.8)
+    assert run_all.parse("RESULT: pass\n") == ("pass", "", None)
+    assert run_all.parse("RESULT: fail - x: expected 1, got 2")[0] == "fail"
+    assert run_all.parse("ok  a\n")[0] == "fail"  # killed before its RESULT line
+
+
+def test_run_all_verdict_fails_on_a_failure_or_on_different_scores():
+    ok = ("pass", "", 0.8)
+    assert run_all.overall({"a": ok, "b": ok}) == "pass"
+    assert run_all.overall({"a": ok, "b": ("skipped", "no key", None)}) == "skipped"
+    assert run_all.overall({"a": ok, "b": ("fail", "x", None)}) == "fail"
+    assert run_all.overall({"a": ok, "b": ("pass", "", 0.7)}) == "fail"
