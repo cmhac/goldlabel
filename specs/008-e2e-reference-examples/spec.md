@@ -16,7 +16,7 @@
 
 - Q: Should each example be a plain script, an automated test, or both? → A: Plain scripts, one per example folder, that check their own results and exit non-zero on failure, plus one run-all script that prints a single summary. A thin test wrapper may be added later without changing the examples. The project's default test run only collects `tests/`, so `e2e/` is never run by it.
 - Q: Should the examples share one data file? → A: No. Each example folder is self-contained: it defines its own small data and expected values, and does not import another example's files. The container start and stop code is repeated in each example that needs it. Agreement between the examples' data is held by a fast offline check in `tests/`.
-- Q: Which local file inputs are covered? → A: All of them, in every mode. CSV, Parquet read through polars, Parquet read through pandas, JSONL, a polars DataFrame, a pandas DataFrame and a list of rows each go through the whole corpus and keywords; seed search goes through every form that can hold vectors, and a CSV with a vector column is checked to be refused.
+- Q: Which local file inputs are covered? → A: One table example script that shows every way of loading local data (CSV, Parquet read through polars, Parquet read through pandas, JSONL, a polars DataFrame, a pandas DataFrame and a list of rows). Every form is loaded and must give the same whole corpus. Keywords and seeds are demonstrated on a few representative forms, not on every form: no exhaustive form-by-mode grid is required, and the user said the examples do not need to be structured as many clean automated tests.
 - Note: "a user can copy a folder" was an assumption in the first draft, not a requirement from the user. The goal is that a reader can use each folder as a reference for that setup.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -41,14 +41,13 @@ values written in the example.
    file read through pandas, a JSONL file, a polars DataFrame, a pandas DataFrame and a list of
    rows, **When** the example asks for the whole corpus from each, **Then** all seven give the
    same ids in the same order.
-2. **Given** that corpus in each of the seven forms, **When** the example searches by keywords and
-   regular expressions, **Then** the ranked hits, their term and match counts, and a limited list
-   all equal the values written in the example by hand, and are the same for every form.
-3. **Given** the corpus with embeddings in every form that can hold them (Parquet through each
-   engine, JSONL, both DataFrames, a list of rows), **When** the example searches by seed phrases
-   with a stand-in embedder, **Then** the similarities, bands and best seeds equal the
-   hand-computed values for every form, and no key is needed. **And** a CSV given a vector column
-   is refused with a message that names the reason.
+2. **Given** that corpus as a file and as a DataFrame, **When** the example searches by keywords
+   and regular expressions, **Then** the ranked hits, their term and match counts, and a limited
+   list all equal the values written in the example by hand, and are the same for both.
+3. **Given** the corpus with embeddings as a JSONL file, a Parquet file and a DataFrame, **When**
+   the example searches by seed phrases with a stand-in embedder, **Then** the similarities, bands
+   and best seeds equal the hand-computed values for all three, and no key is needed. **And** a
+   CSV given a vector column is refused with a message that names the reason.
 4. **Given** any expected value that is wrong, **When** the example runs, **Then** it stops with a
    message that names the check that failed and both values.
 
@@ -185,9 +184,8 @@ checks fail. Start the default checks with no container tool, no network and no 
 ### Functional Requirements
 
 - **FR-001**: The repository MUST have an `e2e/` folder with one example for each of these paths,
-  and no path without one: file and DataFrame tables (CSV, Parquet through polars, Parquet through
-  pandas, JSONL, polars and pandas DataFrames, a list of rows; each through whole corpus,
-  keywords and regular expressions, and seeds where the form can hold embeddings); Postgres without embeddings (whole corpus, keywords, server-side
+  and no path without one: file and DataFrame tables (every supported input form loaded and checked
+  for the whole corpus; keywords and regular expressions and seeds shown on representative forms); Postgres without embeddings (whole corpus, keywords, server-side
   filtering) in one-table and two-table layouts; Postgres with pgvector (seeds, exact and index
   modes); S3 Vectors (whole corpus, keywords, seeds); classify, estimate and evaluate.
 - **FR-002**: Each example MUST be a self-contained folder with a README (what it shows, what it
