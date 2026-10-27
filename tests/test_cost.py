@@ -143,6 +143,24 @@ def test_entries_use_the_sha256_layout_in_the_given_directory(tmp_path):
     assert cost.cache_get(tmp_path / "other", key) is None
 
 
+def test_cache_put_never_exposes_a_half_written_entry(tmp_path, monkeypatch):
+    key = cost.cache_key("m", "p", "t")
+    cost.cache_put(tmp_path, key, ["a"], UNKNOWN)
+    assert [p.name for p in tmp_path.iterdir()] == [f"{key}.json"]
+
+    other = tmp_path / "other"
+
+    def boom(*args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cost.os, "replace", boom)
+    with pytest.raises(OSError):
+        cost.cache_put(other, key, ["a"], UNKNOWN)
+    assert (
+        list(other.iterdir()) == []
+    )  # no entry a reader could parse, no temp file left
+
+
 def test_cache_false_writes_nothing_and_reads_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "root", tmp_path / "root")
     key = cost.cache_key("m", "p", "t")

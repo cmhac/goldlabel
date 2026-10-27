@@ -53,7 +53,14 @@ def cache_put(cache, key: str, output, usage: RunUsage | RequestUsage) -> None:
             "output_tokens": usage.output_tokens,
         },
     }
-    (directory / f"{key}.json").write_text(json.dumps(entry))
+    # write then rename, so a run sharing this cache never reads a half-written entry
+    tmp = directory / f"{key}.json.{os.getpid()}.tmp"
+    try:
+        tmp.write_text(json.dumps(entry))
+        os.replace(tmp, directory / f"{key}.json")
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def messages_dollars(messages: list[ModelMessage]) -> float | None:
