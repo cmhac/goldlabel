@@ -1,9 +1,11 @@
 import asyncio
 import csv
 import hashlib
+import heapq
 import io
 import json
 import random
+import re
 from collections import Counter
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
@@ -220,29 +222,90 @@ def _items(corpus):
     raise NotImplementedError("whole-corpus reads arrive with the Postgres/S3 reader")
 
 
+def _compile(keywords, regex: bool) -> list[re.Pattern]:
+    patterns = []
+    for term in keywords:
+        if isinstance(term, re.Pattern):
+            pattern = term
+        elif isinstance(term, str):
+            if not term.strip():
+                raise ValueError("keywords has a blank term")
+            try:
+                pattern = (
+                    re.compile(term)
+                    if regex
+                    else re.compile(re.escape(term), re.IGNORECASE)
+                )
+            except re.error as e:
+                raise re.error(f"invalid regular expression {term!r}: {e}") from None
+        else:
+            raise TypeError(
+                f"keywords must be strings or compiled patterns, not {type(term).__name__}"
+            )
+        # shortcut: only patterns matching the empty string are refused, zero-width ones like \b
+        # still match every word, tell the user in the docs
+        if pattern.match(""):
+            raise ValueError(
+                f"keyword {pattern.pattern!r} matches the empty string, so it would match every item"
+            )
+        patterns.append(pattern)
+    return patterns
+
+
+def _rank(items, patterns: list[re.Pattern], limit: int | None) -> list[dict]:
+    """Items matching any pattern, best first: distinct patterns matched, then total matches, then
+    corpus order. With a limit only that many are held at a time."""
+
+    def hits():
+        for index, (id, text) in enumerate(items):
+            counts = [sum(1 for _ in p.finditer(text)) for p in patterns]
+            if terms := sum(c > 0 for c in counts):
+                yield -terms, -sum(counts), index, id, text
+
+    ranked = heapq.nsmallest(limit, hits()) if limit else sorted(hits())
+    return [
+        {"id": id, "text": text, "terms_matched": -t, "matches": -m}
+        for t, m, _, id, text in ranked
+    ]
+
+
 async def aget_candidates(
     corpus: Table | S3Corpus | PgCorpus,
     *,
     seeds: Sequence[str] | None = None,
     embedder: str | Embedder | None = None,
     floor: float | None = None,
+    keywords: Sequence[str | re.Pattern] | None = None,
+    regex: bool = False,
     limit: int | None = None,
     out=None,
     cache=None,
 ) -> Candidates:
-    """The corpus's candidate items. With no filter, every item in the corpus's order; with
-    `seeds`, the items whose maximum similarity to any seed is at least `floor` (None: 0.60),
-    best first; ties go to the earlier seed.
+    """The corpus's candidate items, filtered by at most one of `seeds` or `keywords`.
+
+    No filter: every item in the corpus's order. `seeds`: the items whose maximum similarity to
+    any seed is at least `floor` (None: 0.60), best first; ties go to the earlier seed.
+    `keywords`: the items containing any term, best first (distinct terms matched, then total
+    matches, then corpus order). A term is a plain string (literal, case-insensitive) or a
+    compiled `re.Pattern` that keeps its own flags; `regex=True` makes strings patterns, as written.
 
     `embedder` (a pydantic-ai model string or an `Embedder`), `floor` and `cache` (a directory,
-    None for `<settings.root>/cache`, False for none) belong to `seeds`. `limit` keeps the first
-    N items, or the N most similar. `out`: a path writes the list there (+ `.meta.json`), False
-    writes nothing, None writes `<settings.root>/candidates.jsonl` for seeds only.
+    None for `<settings.root>/cache`, False for none) belong to `seeds`. `limit` keeps the first N
+    items, or the best N. `out`: a path writes the list there (+ `.meta.json`), False writes
+    nothing, None writes `<settings.root>/candidates.jsonl` for seeds only.
     """
     if isinstance(seeds, str):
         raise TypeError(
             "seeds must be a list of strings; use read_seeds(path) for a CSV"
         )
+    if isinstance(keywords, str):
+        raise TypeError("keywords must be a list; use keywords=['term'] for one term")
+    if seeds is not None and keywords is not None:
+        raise ValueError("give seeds or keywords, not both: one filter per call")
+    if keywords is not None and not keywords:
+        raise ValueError("keywords is empty; give at least one term")
+    if keywords is None and regex:
+        raise ValueError("regex is only used with keywords")
     if seeds is None:
         for name, value in (("embedder", embedder), ("floor", floor), ("cache", cache)):
             if value is not None:
@@ -254,9 +317,17 @@ async def aget_candidates(
     if limit is not None and limit < 1:
         raise ValueError("limit must be 1 or more")
     if seeds is None:
-        items = await asyncio.to_thread(lambda: list(islice(_items(corpus), limit)))
+        patterns = _compile(keywords, regex) if keywords is not None else None
+
+        def read():
+            if patterns is None:
+                return [{"id": i, "text": t} for i, t in islice(_items(corpus), limit)]
+            return _rank(_items(corpus), patterns, limit)
+
         result = Candidates(
-            [{"id": i, "text": t} for i, t in items], floor=None, source="all"
+            await asyncio.to_thread(read),
+            floor=None,
+            source="all" if patterns is None else "keywords",
         )
         if out is not None and out is not False:
             result.write(resolve(out, "candidates.jsonl"))
@@ -308,6 +379,8 @@ def get_candidates(
     seeds: Sequence[str] | None = None,
     embedder: str | Embedder | None = None,
     floor: float | None = None,
+    keywords: Sequence[str | re.Pattern] | None = None,
+    regex: bool = False,
     limit: int | None = None,
     out=None,
     cache=None,
@@ -319,6 +392,8 @@ def get_candidates(
             seeds=seeds,
             embedder=embedder,
             floor=floor,
+            keywords=keywords,
+            regex=regex,
             limit=limit,
             out=out,
             cache=cache,

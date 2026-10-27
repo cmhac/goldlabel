@@ -1,6 +1,7 @@
 import importlib
 import json
 import math
+import re
 import shutil
 import threading
 from pathlib import Path
@@ -677,3 +678,138 @@ def test_a_path_writes_the_whole_corpus_list_and_nothing_else_does(tmp_path):
     got = get_candidates(plain(), out=out)
     back = Candidates.read(out)
     assert back.rows == got.rows and back.source == "all"
+
+
+# --- keywords ---------------------------------------------------------------------------------------
+
+KW = [
+    {"id": "p0", "text": "Ballot box. The ballot is secret."},
+    {"id": "p1", "text": "Vote early. Vote often. Election day."},
+    {"id": "p2", "text": "Nice\nweather today."},
+    {"id": "p3", "text": "election results and a ballot count."},
+    {"id": "p4", "text": "Straße ist gesperrt."},
+]
+
+
+def kw(*terms, **kwargs):
+    kwargs.setdefault("out", False)
+    got = get_candidates(Table(KW, id_column="id"), keywords=list(terms), **kwargs)
+    return [(r["id"], r["terms_matched"], r["matches"]) for r in got.rows]
+
+
+def test_any_term_matches_each_item_once_and_ranks_by_terms_then_matches():
+    # p3: both terms, 1 + 1 hits; p0: ballot twice; p1: election once
+    assert kw("ballot", "election") == [("p3", 2, 2), ("p0", 1, 2), ("p1", 1, 1)]
+
+
+def test_the_result_is_a_keyword_list():
+    got = get_candidates(Table(KW, id_column="id"), keywords=["ballot"], out=False)
+    assert got.source == "keywords" and got.floor is None and got.capped is False
+    assert set(got.rows[0]) == {"id", "text", "terms_matched", "matches"}
+    assert got.rows[0]["text"] == "Ballot box. The ballot is secret."
+    assert repr(got) == "2 candidates (from keywords)"
+
+
+def test_plain_strings_ignore_case_literally():
+    assert kw("BALLOT") == [("p0", 1, 2), ("p3", 1, 1)]
+    assert kw("straße") == [("p4", 1, 1)]
+    assert kw("strasse") == []  # no case folding beyond IGNORECASE: ss is not ß
+
+
+def test_the_same_string_is_literal_or_a_pattern():
+    assert kw("Vote.*early") == []
+    assert kw("Vote.*early", regex=True) == [("p1", 1, 1)]
+    assert kw("vote", regex=True) == []  # a pattern string keeps its own case
+    assert kw("(?i)vote", regex=True) == [("p1", 1, 2)]
+
+
+def test_compiled_patterns_keep_only_their_own_flags():
+    loud = re.compile("vote", re.IGNORECASE)  # matches Vote twice
+    exact = re.compile(
+        "Election"
+    )  # not case-insensitive: p3's lowercase one is not a hit
+    dotall = re.compile("Nice.weather", re.DOTALL)  # the dot crosses the newline in p2
+    assert kw(loud, exact, dotall) == [("p1", 2, 3), ("p2", 1, 1)]
+    assert kw(re.compile("Nice.weather")) == []  # no re.S, no match
+
+
+def test_a_tie_keeps_table_order():
+    assert kw("ballot", "weather") == [("p0", 1, 2), ("p2", 1, 1), ("p3", 1, 1)]
+
+
+def test_limit_keeps_the_best_of_ten_hits():
+    table = Table(
+        [{"id": f"r{i}", "text": "x " * (i + 1)} for i in range(10)], id_column="id"
+    )
+    got = get_candidates(table, keywords=["x"], limit=3, out=False)
+    assert [(r["id"], r["matches"]) for r in got.rows] == [
+        ("r9", 10),
+        ("r8", 9),
+        ("r7", 8),
+    ]
+
+
+def test_no_match_is_an_empty_result_that_says_so():
+    got = get_candidates(Table(KW, id_column="id"), keywords=["zzz"], out=False)
+    assert got.rows == [] and repr(got) == "0 candidates (from keywords)"
+
+
+@pytest.mark.parametrize(
+    ("terms", "kwargs", "message"),
+    [
+        (["ballot", "  "], {}, "blank"),
+        ([""], {}, "blank"),
+        (["a*"], {"regex": True}, "'a\\*'.*empty string"),
+        ([re.compile("b?")], {}, "'b\\?'.*empty string"),
+        (["("], {"regex": True}, r"invalid regular expression '\('"),
+        ([5], {}, "keywords"),
+    ],
+)
+def test_bad_terms_are_refused_before_the_corpus_is_read(
+    monkeypatch, terms, kwargs, message
+):
+    def boom(*a, **k):
+        raise AssertionError("the corpus must not be read")
+
+    monkeypatch.setattr(candidates, "table_rows", boom)
+    with pytest.raises((ValueError, TypeError, re.error), match=message):
+        get_candidates(plain(), keywords=terms, out=False, **kwargs)
+
+
+def test_keyword_argument_rules():
+    emb = StubEmbedder(SEEDS)
+    with pytest.raises(ValueError, match="one filter per call"):
+        get_candidates(plain(), seeds=["a"], embedder=emb, keywords=["a"], out=False)
+    with pytest.raises(ValueError, match="keywords"):
+        get_candidates(plain(), keywords=[], out=False)
+    with pytest.raises(TypeError, match="keywords"):
+        get_candidates(plain(), keywords="ballot", out=False)
+    with pytest.raises(ValueError, match="regex"):
+        get_candidates(plain(), regex=True, out=False)
+    with pytest.raises(ValueError, match="embedder"):
+        get_candidates(plain(), keywords=["a"], embedder=emb, out=False)
+
+
+def test_a_keyword_list_refuses_similarity_operations():
+    got = get_candidates(plain(), keywords=["text"], out=False)
+    with pytest.raises(ValueError, match="keywords"):
+        got.above(0.7)
+
+
+def test_garbage_vectors_do_not_stop_a_keyword_search():
+    table = Table(
+        [{"id": "a", "text": "ballot", "v": "garbage"}],
+        id_column="id",
+        vector_column="v",
+        embedding_model="m",
+    )
+    assert len(get_candidates(table, keywords=["ballot"], out=False).rows) == 1
+
+
+def test_keyword_lists_are_written_only_to_a_path(tmp_path):
+    get_candidates(Table(KW, id_column="id"), keywords=["ballot"])
+    assert not (tmp_path / "root").exists()
+    out = tmp_path / "k.jsonl"
+    got = get_candidates(Table(KW, id_column="id"), keywords=["ballot"], out=out)
+    back = Candidates.read(out)
+    assert back.source == "keywords" and back.rows == got.rows
