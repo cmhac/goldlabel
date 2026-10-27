@@ -45,6 +45,7 @@ dev = [
 asyncio_mode = "auto"
 addopts = "-n auto"
 testpaths = ["tests"]
+pythonpath = ["."]  # tests import e2e.common.support
 
 [tool.ruff.lint.per-file-ignores]
 "examples/**" = ["B018"]  # a notebook cell ends with the value it displays

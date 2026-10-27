@@ -6,11 +6,19 @@ arithmetic, not with the library under test.
 
 import json
 import math
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 
+import hunches as hn
+from e2e.common import support
+from hunches.classifier import CostLimit
 from hunches.taxonomy import Taxonomy
 
 COMMON = Path(__file__).parent.parent / "e2e" / "common"
@@ -118,3 +126,93 @@ def test_gold_rows_match_the_corpus_and_taxonomy():
         if stale or unstamped or not set(labels) <= names:
             bad.append(row["id"])
     assert not bad, f"gold rows that no longer match the corpus or taxonomy: {bad}"
+
+
+# --- e2e/common/support.py ------------------------------------------------------------------------
+
+ROOT = COMMON.parent.parent
+
+
+def run_example(body: str) -> subprocess.CompletedProcess:
+    code = (
+        "from e2e.common.support import Failed, check, run\n"
+        f"def main():\n    {body}\nrun(main)\n"
+    )
+    env = {**os.environ, "PYTHONPATH": str(ROOT)}
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env=env,
+        check=False,
+    )
+
+
+def test_result_line_and_exit_status_for_pass_skipped_and_fail():
+    done = run_example("check('one', 1, 1)")
+    assert done.returncode == 0
+    assert done.stdout.splitlines()[-1] == "RESULT: pass"
+
+    done = run_example("return 'no key'")
+    assert done.returncode == 0
+    assert done.stdout.splitlines()[-1] == "RESULT: skipped - no key"
+
+    done = run_example("check('sum', 1 + 1, 3)")
+    assert done.returncode == 1
+    assert done.stdout.splitlines()[-1] == "RESULT: fail - sum: expected 3, got 2"
+
+    done = run_example("raise KeyError('boom')")
+    assert done.returncode == 1
+    assert done.stdout.splitlines()[-1] == "RESULT: fail - KeyError: 'boom'"
+
+
+def test_stand_in_embedder_returns_the_seed_vector_and_rejects_unknown_phrases():
+    import asyncio
+
+    embedder = support.StandIn()
+    result = asyncio.run(embedder.embed_query("I just lost my job"))
+    assert result.embeddings == [[1.0, 0.0]]
+    with pytest.raises(KeyError, match="no such phrase"):
+        asyncio.run(embedder.embed_query("no such phrase"))
+
+
+def test_a_missing_podman_fails_naming_podman_and_never_docker(monkeypatch):
+    monkeypatch.setenv("PATH", "")
+    with (
+        pytest.raises(support.Failed) as caught,
+        support.container("x", "postgres:16", 5432),
+    ):
+        pass
+    assert "podman is required" in str(caught.value)
+    assert "docker" not in str(caught.value).lower()
+
+
+ROWS = [{"id": "a", "text": "laid off today"}, {"id": "b", "text": "nice weather"}]
+
+
+def test_no_key_and_nothing_cached_skips_after_the_estimate(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.delenv(support.KEY, raising=False)
+    got = support.classify_and_evaluate(
+        hn.Candidates(ROWS, source="all"), tmp_path, cache=tmp_path / "c"
+    )
+    assert got is not None and support.KEY in got and "2 items" in got
+    assert "Estimate: 2 items, 0 cached, 2 live calls" in capsys.readouterr().out
+
+
+def test_an_unknown_price_costs_one_probe_call_and_then_refuses(tmp_path, monkeypatch):
+    calls = []
+
+    def answer(messages, info: AgentInfo) -> ModelResponse:
+        calls.append(1)
+        args = {"reasoning": "x", "labels": ["off_topic"]}
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, args)])
+
+    monkeypatch.setattr(support, "MODEL", FunctionModel(answer, model_name="unpriced"))
+    with pytest.raises(CostLimit, match="unknown"):
+        support.classify_and_evaluate(
+            hn.Candidates(ROWS, source="all"), tmp_path, cache=tmp_path / "c"
+        )
+    assert len(calls) == 1
