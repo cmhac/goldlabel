@@ -21,13 +21,11 @@ from e2e.common.support import (
     classify_and_evaluate,
     corpus_rows,
     expected,
+    found,
+    hits,
     run,
     seeds,
 )
-
-
-def hits(candidates) -> list[list]:
-    return [[r["id"], r["terms_matched"], r["matches"]] for r in candidates.rows]
 
 
 def main() -> str | None:
@@ -106,11 +104,7 @@ def main() -> str | None:
                 out=False,
                 cache=False,
             )
-            found = [
-                [r["id"], round(r["max_similarity"], 4), r["best_seed"]]
-                for r in got.rows
-            ]
-            check(f"seed search on {name}", found, want["seeds"]["hits"])
+            check(f"seed search on {name}", found(got), want["seeds"]["hits"])
             check(f"bands on {name}", got.bands(), want["seeds"]["band_counts"])
         try:
             hn.Table(tmp / "corpus.csv", vector_column="embedding")

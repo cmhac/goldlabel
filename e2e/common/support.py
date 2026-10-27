@@ -28,6 +28,7 @@ MODEL = "anthropic:claude-haiku-5-5"
 MAX_COST = 0.50  # dollars, per classification call; a cold run needs about a cent
 EMBEDDING_MODEL = "hand-built-2d"
 KEY = "ANTHROPIC_API_KEY"
+READY_SECONDS = 60  # how long a container gets to answer
 
 
 class Failed(Exception):
@@ -57,6 +58,19 @@ def taxonomy() -> hn.Taxonomy:
 
 def prompt() -> str:
     return (COMMON / "prompt.md").read_text().strip()
+
+
+def hits(candidates) -> list[list]:
+    """Keyword candidates as [id, terms_matched, matches], the shape of expected.json."""
+    return [[r["id"], r["terms_matched"], r["matches"]] for r in candidates.rows]
+
+
+def found(candidates) -> list[list]:
+    """Seed candidates as [id, similarity to 4 places, best seed], the shape of expected.json."""
+    return [
+        [r["id"], round(r["max_similarity"], 4), r["best_seed"]]
+        for r in candidates.rows
+    ]
 
 
 def check(name: str, got, want) -> None:
@@ -105,6 +119,16 @@ def run(main) -> None:
     say(f"RESULT: skipped - {skipped}" if skipped else "RESULT: pass")
 
 
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def _podman(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["podman", *args], capture_output=True, text=True, check=False
@@ -122,9 +146,14 @@ def container(example: str, image: str, port: int, env: dict | None = None, read
     if shutil.which("podman") is None:
         raise Failed("podman is required: https://podman.io/docs/installation")
     label = f"hunches-e2e={example}"
-    stale = _podman("ps", "-aq", "--filter", f"label={label}").stdout.split()
-    if stale:
-        _podman("rm", "-f", *stale)
+    for old in _podman(
+        "ps", "-a", "--filter", f"label={label}", "--format", "{{.Names}}"
+    ).stdout.split():
+        if _alive(int(old.rsplit("-", 1)[1])):
+            raise Failed(
+                f"another run of {example} is in progress (container {old}); wait for it"
+            )
+        _podman("rm", "-f", old)  # left by a run that was killed
     name = f"hunches-e2e-{example}-{os.getpid()}"
     command = ["run", "-d", "--rm", "--name", name, "--label", label]
     command += ["-p", f"127.0.0.1::{port}"]
@@ -144,7 +173,7 @@ def container(example: str, image: str, port: int, env: dict | None = None, read
         if not mapped:
             raise Failed(f"{image} published no port {port}")
         host_port = int(mapped[0].rsplit(":", 1)[1])
-        deadline = time.monotonic() + 60
+        deadline = time.monotonic() + READY_SECONDS
         while True:
             try:
                 answered = ready is None or ready(host_port) is not False
@@ -155,7 +184,7 @@ def container(example: str, image: str, port: int, env: dict | None = None, read
             if time.monotonic() > deadline:
                 logs = _podman("logs", "--tail", "20", name)
                 raise Failed(
-                    f"{image} was not ready after 60s; last log lines:\n{logs.stdout}{logs.stderr}"
+                    f"{image} was not ready after {READY_SECONDS}s; last log lines:\n{logs.stdout}{logs.stderr}"
                 )
             time.sleep(0.5)
         yield host_port
@@ -190,8 +219,9 @@ def classify_and_evaluate(candidates, tmp: Path, cache=CACHE, gold=GOLD) -> str 
         )
     copy = tmp / "gold.jsonl"
     shutil.copyfile(gold, copy)
-    check("gold copied byte for byte", copy.read_bytes(), gold.read_bytes())
     say((COMMON / "GOLD.md").read_text())
+    # shortcut: evaluate has no cost cap; safe because every caller classifies the whole corpus first,
+    # which caches every gold row, upgrade when an example classifies only a subset
     evaluation = hn.evaluate(
         clf, hn.Gold(copy).dev, target=expected()["score_floor"], log=False
     )

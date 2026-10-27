@@ -302,3 +302,76 @@ def test_the_default_test_run_never_collects_e2e_and_the_cache_is_ignored():
 def test_gold_provenance_is_committed_with_the_gold_file():
     if (COMMON / "gold.jsonl").exists():
         assert (COMMON / "GOLD.md").is_file(), "gold.jsonl needs GOLD.md beside it"
+
+
+# --- support.container against a stand-in `podman` ----------------------------------------------------
+
+STUB = """#!/bin/sh
+echo "$@" >> "$PODMAN_LOG"
+case "$1" in
+  ps) printf '%s' "$PODMAN_PS" ;;
+  port) echo "127.0.0.1:5555" ;;
+  logs) echo "last log line" ;;
+esac
+"""
+
+
+@pytest.fixture
+def fake_podman(tmp_path, monkeypatch):
+    stub = tmp_path / "bin" / "podman"
+    stub.parent.mkdir()
+    stub.write_text(STUB)
+    stub.chmod(0o755)
+    log = tmp_path / "podman.log"
+    monkeypatch.setenv("PATH", f"{stub.parent}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("PODMAN_LOG", str(log))
+    monkeypatch.setenv("PODMAN_PS", "")
+    return lambda: log.read_text().splitlines() if log.exists() else []
+
+
+def test_the_container_is_published_on_a_random_local_port_and_removed_after_a_failure(
+    fake_podman,
+):
+    name = f"hunches-e2e-x-{os.getpid()}"
+    with (
+        pytest.raises(RuntimeError, match="boom"),
+        support.container("x", "img", 5432, {"A": "b"}) as port,
+    ):
+        assert port == 5555
+        raise RuntimeError("boom")
+    calls = fake_podman()
+    run = next(c for c in calls if c.startswith("run "))
+    assert f"--name {name}" in run and "-p 127.0.0.1::5432" in run and "-e A=b" in run
+    assert calls[-1] == f"rm -f {name}"
+
+
+def test_a_container_left_by_a_dead_run_is_swept_but_a_live_run_is_respected(
+    fake_podman, monkeypatch
+):
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    monkeypatch.setenv("PODMAN_PS", f"hunches-e2e-x-{dead.pid}\n")
+    with support.container("x", "img", 5432):
+        pass
+    assert f"rm -f hunches-e2e-x-{dead.pid}" in fake_podman()
+
+    monkeypatch.setenv("PODMAN_PS", f"hunches-e2e-x-{os.getpid()}\n")
+    before = len(fake_podman())
+    with (
+        pytest.raises(support.Failed, match="another run of x is in progress"),
+        support.container("x", "img", 5432),
+    ):
+        pass
+    assert not any(c.startswith("run ") for c in fake_podman()[before:])
+
+
+def test_a_service_that_never_answers_fails_with_the_log_and_is_removed(
+    fake_podman, monkeypatch
+):
+    monkeypatch.setattr(support, "READY_SECONDS", 0.2)
+    with (
+        pytest.raises(support.Failed, match="last log line"),
+        support.container("x", "img", 5432, ready=lambda port: False),
+    ):
+        pass
+    assert fake_podman()[-1] == f"rm -f hunches-e2e-x-{os.getpid()}"

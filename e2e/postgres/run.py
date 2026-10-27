@@ -18,6 +18,7 @@ from e2e.common.support import (
     container,
     corpus_rows,
     expected,
+    hits,
     run,
     say,
 )
@@ -54,10 +55,6 @@ def load(url: str) -> None:
             conn.execute(
                 f"ANALYZE {table}"
             )  # the size guard reads the planner statistics
-
-
-def hits(candidates) -> list[list]:
-    return [[r["id"], r["terms_matched"], r["matches"]] for r in candidates.rows]
 
 
 def main() -> str | None:

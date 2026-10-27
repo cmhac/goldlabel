@@ -18,6 +18,8 @@ from e2e.common.support import (
     container,
     corpus_rows,
     expected,
+    found,
+    hits,
     run,
     seeds,
 )
@@ -58,9 +60,8 @@ def put(client, index: str, vectors: list[dict]) -> None:
         )
 
 
-def hits(candidates) -> list[list]:
+def by_rank(rows: list[list]) -> list[list]:
     # the service lists vectors in its own order, so ties are compared by id, not by position
-    rows = [[r["id"], r["terms_matched"], r["matches"]] for r in candidates.rows]
     return sorted(rows, key=lambda h: (-h[1], -h[2], h[0]))
 
 
@@ -111,10 +112,7 @@ def main() -> str | None:
                 got = hn.get_candidates(
                     corpus, keywords=entry["terms"], regex=entry["regex"], out=False
                 )
-                expected_hits = sorted(
-                    entry["hits"], key=lambda h: (-h[1], -h[2], h[0])
-                )
-                check(f"keywords {key}", hits(got), expected_hits)
+                check(f"keywords {key}", by_rank(hits(got)), by_rank(entry["hits"]))
 
             got = hn.get_candidates(
                 corpus,
@@ -124,11 +122,7 @@ def main() -> str | None:
                 out=False,
                 cache=False,
             )
-            found = [
-                [r["id"], round(r["max_similarity"], 4), r["best_seed"]]
-                for r in got.rows
-            ]
-            check("seed search", found, want["seeds"]["hits"])
+            check("seed search", found(got), want["seeds"]["hits"])
 
             got = hn.get_candidates(hn.S3Corpus(BUCKET, "pad"), out=False)
             padded = [r["id"] for r in got.rows]

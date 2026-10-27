@@ -17,6 +17,7 @@ from e2e.common.support import (
     container,
     corpus_rows,
     expected,
+    found,
     run,
     seeds,
 )
@@ -42,13 +43,6 @@ def load(url: str) -> None:
                 (r["id"], r["text"], str(r["embedding"])),
             )
         conn.execute("ANALYZE corpus")
-
-
-def found(candidates) -> list[list]:
-    return [
-        [r["id"], round(r["max_similarity"], 4), r["best_seed"]]
-        for r in candidates.rows
-    ]
 
 
 def main() -> str | None:
