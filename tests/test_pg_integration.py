@@ -222,9 +222,9 @@ class VectorEmbedder(Embedder):
 
 
 async def run_candidates(monkeypatch, seeds, corpus) -> dict[str, dict]:
-    """search() over `corpus`; the candidate rows by id."""
-    found = await candidates.asearch(
-        corpus, SEED_TEXTS, embedder=VectorEmbedder(seeds), out=False, cache=False
+    """get_candidates() over `corpus`; the candidate rows by id."""
+    found = await candidates.aget_candidates(
+        corpus, seeds=SEED_TEXTS, embedder=VectorEmbedder(seeds), out=False, cache=False
     )
     return {r["id"]: r for r in found.rows}
 

@@ -8,7 +8,7 @@ from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
 from pydantic_ai.usage import RequestUsage
 
-from hunches.candidates import asearch
+from hunches.candidates import aget_candidates
 from hunches.search import Table, search_table, table_rows
 from hunches.settings import settings
 
@@ -221,9 +221,9 @@ class StubEmbedder(Embedder):
         )
 
 
-async def test_asearch_reads_a_table_and_ranks_like_before():
-    got = await asearch(
-        vec_table(), ["sa", "sb"], embedder=StubEmbedder(VECTORS), out=False
+async def test_aget_candidates_reads_a_table_and_ranks_like_before():
+    got = await aget_candidates(
+        vec_table(), seeds=["sa", "sb"], embedder=StubEmbedder(VECTORS), out=False
     )
     assert [(r["id"], r["best_seed"]) for r in got.rows] == [
         ("r0", "sa"),

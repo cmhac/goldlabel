@@ -49,5 +49,4 @@ testpaths = ["tests"]
 
 [tool.ty.src]
 # specs: design handoff files import textual, which is no longer a dependency.
-# examples: ty reads `hn.search` as the submodule `hunches.search`, which the package shadows with the function.
-exclude = ["specs", "examples"]
+exclude = ["specs"]

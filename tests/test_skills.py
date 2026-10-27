@@ -202,7 +202,7 @@ def test_samples_keep_secrets_and_gold_edits_out():
 def test_the_samples_cover_the_main_calls():
     all_code = "\n".join(c for p in DOCS for c in python_blocks(p))
     for needle in (
-        "hn.search(",
+        "hn.get_candidates(",
         "hn.Taxonomy(",
         "hn.Classifier(",
         "hn.Gold(",

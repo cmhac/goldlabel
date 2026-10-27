@@ -9,7 +9,12 @@ from importlib.metadata import PackageNotFoundError, version
 
 from hunches._gold_rule import GOLD_RULE_FULL, GOLD_RULE_SHORT, GoldError
 from hunches._label import label
-from hunches.candidates import Candidates, asearch, read_seeds, search
+from hunches.candidates import (
+    Candidates,
+    aget_candidates,
+    get_candidates,
+    read_seeds,
+)
 from hunches.classifier import Classifier, CostLimit, Estimate, Predictions
 from hunches.cost import Cost, cost
 from hunches.evaluation import (
@@ -52,13 +57,13 @@ __all__ = [
     "Taxonomy",
     "__version__",
     "aevaluate",
-    "asearch",
+    "aget_candidates",
     "band_sample",
     "cost",
     "eval_log",
     "evaluate",
+    "get_candidates",
     "label",
     "read_seeds",
-    "search",
     "settings",
 ]

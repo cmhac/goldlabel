@@ -24,11 +24,13 @@ corpus = hn.PgCorpus(url_env="HUNCHES_PG_URL", table="posts", text_column="body"
 # corpus = hn.Table("posts.parquet", text_column="body", vector_column="embedding", embedding_model="openai:text-embedding-3-small")
 
 seeds = hn.read_seeds("seeds.csv")  # or a plain list[str]
-candidates = hn.search(corpus, seeds, embedder="openai:text-embedding-3-small")
+candidates = hn.get_candidates(
+    corpus, seeds=seeds, embedder="openai:text-embedding-3-small"
+)
 candidates  # count, similarity bands, and a WARNING if the backend capped the results
 ```
 
-`embedder` must be the model the corpus was embedded with. `search` writes `.hunches/candidates.jsonl`; running it again with one changed seed re-embeds only that seed. Show `candidates.bands()` and `candidates.top_seeds(0.70)` to the user: which seeds bring in the items, and are the top items what they meant? A seed that brings in junk is a reason to reword the seed, not to change the classifier.
+`embedder` must be the model the corpus was embedded with. `get_candidates` writes `.hunches/candidates.jsonl`; running it again with one changed seed re-embeds only that seed. Show `candidates.bands()` and `candidates.top_seeds(0.70)` to the user: which seeds bring in the items, and are the top items what they meant? A seed that brings in junk is a reason to reword the seed, not to change the classifier.
 
 For a database, `corpus.check()` (on `PgCorpus` only) reports problems with the table and column before searching. The URL stays in the environment variable; never type it into the notebook.
 
@@ -95,9 +97,9 @@ If your tools cannot edit `.ipynb` JSON reliably, write the pipeline as a plain 
 import hunches as hn
 
 # %% Search
-candidates = hn.search(
+candidates = hn.get_candidates(
     hn.PgCorpus(table="posts", text_column="body"),
-    hn.read_seeds("seeds.csv"),
+    seeds=hn.read_seeds("seeds.csv"),
     embedder="openai:text-embedding-3-small",
 )
 print(candidates)

@@ -17,7 +17,7 @@ pip install hunches            # extras: hunches[pg] pgvector, hunches[s3] S3 Ve
 ```
 
 ```
-corpus -> hn.search -> candidates -> hn.Taxonomy + hn.Classifier -> gold (people label) -> hn.evaluate
+corpus -> hn.get_candidates -> candidates -> hn.Taxonomy + hn.Classifier -> gold (people label) -> hn.evaluate
        -> edit the prompt, evaluate again -> hn.band_sample (pick a cutoff) -> clf.estimate -> clf.classify -> clf.save
 ```
 

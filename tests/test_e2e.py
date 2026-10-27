@@ -128,15 +128,14 @@ def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     # 1. search: embeds the seeds (one live call per seed), calls no classifier model
     fake = FakeModel()
     embedder = HandEmbedder()
-    # ty sees the submodule `hunches.search` here; at run time `hn.search` is the function
-    candidates = hn.search(  # ty: ignore[call-non-callable]
+    candidates = hn.get_candidates(
         hn.Table(
             corpus_file,
             id_column="id",
             vector_column="embedding",
             embedding_model="hand-built-2d",
         ),
-        ["I lost my job"],
+        seeds=["I lost my job"],
         embedder=embedder,
     )
     assert embedder.calls == 1

@@ -51,7 +51,7 @@ def test_readme_python_blocks_use_public_names_only():
     assert used
     for name in used:
         assert name in hunches.__all__, f"README uses hunches.{name}, not public"
-    for needle in ("hn.search(", "hn.label(", "hn.evaluate(", "clf.classify("):
+    for needle in ("hn.get_candidates(", "hn.label(", "hn.evaluate(", "clf.classify("):
         assert any(needle in b for b in blocks), needle
     assert any(".to_polars()" in b for b in blocks)
 

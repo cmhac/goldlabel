@@ -20,7 +20,7 @@ class HandEmbedder(Embedder):
     """Stand-in for a real embedding model: the sample vectors are hand-built, not embeddings.
 
     With your own corpus, drop this and pass `embedder="openai:text-embedding-3-small"` (or the
-    model your corpus was embedded with) to `hn.search`.
+    model your corpus was embedded with) to `hn.get_candidates`.
     """
 
     def __init__(self):
@@ -40,7 +40,7 @@ class HandEmbedder(Embedder):
 # %% [markdown]
 # ## 1. Search
 #
-# Seed phrases are things a matching post could say. `search` embeds them, finds the closest items
+# Seed phrases are things a matching post could say. `get_candidates` embeds them, finds the closest items
 # and keeps each item's best similarity. The result is saved to `.hunches/candidates.jsonl`.
 
 # %%
@@ -51,7 +51,7 @@ corpus = hn.Table(
     embedding_model="hand-built-2d",
 )
 seeds = ["I just lost my job"]
-candidates = hn.search(corpus, seeds, embedder=HandEmbedder())
+candidates = hn.get_candidates(corpus, seeds=seeds, embedder=HandEmbedder())
 candidates
 
 # %%

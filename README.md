@@ -37,7 +37,9 @@ corpus = hn.PgCorpus(
     table="posts", text_column="body"
 )  # or hn.S3Corpus(...), hn.Table("posts.parquet", ...)
 seeds = hn.read_seeds("seeds.csv")  # or a plain list of strings
-candidates = hn.search(corpus, seeds, embedder="openai:text-embedding-3-small")
+candidates = hn.get_candidates(
+    corpus, seeds=seeds, embedder="openai:text-embedding-3-small"
+)
 candidates  # count, similarity bands, a warning if the backend capped the results
 candidates.to_polars()
 ```
@@ -112,7 +114,7 @@ the current directory. Change it for the process with `hn.settings.root = Path("
 
 | File | Written by | Default |
 |---|---|---|
-| `candidates.jsonl` (+ `.meta.json`) | `hn.search` | `.hunches/candidates.jsonl`; `out=` moves it, `out=False` keeps it in memory |
+| `candidates.jsonl` (+ `.meta.json`) | `hn.get_candidates` | `.hunches/candidates.jsonl`; `out=` moves it, `out=False` keeps it in memory |
 | `gold.jsonl` | `hn.Gold()` | `.hunches/gold.jsonl`; `hn.Gold("path")` |
 | `evals.jsonl` | `hn.evaluate` | `.hunches/evals.jsonl`; `log=` moves it, `log=False` turns it off |
 | `cache/` | model and embedding calls, and the cost ledger | `.hunches/cache`; `cache=` moves it, `cache=False` turns it off |

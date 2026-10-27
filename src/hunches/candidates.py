@@ -211,26 +211,33 @@ async def embed_seeds(
     return vectors
 
 
-async def asearch(
+async def aget_candidates(
     corpus: Table | S3Corpus | PgCorpus,
-    seeds: Sequence[str],
     *,
+    seeds: Sequence[str],
     embedder: str | Embedder,
-    floor: float = FLOOR,
+    floor: float | None = None,
+    limit: int | None = None,
     out=None,
     cache=None,
 ) -> Candidates:
-    """Items whose maximum similarity to any seed is at least `floor`; ties go to the earlier seed.
+    """Items whose maximum similarity to any seed is at least `floor` (None: 0.60), best first;
+    ties go to the earlier seed.
 
-    `embedder` is a pydantic-ai model string or an `Embedder`. `out`: None writes
-    `<settings.root>/candidates.jsonl` (+ `.meta.json`), False writes nothing, a path writes there.
-    `cache`: a directory, None for `<settings.root>/cache`, False for none.
+    `embedder` is a pydantic-ai model string or an `Embedder`. `limit` keeps the most similar N.
+    `out`: None writes `<settings.root>/candidates.jsonl` (+ `.meta.json`), False writes nothing,
+    a path writes there. `cache`: a directory, None for `<settings.root>/cache`, False for none.
     """
     if isinstance(seeds, str):
         raise TypeError(
             "seeds must be a list of strings; use read_seeds(path) for a CSV"
         )
     seeds = list(seeds)
+    if not seeds:
+        raise ValueError("seeds is empty; give at least one seed phrase")
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be 1 or more")
+    floor = FLOOR if floor is None else floor
     if isinstance(embedder, str):
         model, embedder = embedder, Embedder(embedder)
     else:
@@ -262,23 +269,32 @@ async def asearch(
                     "max_similarity": sim,
                     "best_seed": seed,
                 }
-    rows = sorted(best.values(), key=lambda r: (-r["max_similarity"], r["id"]))
+    rows = sorted(best.values(), key=lambda r: (-r["max_similarity"], r["id"]))[:limit]
     result = Candidates(rows, capped, floor, seeds_digest(seeds), model)
     if out is not False:
         result.write(resolve(out, "candidates.jsonl"))
     return result
 
 
-def search(
+def get_candidates(
     corpus: Table | S3Corpus | PgCorpus,
-    seeds: Sequence[str],
     *,
+    seeds: Sequence[str],
     embedder: str | Embedder,
-    floor: float = FLOOR,
+    floor: float | None = None,
+    limit: int | None = None,
     out=None,
     cache=None,
 ) -> Candidates:
-    """`asearch` for scripts and notebooks; also works inside a running event loop."""
+    """`aget_candidates` for scripts and notebooks; also works inside a running event loop."""
     return run(
-        asearch(corpus, seeds, embedder=embedder, floor=floor, out=out, cache=cache)
+        aget_candidates(
+            corpus,
+            seeds=seeds,
+            embedder=embedder,
+            floor=floor,
+            limit=limit,
+            out=out,
+            cache=cache,
+        )
     )
