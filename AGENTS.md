@@ -55,7 +55,7 @@ Nothing in this repository may add a way to set a gold label. Only the labelling
 
 ## Stack
 
-Python 3.12+, `uv`, `pydantic-ai-slim` (Agent, Embedder; anthropic and openai extras), `numpy`, `genai-prices`, `pyyaml`; optional extras `s3` (`boto3`), `pg` (`psycopg[binary]`), `rds` (`psycopg[binary]` + `boto3`), `local` (Sentence Transformers). Standard-library `http.server` for the labelling page, vanilla JavaScript, Tailwind CSS pre-built into `src/hunches/web/app.css` (see `web/README.md`). Dev group: `pytest`, `pytest-asyncio` (`asyncio_mode = "auto"`), `pytest-xdist`, `ruff`, `ty`, `pre-commit`, `polars`, `pandas` (the last two only for the export tests). **No** Textual, keyring, platformdirs, python-dotenv, nbformat or Playwright; a build or example script that needs one runs it with `uv run --with` and does not add it to the project.
+Python 3.12+, `uv`, `pydantic-ai-slim` (Agent, Embedder; anthropic and openai extras), `numpy`, `genai-prices`, `pyyaml`; optional extras `s3` (`boto3`), `pg` (`psycopg[binary]`), `rds` (`psycopg[binary]` + `boto3`), `local` (Sentence Transformers). Standard-library `http.server` for the labelling page, vanilla JavaScript, Tailwind CSS pre-built into `src/hunches/web/app.css` (see `web/README.md`). Dev group: `pytest`, `pytest-asyncio` (`asyncio_mode = "auto"`), `pytest-xdist`, `ruff`, `ty`, `pre-commit`, `polars`, `pandas` (the last two only for the export tests). **No** Textual, keyring, platformdirs, python-dotenv or Playwright. Notebook libraries (nbformat, nbclient, a Jupyter kernel) may be dev-group dependencies only (constitution v1.2.0), never runtime dependencies or extras; anything else a build or example script needs runs with `uv run --with` and is not added to the project.
 
 ## Commands
 

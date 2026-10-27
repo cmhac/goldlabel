@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-27
 
-**Status**: Draft, clarification in progress (Q1 to Q3 resolved 2026-10-27; ready for `/speckit-plan` after a last pass)
+**Status**: Draft, clarification in progress (all questions resolved 2026-10-27; ready for `/speckit-plan`)
 
 **Input**: User description: "Runnable end-to-end reference examples in an e2e/ folder, one per primary path a user can take with the hunches library, each runnable fully locally against podman-run emulators (Postgres, Postgres with pgvector, Floci for S3 Vectors) plus a required real LLM API key for the classifier, never run in local pre-commit hooks or CI by default, kept up to date as source code and pointed to from the README as the reference for different implementations."
 
@@ -17,6 +17,7 @@
 - Q: Should each example be a plain script, an automated test, or both? → A: Plain scripts, one per example folder, that check their own results and exit non-zero on failure, plus one run-all script that prints a single summary. A thin test wrapper may be added later without changing the examples. The project's default test run only collects `tests/`, so `e2e/` is never run by it.
 - Q: Which local file inputs are covered? → A: One table example script that shows every way of loading local data (CSV, Parquet read through polars, Parquet read through pandas, JSONL, a polars DataFrame, a pandas DataFrame and a list of rows). Every form is loaded and must give the same whole corpus. Keywords and seeds are demonstrated on a few representative forms, not on every form. The user said the examples do not need to be structured as many clean automated tests.
 - Q: One corpus for every example, or a separate one for classification? → A: One corpus of about 60 items for every example, read from a common data folder. Every backend example runs the full chain (candidates, classify, evaluate) on its own backend, and a shared result cache means each item is classified by the model once, however many examples run. The user's reason: the same data lets the end-to-end results be compared across configurations without paying for the model again.
+- Q: Should the detailed walkthrough stay a notebook-and-script pair? → A: It becomes a notebook only, with no script twin, and the run-all script runs it headlessly and treats a failing cell as a failed check. The notebook-equals-script drift test is dropped with the script. The notebook executor is a development-group dependency, which the constitution (amended to v1.2.0 on 2026-10-27) now allows for notebook libraries.
 - Q: Does an example have to be a copyable, self-contained folder? → A: No. That was an assumption in the first draft, not the user's requirement. Each folder has its own README and script and is the reference for its setup; the common data lives in one place, and no example imports another example.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -123,7 +124,7 @@ without AWS, and only one of the three backends.
 A user wants the rest of the chain explained step by step once they have candidates: draw gold
 rows, use the labels people made, estimate the cost, classify with a real model under a spend cap,
 resume, evaluate, read the disagreements, band-sample, and save the classifier. This is the
-existing walkthrough, moved into `e2e/` and rebuilt on the common data. The backend examples run
+existing walkthrough, moved into `e2e/`, rebuilt on the common data and kept as a notebook only. The backend examples run
 the same steps tersely; this one is the place that shows and explains each.
 
 **Why this priority**: it is the part that costs money and needs human-made data, so it is built
@@ -213,7 +214,8 @@ checks with no container tool, no network and no key; they pass.
   and two-table layouts; Postgres with pgvector (seeds, exact and index modes); S3 Vectors (whole
   corpus, keywords, seeds); and the detailed classify, estimate and evaluate walkthrough.
 - **FR-002**: Each example MUST be a folder with a README (what it shows, what it needs, the one
-  command that runs it, what a pass looks like) and a single script. An example MUST NOT import
+  command that runs it, what a pass looks like) and a single script. The one exception is the
+  detailed walkthrough, whose single file is a notebook with no stored outputs. An example MUST NOT import
   or read another example's files; it reads the common data only through the common data folder
   (FR-004). Each folder MUST be readable on its own as the reference for that setup.
 - **FR-003**: Each example MUST check its own results against expected values written by hand,
@@ -253,7 +255,8 @@ checks with no container tool, no network and no key; they pass.
   implementations, and name which folder to read for which corpus kind. The agent-facing texts
   that name the example folder (`AGENTS.md`, the skill) MUST be updated to say `e2e/`.
 - **FR-012**: The existing `examples/sample` walkthrough MUST be moved into `e2e/` as the detailed
-  walkthrough (FR-001) and rebuilt on the common data, `examples/` retired, and every reference to
+  walkthrough (FR-001), rebuilt on the common data and kept as a notebook only (its script twin and
+  the test that kept the two identical are removed), `examples/` retired, and every reference to
   the old path (README, project notes, tests, lint configuration) updated.
 - **FR-013**: Examples MUST write their working files (candidates, the gold copy, results) to a
   temporary folder by default. The result cache MUST live in one folder shared by all examples and
@@ -279,7 +282,9 @@ checks with no container tool, no network and no key; they pass.
 - **FR-018**: Each example MUST be run by a plain command and exit with a non-zero status on any
   failed check. One run-all command MUST run every example, print one summary line per example
   and a final one, and exit non-zero if any failed. A skipped step is reported as skipped and is
-  not a failure. A test-tool wrapper is NOT required.
+  not a failure. The notebook walkthrough MUST be run headlessly by the same commands, with a cell
+  that raises counting as a failed check and a missing key reported as skipped. A test-tool wrapper
+  is NOT required.
 - **FR-019**: A documented maintainer procedure MUST say how to produce the gold file: which
   command draws the rows to label from the corpus, that the labelling page is used by a person,
   and that the resulting file is committed as written. The corpus, taxonomy and prompt MUST be
@@ -356,8 +361,9 @@ say so; the candidate steps do not depend on it.
 - Visual checks (the labelling page's look, notebook rendering) and IAM-based database login are
   out of scope.
 - `examples/sample` is moved rather than kept, because two reference folders would confuse the
-  README's instruction. Its notebook and script pair, and the tests that keep them in step, move
-  with it; the labelling step in it changes from live labelling to the committed gold file.
+  README's instruction. Its notebook moves with it and its script twin is dropped; the labelling
+  step in it changes from live labelling to the committed gold file. The headless notebook
+  executor is a development-group dependency, allowed by constitution v1.2.0.
 - The existing end-to-end test in the test suite (which uses a stubbed model and a simulated
   person) stays where it is; it is part of the default checks and is a different thing from these
   opt-in runs, so the name `e2e/` for the folder is a naming overlap to be explained in the README.
