@@ -390,3 +390,11 @@ def test_band_sample_off_topic_means_exactly_off_topic():
     c = clf(model, mode="multi")
     report = band_sample(c, Candidates([cand(0, 0.61), cand(1, 0.61)]))
     assert report.rows[0]["off_topic"] == 1 and report.rows[0]["rate"] == 0.5
+
+
+def test_band_sample_refuses_a_list_without_similarity_scores():
+    model, calls = answering({})
+    other = Candidates([{"id": "a", "text": "t"}], source="all")
+    with pytest.raises(ValueError, match="band_sample needs similarity scores.*all"):
+        band_sample(clf(model), other)
+    assert calls == []

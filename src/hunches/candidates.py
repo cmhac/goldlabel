@@ -72,18 +72,30 @@ def top_seeds(rows: list[dict], threshold: float, n: int = 10) -> list[tuple[str
 
 @dataclass(frozen=True)
 class Candidates:
-    """Items found by a search: rows `{id, text, max_similarity, best_seed}`, best first."""
+    """Candidate items. `source` says where they came from: "seeds" (rows `{id, text, max_similarity,
+    best_seed}`, best first), "keywords" (`{id, text, terms_matched, matches}`, best first) or
+    "all" (`{id, text}`, corpus order). Floor, digest and model are None outside seeds."""
 
     rows: list[dict]
     capped: bool = False  # a backend cap may have hidden hits above the floor
-    floor: float = FLOOR
+    floor: float | None = FLOOR
     seeds_digest: str | None = None
     embedding_model: str | None = None
+    source: str = "seeds"
+
+    def _need_seeds(self, name: str) -> None:
+        if self.source != "seeds":
+            raise ValueError(
+                f"{name} needs similarity scores, but this list was built from "
+                f"{self.source}, not from seeds"
+            )
 
     def above(self, t: float) -> "Candidates":
+        self._need_seeds("above")
         return replace(self, rows=[r for r in self.rows if r["max_similarity"] >= t])
 
     def bands(self) -> list[int]:
+        self._need_seeds("bands")
         return band_counts(self.rows)
 
     def sample(self, n: int, seed=None, exclude: Collection[str] = ()) -> "Candidates":
@@ -92,6 +104,7 @@ class Candidates:
         return replace(self, rows=random.Random(seed).sample(pool, min(n, len(pool))))
 
     def top_seeds(self, threshold: float, n: int = 10) -> list[tuple[str, int]]:
+        self._need_seeds("top_seeds")
         return top_seeds(self.rows, threshold, n)
 
     @classmethod
@@ -106,6 +119,7 @@ class Candidates:
             floor=meta.get("floor", FLOOR),
             seeds_digest=meta.get("seeds_digest"),
             embedding_model=meta.get("embedding_model"),
+            source=meta.get("source", "seeds"),
         )
 
     def write(self, path) -> None:
@@ -118,6 +132,7 @@ class Candidates:
             "floor": self.floor,
             "embedding_model": self.embedding_model,
             "capped": self.capped,
+            "source": self.source,
         }
         path.with_suffix(".meta.json").write_text(json.dumps(meta))
 
@@ -127,13 +142,32 @@ class Candidates:
     def to_pandas(self):
         return _frame.to_pandas(self.rows)
 
+    def _headline(self) -> str:
+        if self.source == "keywords":
+            return f"{len(self.rows)} candidates (from keywords)"
+        if self.source == "all":
+            return f"{len(self.rows)} candidates (whole corpus)"
+        return f"{len(self.rows)} candidates (floor {self.floor:.2f})"
+
     def _repr_html_(self) -> str:
+        if self.source == "keywords":
+            return _html.line(self._headline()) + _html.table(
+                ["id", "text", "terms matched", "matches"],
+                [
+                    (r["id"], r["text"], r["terms_matched"], r["matches"])
+                    for r in self.rows
+                ],
+            )
+        if self.source == "all":
+            return _html.line(self._headline()) + _html.table(
+                ["id", "text"], [(r["id"], r["text"]) for r in self.rows]
+            )
         rows = [
             (r["id"], r["text"], f"{r['max_similarity']:.3f}", r["best_seed"])
             for r in self.rows
         ]
         out = [
-            _html.line(f"{len(self.rows)} candidates (floor {self.floor:.2f})"),
+            _html.line(self._headline()),
             _html.bars([(_band_name(i), n) for i, n in enumerate(self.bands())]),
         ]
         if self.capped:
@@ -142,7 +176,9 @@ class Candidates:
         return "".join(out)
 
     def __repr__(self) -> str:
-        lines = [f"{len(self.rows)} candidates (floor {self.floor:.2f})"]
+        if self.source != "seeds":
+            return self._headline()
+        lines = [self._headline()]
         for i, count in enumerate(self.bands()):
             lines.append(f"  {_band_name(i)}  {count}")
         if self.capped:

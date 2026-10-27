@@ -170,6 +170,7 @@ def test_round_trip_and_meta_beside_the_file(tmp_path):
         "floor",
         "embedding_model",
         "capped",
+        "source",
     }
     assert meta["seeds_digest"] == candidates.seeds_digest(["alpha", "beta"])
     assert meta["floor"] == 0.6 and meta["embedding_model"] == "m"
@@ -467,3 +468,77 @@ def test_top_seeds_function_at_two_thresholds():
     assert candidates.top_seeds(rows, 0.6) == [("A", 3), ("B", 2)]
     assert candidates.top_seeds(rows, 0.7) == [("B", 2)]
     assert len(candidates.top_seeds(rows, 0.6, n=1)) == 1
+
+
+# --- source: lists that did not come from seeds ---------------------------------------------------
+
+
+def kw_list():
+    rows = [
+        {"id": "a", "text": "one", "terms_matched": 2, "matches": 3},
+        {"id": "b", "text": "two", "terms_matched": 1, "matches": 1},
+    ]
+    return Candidates(rows, floor=None, source="keywords")
+
+
+def all_list():
+    return Candidates(
+        [{"id": "a", "text": "one"}, {"id": "b", "text": "two"}],
+        floor=None,
+        source="all",
+    )
+
+
+def test_source_defaults_to_seeds_and_other_fields_are_none_outside_seeds():
+    assert Candidates([]).source == "seeds"
+    c = kw_list()
+    assert c.floor is None and c.seeds_digest is None and c.embedding_model is None
+    assert c.capped is False
+
+
+@pytest.mark.parametrize("make", [kw_list, all_list])
+@pytest.mark.parametrize("call", ["above", "bands", "top_seeds"])
+def test_similarity_operations_refuse_other_sources(make, call):
+    c = make()
+    args = {"above": (0.7,), "bands": (), "top_seeds": (0.7,)}[call]
+    with pytest.raises(
+        ValueError, match=rf"{call} needs similarity scores.*{c.source}"
+    ):
+        getattr(c, call)(*args)
+
+
+def test_seed_operations_are_unchanged_by_the_source_field():
+    c = Candidates([{"id": "x", "text": "t", "max_similarity": 0.7, "best_seed": "s"}])
+    assert c.above(0.7).rows == c.rows and c.bands()[4] == 1
+
+
+def test_non_seed_lists_round_trip_with_source_and_rank_values(tmp_path):
+    for c in (kw_list(), all_list()):
+        c.write(tmp_path / "c.jsonl")
+        meta = json.loads((tmp_path / "c.meta.json").read_text())
+        assert meta["source"] == c.source and meta["floor"] is None
+        back = Candidates.read(tmp_path / "c.jsonl")
+        assert back.rows == c.rows and back.source == c.source and back.floor is None
+
+
+def test_a_file_without_source_loads_as_seeds_with_its_bands():
+    c = Candidates.read(FIXTURES / "candidates.jsonl")
+    assert c.source == "seeds" and c.bands()[:2] == [0, 0] and sum(c.bands()) == 2
+
+
+def test_other_sources_repr_says_where_they_came_from_and_never_mentions_scores():
+    assert repr(kw_list()) == "2 candidates (from keywords)"
+    assert repr(all_list()) == "2 candidates (whole corpus)"
+    for c in (kw_list(), all_list()):
+        both = (repr(c) + c._repr_html_()).lower()
+        for word in ("floor", "similarity", "seed", "band"):
+            assert word not in both, (c.source, word)
+    html = kw_list()._repr_html_()
+    assert "terms matched" in html and "<td" in html
+
+
+def test_sample_and_frames_work_on_every_source():
+    for c in (kw_list(), all_list()):
+        got = c.sample(1, seed=1)
+        assert got.source == c.source and len(got.rows) == 1
+        assert c.to_polars().height == 2 and len(c.to_pandas()) == 2

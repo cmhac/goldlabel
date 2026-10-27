@@ -321,6 +321,11 @@ def band_sample(clf: Classifier, candidates, *, per_band=30, seed=None) -> BandR
 
     Off-topic means the predicted labels are exactly `{off_topic}`. Nothing is written.
     """
+    if candidates.source != "seeds":
+        raise ValueError(
+            f"band_sample needs similarity scores, but this list was built from "
+            f"{candidates.source}, not from seeds"
+        )
     rng = random.Random(seed)
     names = [
         f"{BANDS[i]:.3f}-{BANDS[i + 1]:.3f}"
