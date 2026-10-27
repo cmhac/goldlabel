@@ -20,9 +20,10 @@ a polars frame, a pandas frame and a list of dicts. For each source:
 
 ```python
 import hunches as hn
+
 t = hn.Table(source, text_column="body", id_column="post_id")
-hn.get_candidates(t).to_polars()                          # all five, table order
-hn.get_candidates(t, keywords=["ballot"]).to_polars()     # the hand-computed ids
+hn.get_candidates(t).to_polars()  # all five, table order
+hn.get_candidates(t, keywords=["ballot"]).to_polars()  # the hand-computed ids
 ```
 
 Expected: identical ids and order from every source; no file written (`.hunches/` untouched).
@@ -31,6 +32,7 @@ Expected: identical ids and order from every source; no file written (`.hunches/
 
 ```python
 import re
+
 hn.get_candidates(t, keywords=[re.compile("vote", re.I), re.compile("^Election", re.M)])
 ```
 
