@@ -1,0 +1,60 @@
+{"id": "p01", "text": "I got laid off on Monday after nine years at the company.", "embedding": [1.0, 0.0]}
+{"id": "p02", "text": "My whole team was cut in the reorg, and I am job hunting now.", "embedding": [1.0, 0.0]}
+{"id": "p03", "text": "Rumours of redundancies are going around the office.", "embedding": [0.8, 0.6]}
+{"id": "p04", "text": "HR called a meeting for 3pm and by 3:20 I was carrying a box out.", "embedding": [1.0, 0.0]}
+{"id": "p05", "text": "They cut 40% of the team and I was part of it.", "embedding": [1.0, 0.0]}
+{"id": "p06", "text": "My manager says layoffs are coming next quarter and nobody will say who.", "embedding": [0.8, 0.6]}
+{"id": "p07", "text": "Redundancy letter arrived today. Last day is the 30th. The redundancy pay is generous.", "embedding": [1.0, 0.0]}
+{"id": "p08", "text": "Got let go this morning, no warning, two weeks of severance.", "embedding": [1.0, 0.0]}
+{"id": "p09", "text": "We heard the whole department might be restructured away.", "embedding": [0.8, 0.6]}
+{"id": "p10", "text": "After the merger, they laid off everyone in accounting, including me.", "embedding": [1.0, 0.0]}
+{"id": "p11", "text": "Laid off again, second time in three years.", "embedding": [1.0, 0.0]}
+{"id": "p12", "text": "They keep saying there will be no redundancies, which is what they said last time.", "embedding": [0.8, 0.6]}
+{"id": "p13", "text": "My contract was not renewed, so I am out of work from Friday.", "embedding": [1.0, 0.0]}
+{"id": "p14", "text": "I started a folder called job_loss_notes and keep adding to it after every all-hands.", "embedding": [0.8, 0.6]}
+{"id": "p15", "text": "The company froze hiring and I think my role is next.", "embedding": [0.8, 0.6]}
+{"id": "p16", "text": "My lawyer says I should sign nothing until I read the layoff agreement.", "embedding": [1.0, 0.0]}
+{"id": "p17", "text": "Half of engineering was let go today and our channel went silent.", "embedding": [1.0, 0.0]}
+{"id": "p18", "text": "Our site is closing in March and nobody knows who stays.", "embedding": [0.8, 0.6]}
+{"id": "p19", "text": "I survived the layoffs but half my friends did not.", "embedding": [0.8, 0.6]}
+{"id": "p20", "text": "The unemployment office was packed today; I was laid off in June and my redundancy pay has run out.", "embedding": [1.0, 0.0]}
+{"id": "p21", "text": "I am exhausted and dread opening my laptop every morning.", "embedding": [0.28, 0.96]}
+{"id": "p22", "text": "Another 70 hour week and I cried in the car park before work.", "embedding": [0.28, 0.96]}
+{"id": "p23", "text": "I used to love this job and now I feel nothing at all.", "embedding": [0.352, 0.936]}
+{"id": "p24", "text": "My doctor says my blood pressure is up because of work stress.", "embedding": [0.28, 0.96]}
+{"id": "p25", "text": "I have not taken a real day off in eight months.", "embedding": [0.352, 0.936]}
+{"id": "p26", "text": "Exported my timesheets to D:\\work\\hours.csv to prove how many hours I really do.", "embedding": [0.28, 0.96]}
+{"id": "p27", "text": "Sunday evenings give me a knot in my stomach, I cannot switch off.", "embedding": [0.352, 0.936]}
+{"id": "p28", "text": "I snapped at a colleague over nothing and I know I am running on empty.", "embedding": [0.28, 0.96]}
+{"id": "p29", "text": "Being on call every night has worn me down to the bone.", "embedding": [0.28, 0.96]}
+{"id": "p30", "text": "I keep making small mistakes now and I used to be so careful.", "embedding": [0.352, 0.936]}
+{"id": "p31", "text": "Everyone says take a holiday but the work will pile up and I cannot.", "embedding": [0.352, 0.936]}
+{"id": "p32", "text": "I am burned out and I do not even have the energy to look for something new.", "embedding": [0.28, 0.96]}
+{"id": "p33", "text": "Working 60% over my contract hours; I keep a file called burnout_log.txt of it all.", "embedding": [0.28, 0.96]}
+{"id": "p34", "text": "Coffee for breakfast, coffee for lunch, still falling asleep at my desk.", "embedding": [0.352, 0.936]}
+{"id": "p35", "text": "The constant emails after midnight are wearing me out.", "embedding": [0.28, 0.96]}
+{"id": "p36", "text": "I am so tired of being tired of this job.", "embedding": [0.352, 0.936]}
+{"id": "p37", "text": "My manager asks for miracles and I have nothing left to give.", "embedding": [0.28, 0.96]}
+{"id": "p38", "text": "Burnout is real: I slept twelve hours and still woke up exhausted.", "embedding": [0.28, 0.96]}
+{"id": "p39", "text": "Rumours of layoffs do not even scare me anymore, I am too worn out to care.", "embedding": [0.352, 0.936]}
+{"id": "p40", "text": "Went on stress leave this week and the team treats it like a betrayal.", "embedding": [0.352, 0.936]}
+{"id": "p41", "text": "Lay off the sauce, you can have one more taco.", "embedding": [0.8, 0.6]}
+{"id": "p42", "text": "The Lakers were laid back all night and still won by ten.", "embedding": [1.0, 0.0]}
+{"id": "p43", "text": "I burned out the motor on my blender making soup.", "embedding": [0.28, 0.96]}
+{"id": "p44", "text": "Marathon training has me exhausted but in the best way.", "embedding": [0.352, 0.936]}
+{"id": "p45", "text": "The weather in DC is perfect today, 22 degrees and sunny.", "embedding": [0.6, -0.8]}
+{"id": "p46", "text": "Looking for a good sourdough starter recipe, any tips?", "embedding": [-0.6, -0.8]}
+{"id": "p47", "text": "Saved the recipe as sourdough_v2.docx, 100% worth it.", "embedding": [-1.0, 0.0]}
+{"id": "p48", "text": "Anyone know a good vet near Dupont Circle?", "embedding": [0.0, -1.0]}
+{"id": "p49", "text": "The new bus lanes finally opened downtown.", "embedding": [-0.8, 0.6]}
+{"id": "p50", "text": "My dog learned to open the back door and I am not amused.", "embedding": [0.6, -0.8]}
+{"id": "p51", "text": "Does anyone have a recommendation for a standing desk under 400 dollars?", "embedding": [-0.6, -0.8]}
+{"id": "p52", "text": "Windows tip: the folder C:\\Users\\me\\Documents holds the old photos.", "embedding": [-1.0, 0.0]}
+{"id": "p53", "text": "The cherry blossoms peaked early this year.", "embedding": [0.0, -1.0]}
+{"id": "p54", "text": "Congrats to the team on shipping the redesign, it looks great.", "embedding": [-0.8, 0.6]}
+{"id": "p55", "text": "Quarterly planning starts Monday and I am excited about the roadmap.", "embedding": [0.6, -0.8]}
+{"id": "p56", "text": "Our office plants survived the holiday break, against all odds.", "embedding": [-0.6, -0.8]}
+{"id": "p57", "text": "Can someone explain how the new expense tool works?", "embedding": [-1.0, 0.0]}
+{"id": "p58", "text": "Just finished a great book about the history of canals.", "embedding": [0.0, -1.0]}
+{"id": "p59", "text": "Team lunch on Friday, vote for tacos or sushi.", "embedding": [-0.8, 0.6]}
+{"id": "p60", "text": "The commute was easy today because the metro ran on time.", "embedding": [0.6, -0.8]}

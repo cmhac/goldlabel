@@ -1,0 +1,4 @@
+mode: single
+labels:
+  layoff: The author lost their job, or expects to.
+  burnout: The author is worn out by their work.

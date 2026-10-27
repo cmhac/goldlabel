@@ -1,0 +1,562 @@
+{
+ "whole": [
+  "p01",
+  "p02",
+  "p03",
+  "p04",
+  "p05",
+  "p06",
+  "p07",
+  "p08",
+  "p09",
+  "p10",
+  "p11",
+  "p12",
+  "p13",
+  "p14",
+  "p15",
+  "p16",
+  "p17",
+  "p18",
+  "p19",
+  "p20",
+  "p21",
+  "p22",
+  "p23",
+  "p24",
+  "p25",
+  "p26",
+  "p27",
+  "p28",
+  "p29",
+  "p30",
+  "p31",
+  "p32",
+  "p33",
+  "p34",
+  "p35",
+  "p36",
+  "p37",
+  "p38",
+  "p39",
+  "p40",
+  "p41",
+  "p42",
+  "p43",
+  "p44",
+  "p45",
+  "p46",
+  "p47",
+  "p48",
+  "p49",
+  "p50",
+  "p51",
+  "p52",
+  "p53",
+  "p54",
+  "p55",
+  "p56",
+  "p57",
+  "p58",
+  "p59",
+  "p60"
+ ],
+ "keywords": {
+  "laid_off_or_redundancy": {
+   "terms": [
+    "laid off",
+    "redundan"
+   ],
+   "regex": false,
+   "hits": [
+    [
+     "p20",
+     2,
+     2
+    ],
+    [
+     "p07",
+     1,
+     2
+    ],
+    [
+     "p01",
+     1,
+     1
+    ],
+    [
+     "p03",
+     1,
+     1
+    ],
+    [
+     "p10",
+     1,
+     1
+    ],
+    [
+     "p11",
+     1,
+     1
+    ],
+    [
+     "p12",
+     1,
+     1
+    ]
+   ],
+   "limit5": [
+    [
+     "p20",
+     2,
+     2
+    ],
+    [
+     "p07",
+     1,
+     2
+    ],
+    [
+     "p01",
+     1,
+     1
+    ],
+    [
+     "p03",
+     1,
+     1
+    ],
+    [
+     "p10",
+     1,
+     1
+    ]
+   ]
+  },
+  "regex_with_flag": {
+   "terms": [
+    "(?i)laid off|redundan|let go"
+   ],
+   "regex": true,
+   "hits": [
+    [
+     "p07",
+     1,
+     2
+    ],
+    [
+     "p20",
+     1,
+     2
+    ],
+    [
+     "p01",
+     1,
+     1
+    ],
+    [
+     "p03",
+     1,
+     1
+    ],
+    [
+     "p08",
+     1,
+     1
+    ],
+    [
+     "p10",
+     1,
+     1
+    ],
+    [
+     "p11",
+     1,
+     1
+    ],
+    [
+     "p12",
+     1,
+     1
+    ],
+    [
+     "p17",
+     1,
+     1
+    ]
+   ],
+   "limit5": [
+    [
+     "p07",
+     1,
+     2
+    ],
+    [
+     "p20",
+     1,
+     2
+    ],
+    [
+     "p01",
+     1,
+     1
+    ],
+    [
+     "p03",
+     1,
+     1
+    ],
+    [
+     "p08",
+     1,
+     1
+    ]
+   ]
+  },
+  "percent": {
+   "terms": [
+    "%"
+   ],
+   "regex": false,
+   "hits": [
+    [
+     "p05",
+     1,
+     1
+    ],
+    [
+     "p33",
+     1,
+     1
+    ],
+    [
+     "p47",
+     1,
+     1
+    ]
+   ],
+   "limit5": [
+    [
+     "p05",
+     1,
+     1
+    ],
+    [
+     "p33",
+     1,
+     1
+    ],
+    [
+     "p47",
+     1,
+     1
+    ]
+   ]
+  },
+  "underscore": {
+   "terms": [
+    "_"
+   ],
+   "regex": false,
+   "hits": [
+    [
+     "p14",
+     1,
+     2
+    ],
+    [
+     "p33",
+     1,
+     1
+    ],
+    [
+     "p47",
+     1,
+     1
+    ]
+   ],
+   "limit5": [
+    [
+     "p14",
+     1,
+     2
+    ],
+    [
+     "p33",
+     1,
+     1
+    ],
+    [
+     "p47",
+     1,
+     1
+    ]
+   ]
+  },
+  "backslash": {
+   "terms": [
+    "\\"
+   ],
+   "regex": false,
+   "hits": [
+    [
+     "p52",
+     1,
+     3
+    ],
+    [
+     "p26",
+     1,
+     2
+    ]
+   ],
+   "limit5": [
+    [
+     "p52",
+     1,
+     3
+    ],
+    [
+     "p26",
+     1,
+     2
+    ]
+   ]
+  }
+ },
+ "seeds": {
+  "floor": 0.65,
+  "hits": [
+   [
+    "p01",
+    1.0,
+    "I just lost my job"
+   ],
+   [
+    "p02",
+    1.0,
+    "I just lost my job"
+   ],
+   [
+    "p04",
+    1.0,
+    "I just lost my job"
+   ],
+   [
+    "p05",
+    1.0,
+    "I just lost my job"
+   ],
+   [
+    "p07",
+    1.0,
+    "I just lost my job"
+   ],
+   [
+    "p08",
+    1.0,
+    "I just lost my job"
+   ],
+   [
+    "p10",
+    1.0,
+    "I just lost my job"
+   ],
+   [
+    "p11",
+    1.0,
+    "I just lost my job"
+   ],
+   [
+    "p13",
+    1.0,
+    "I just lost my job"
+   ],
+   [
+    "p16",
+    1.0,
+    "I just lost my job"
+   ],
+   [
+    "p17",
+    1.0,
+    "I just lost my job"
+   ],
+   [
+    "p20",
+    1.0,
+    "I just lost my job"
+   ],
+   [
+    "p42",
+    1.0,
+    "I just lost my job"
+   ],
+   [
+    "p21",
+    0.96,
+    "I am completely worn out by work"
+   ],
+   [
+    "p22",
+    0.96,
+    "I am completely worn out by work"
+   ],
+   [
+    "p24",
+    0.96,
+    "I am completely worn out by work"
+   ],
+   [
+    "p26",
+    0.96,
+    "I am completely worn out by work"
+   ],
+   [
+    "p28",
+    0.96,
+    "I am completely worn out by work"
+   ],
+   [
+    "p29",
+    0.96,
+    "I am completely worn out by work"
+   ],
+   [
+    "p32",
+    0.96,
+    "I am completely worn out by work"
+   ],
+   [
+    "p33",
+    0.96,
+    "I am completely worn out by work"
+   ],
+   [
+    "p35",
+    0.96,
+    "I am completely worn out by work"
+   ],
+   [
+    "p37",
+    0.96,
+    "I am completely worn out by work"
+   ],
+   [
+    "p38",
+    0.96,
+    "I am completely worn out by work"
+   ],
+   [
+    "p43",
+    0.96,
+    "I am completely worn out by work"
+   ],
+   [
+    "p23",
+    0.936,
+    "I am completely worn out by work"
+   ],
+   [
+    "p25",
+    0.936,
+    "I am completely worn out by work"
+   ],
+   [
+    "p27",
+    0.936,
+    "I am completely worn out by work"
+   ],
+   [
+    "p30",
+    0.936,
+    "I am completely worn out by work"
+   ],
+   [
+    "p31",
+    0.936,
+    "I am completely worn out by work"
+   ],
+   [
+    "p34",
+    0.936,
+    "I am completely worn out by work"
+   ],
+   [
+    "p36",
+    0.936,
+    "I am completely worn out by work"
+   ],
+   [
+    "p39",
+    0.936,
+    "I am completely worn out by work"
+   ],
+   [
+    "p40",
+    0.936,
+    "I am completely worn out by work"
+   ],
+   [
+    "p44",
+    0.936,
+    "I am completely worn out by work"
+   ],
+   [
+    "p03",
+    0.8,
+    "I just lost my job"
+   ],
+   [
+    "p06",
+    0.8,
+    "I just lost my job"
+   ],
+   [
+    "p09",
+    0.8,
+    "I just lost my job"
+   ],
+   [
+    "p12",
+    0.8,
+    "I just lost my job"
+   ],
+   [
+    "p14",
+    0.8,
+    "I just lost my job"
+   ],
+   [
+    "p15",
+    0.8,
+    "I just lost my job"
+   ],
+   [
+    "p18",
+    0.8,
+    "I just lost my job"
+   ],
+   [
+    "p19",
+    0.8,
+    "I just lost my job"
+   ],
+   [
+    "p41",
+    0.8,
+    "I just lost my job"
+   ]
+  ],
+  "band_counts": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   44
+  ]
+ },
+ "score_floor": 0.7
+}
