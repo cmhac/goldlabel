@@ -8,6 +8,7 @@ import random
 import re
 from collections import Counter
 from collections.abc import Collection, Sequence
+from contextlib import closing
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from itertools import islice
@@ -22,6 +23,7 @@ from hunches.search import (
     PgCorpus,
     S3Corpus,
     Table,
+    pg_items,
     search_pg_exact,
     search_table,
     search_vectors,
@@ -215,10 +217,12 @@ async def embed_seeds(
     return vectors
 
 
-def _items(corpus):
-    """(id, text) of every item in the corpus's own order."""
+def _items(corpus, guard: bool = False, limit: int | None = None):
+    """(id, text) of every item in the corpus's own order, as a generator to close."""
     if isinstance(corpus, Table):
         return ((r["id"], r["text"]) for r in table_rows(corpus))
+    if isinstance(corpus, PgCorpus):
+        return pg_items(corpus, guard, limit)
     raise NotImplementedError("whole-corpus reads arrive with the Postgres/S3 reader")
 
 
@@ -320,9 +324,10 @@ async def aget_candidates(
         patterns = _compile(keywords, regex) if keywords is not None else None
 
         def read():
-            if patterns is None:
-                return [{"id": i, "text": t} for i, t in islice(_items(corpus), limit)]
-            return _rank(_items(corpus), patterns, limit)
+            with closing(_items(corpus, patterns is None, limit)) as items:
+                if patterns is None:
+                    return [{"id": i, "text": t} for i, t in islice(items, limit)]
+                return _rank(items, patterns, limit)
 
         result = Candidates(
             await asyncio.to_thread(read),

@@ -258,10 +258,12 @@ def _cancel(conn):
     (getattr(conn, "cancel_safe", None) or conn.cancel)()
 
 
-def _too_large(text: str, limit_mb: int) -> RuntimeError:
+def _too_large(
+    text: str, limit_mb: int, hint: str = "Use fewer seeds or raise the limit"
+) -> RuntimeError:
     return RuntimeError(
         f"{text} which exceeds the result limit of {limit_mb} MB. "
-        "Use fewer seeds or raise the limit in PgCorpus(max_result_mb=...)."
+        f"{hint} in PgCorpus(max_result_mb=...)."
     )
 
 
@@ -559,6 +561,74 @@ def search_pg_exact(
     except Exception as e:  # noqa: BLE001  the driver's own classes are not imported here
         if stop and stop.stopped:
             raise SearchCancelled from None
+        raise RuntimeError(pg_message(e, corpus)) from None
+    finally:
+        conn.close()
+
+
+def pg_items(corpus: PgCorpus, guard: bool = False, limit: int | None = None):
+    """Yield (id, text) of every item in ascending id order, never touching the vectors.
+
+    `guard`: the caller keeps everything it reads, so refuse up front from the planner statistics
+    (rows, or `limit` if smaller) and abort while streaming past corpus.max_result_mb (0 = none).
+    Close the generator to close the connection."""
+    limit_mb = corpus.max_result_mb
+    hint = "Use a keyword filter, a limit, or raise the limit"
+    conn = pg_connect(corpus)
+    try:
+        from psycopg import sql
+
+        table = sql.Identifier(*corpus.table.split(".", 1))
+        text_table, text_id = text_source(corpus)
+        if guard and limit_mb:
+            rows, width = table_estimates(conn, text_table, corpus.text_column)
+            if (
+                rows is not None and width is not None
+            ):  # no statistics: only the stream checks
+                per_row = width + PG_ROW_OVERHEAD
+                worst = min(rows, limit or rows) * per_row
+                if worst > limit_mb * MB:
+                    raise _too_large(
+                        f"Reading the corpus would return up to ~{worst / MB:.0f} MB "
+                        f"({min(rows, limit or rows):,} rows × ~{per_row} bytes)",
+                        limit_mb,
+                        hint,
+                    )
+        if corpus.text_table:
+            query = sql.SQL(
+                "SELECT t.{id}, x.{text} FROM {table} t "
+                "LEFT JOIN {text_table} x ON x.{text_id} = t.{id} ORDER BY t.{id}"
+            ).format(
+                id=sql.Identifier(corpus.id_column),
+                text=sql.Identifier(corpus.text_column),
+                table=table,
+                text_table=sql.Identifier(*text_table.split(".", 1)),
+                text_id=sql.Identifier(text_id),
+            )
+        else:
+            query = sql.SQL("SELECT {id}, {text} FROM {table} ORDER BY {id}").format(
+                id=sql.Identifier(corpus.id_column),
+                text=sql.Identifier(corpus.text_column),
+                table=table,
+            )
+        received = rows_in = 0
+        with conn.cursor(name="hunches_items") as cur:
+            cur.itersize = PG_BATCH
+            cur.execute(query)
+            for id_, text in cur:
+                if text is None:
+                    raise RuntimeError(f"no text row for id {str(id_)!r}")
+                rows_in += 1
+                received += len(str(id_)) + len(text.encode()) + PG_ROW_OVERHEAD
+                if guard and limit_mb and received > limit_mb * MB:
+                    raise _too_large(
+                        f"Reading has already received {received / MB:.1f} MB "
+                        f"({rows_in:,} rows),",
+                        limit_mb,
+                        hint,
+                    )
+                yield str(id_), text
+    except Exception as e:  # noqa: BLE001  the driver's own classes are not imported here
         raise RuntimeError(pg_message(e, corpus)) from None
     finally:
         conn.close()
