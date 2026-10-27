@@ -1,18 +1,19 @@
 import importlib
 import json
 import math
+import re
 import shutil
+import threading
 from pathlib import Path
 
-import numpy as np
 import pytest
 from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
 from pydantic_ai.usage import RequestUsage
 
 from hunches import candidates
-from hunches.candidates import Candidates, asearch, read_seeds, search
-from hunches.search import LocalCorpus, PgCorpus, S3Corpus
+from hunches.candidates import Candidates, aget_candidates, get_candidates, read_seeds
+from hunches.search import PgCorpus, S3Corpus, Table
 from hunches.settings import settings
 
 cost = importlib.import_module("hunches.cost")  # `hunches.cost` is the function
@@ -57,14 +58,11 @@ VECTORS = [
 ]
 
 
-def local(tmp_path, vectors=VECTORS, model="m"):
-    folder = tmp_path / "corpus"
-    folder.mkdir(exist_ok=True)
-    np.save(folder / "vectors.npy", np.array(vectors, np.float32))
-    items = [{"id": f"i{i}", "text": f"t{i}"} for i in range(len(vectors))]
-    (folder / "items.jsonl").write_text("".join(json.dumps(r) + "\n" for r in items))
-    (folder / "meta.json").write_text(json.dumps({"embedding_model": model}))
-    return LocalCorpus(folder)
+def local(vectors=VECTORS, model="m"):
+    rows = [
+        {"id": f"i{i}", "text": f"t{i}", "v": list(v)} for i, v in enumerate(vectors)
+    ]
+    return Table(rows, id_column="id", vector_column="v", embedding_model=model)
 
 
 @pytest.fixture(autouse=True)
@@ -87,7 +85,7 @@ WANT = [
 
 
 def test_max_across_seeds_sorted_by_score_then_id(tmp_path):
-    c = search(local(tmp_path), ["alpha", "beta"], embedder=StubEmbedder(SEEDS))
+    c = get_candidates(local(), seeds=["alpha", "beta"], embedder=StubEmbedder(SEEDS))
     assert ids(c) == WANT
     assert c.rows[0]["max_similarity"] == pytest.approx(0.76)
     assert c.rows[0]["text"] == "t3"
@@ -96,14 +94,18 @@ def test_max_across_seeds_sorted_by_score_then_id(tmp_path):
 
 
 def test_tie_goes_to_the_earlier_seed(tmp_path):
-    corpus = local(tmp_path, [[1, 1, 0]])  # exactly the same similarity to both
+    corpus = local([[1, 1, 0]])  # exactly the same similarity to both
     emb = lambda: StubEmbedder(SEEDS)
-    assert ids(search(corpus, ["alpha", "beta"], embedder=emb())) == [("i0", "alpha")]
-    assert ids(search(corpus, ["beta", "alpha"], embedder=emb())) == [("i0", "beta")]
+    assert ids(get_candidates(corpus, seeds=["alpha", "beta"], embedder=emb())) == [
+        ("i0", "alpha")
+    ]
+    assert ids(get_candidates(corpus, seeds=["beta", "alpha"], embedder=emb())) == [
+        ("i0", "beta")
+    ]
 
 
 def test_bands_and_top_seeds_by_hand(tmp_path):
-    c = search(local(tmp_path), ["alpha", "beta"], embedder=StubEmbedder(SEEDS))
+    c = get_candidates(local(), seeds=["alpha", "beta"], embedder=StubEmbedder(SEEDS))
     # 0.61 and (0.63, 0.66) and 0.71 and 0.76 fall in bands 0, 1, 2, 4 and 6
     assert c.bands() == [1, 1, 1, 0, 1, 0, 1]
     assert c.top_seeds(0.60) == [("alpha", 3), ("beta", 2)]
@@ -158,8 +160,8 @@ def test_unseeded_sample_still_valid():
 
 
 def test_round_trip_and_meta_beside_the_file(tmp_path):
-    c = search(
-        local(tmp_path), ["alpha", "beta"], embedder=StubEmbedder(SEEDS), out=False
+    c = get_candidates(
+        local(), seeds=["alpha", "beta"], embedder=StubEmbedder(SEEDS), out=False
     )
     path = tmp_path / "out" / "mine.jsonl"
     c.write(path)
@@ -170,6 +172,7 @@ def test_round_trip_and_meta_beside_the_file(tmp_path):
         "floor",
         "embedding_model",
         "capped",
+        "source",
     }
     assert meta["seeds_digest"] == candidates.seeds_digest(["alpha", "beta"])
     assert meta["floor"] == 0.6 and meta["embedding_model"] == "m"
@@ -216,7 +219,7 @@ def test_repr_plain_text():
 
 
 def test_default_out_is_under_settings_root(tmp_path):
-    search(local(tmp_path), ["alpha", "beta"], embedder=StubEmbedder(SEEDS))
+    get_candidates(local(), seeds=["alpha", "beta"], embedder=StubEmbedder(SEEDS))
     rows = (tmp_path / "root" / "candidates.jsonl").read_text().splitlines()
     assert [json.loads(r)["id"] for r in rows] == [i for i, _ in WANT]
     assert (tmp_path / "root" / "candidates.meta.json").exists()
@@ -224,9 +227,9 @@ def test_default_out_is_under_settings_root(tmp_path):
 
 
 def test_out_false_and_cache_false_write_nothing(tmp_path):
-    search(
-        local(tmp_path),
-        ["alpha", "beta"],
+    get_candidates(
+        local(),
+        seeds=["alpha", "beta"],
         embedder=StubEmbedder(SEEDS),
         out=False,
         cache=False,
@@ -236,9 +239,9 @@ def test_out_false_and_cache_false_write_nothing(tmp_path):
 
 def test_out_path_and_cache_path(tmp_path):
     out, cache = tmp_path / "x" / "c.jsonl", tmp_path / "mycache"
-    search(
-        local(tmp_path),
-        ["alpha", "beta"],
+    get_candidates(
+        local(),
+        seeds=["alpha", "beta"],
         embedder=StubEmbedder(SEEDS),
         out=out,
         cache=cache,
@@ -255,35 +258,39 @@ def test_seeds_as_list_and_as_csv(tmp_path):
     assert read_seeds(str(csv_path)) == ["alpha", "beta"]
     csv_path.write_text("alpha\nbeta\n")  # no header
     assert read_seeds(csv_path) == ["alpha", "beta"]
-    corpus = local(tmp_path)
-    a = search(corpus, read_seeds(csv_path), embedder=StubEmbedder(SEEDS), out=False)
-    b = search(corpus, ["alpha", "beta"], embedder=StubEmbedder(SEEDS), out=False)
+    corpus = local()
+    a = get_candidates(
+        corpus, seeds=read_seeds(csv_path), embedder=StubEmbedder(SEEDS), out=False
+    )
+    b = get_candidates(
+        corpus, seeds=["alpha", "beta"], embedder=StubEmbedder(SEEDS), out=False
+    )
     assert a.rows == b.rows and ids(a) == WANT
 
 
 def test_a_bare_string_is_not_a_list_of_seeds(tmp_path):
     with pytest.raises(TypeError, match="list"):
-        search(local(tmp_path), "alpha", embedder=StubEmbedder(SEEDS))
+        get_candidates(local(), seeds="alpha", embedder=StubEmbedder(SEEDS))
 
 
 def test_changed_seed_reembeds_only_that_seed_and_a_repeat_embeds_nothing(tmp_path):
-    corpus = local(tmp_path)
+    corpus = local()
     vectors = {**SEEDS, "gamma": [0, 0, 1]}
     emb = StubEmbedder(vectors)
-    search(corpus, ["alpha", "beta"], embedder=emb, out=False)
+    get_candidates(corpus, seeds=["alpha", "beta"], embedder=emb, out=False)
     assert emb.calls == ["alpha", "beta"]
-    search(corpus, ["alpha", "beta"], embedder=emb, out=False)
+    get_candidates(corpus, seeds=["alpha", "beta"], embedder=emb, out=False)
     assert emb.calls == ["alpha", "beta"]  # identical: no new calls
-    search(corpus, ["alpha", "gamma"], embedder=emb, out=False)
+    get_candidates(corpus, seeds=["alpha", "gamma"], embedder=emb, out=False)
     assert emb.calls == ["alpha", "beta", "gamma"]  # only the changed seed
     assert cost.breakdown(None)["m"]["calls"] == 3  # hits are not recorded as spend
 
 
 def test_cache_false_embeds_every_time(tmp_path):
-    corpus = local(tmp_path)
+    corpus = local()
     emb = StubEmbedder(SEEDS)
     for _ in range(2):
-        search(corpus, ["alpha"], embedder=emb, out=False, cache=False)
+        get_candidates(corpus, seeds=["alpha"], embedder=emb, out=False, cache=False)
     assert emb.calls == ["alpha", "alpha"]
 
 
@@ -291,9 +298,14 @@ def test_the_pre006_seed_embedding_entry_is_a_hit(tmp_path):
     cache = tmp_path / "cache"
     shutil.copytree(FIXTURES / "cache", cache)
     emb = StubEmbedder({}, name="fake-embed")  # any live call is a KeyError
-    c = search(
-        LocalCorpus(FIXTURES / "corpus"),
-        ["alpha seed"],
+    c = get_candidates(
+        Table(
+            FIXTURES / "corpus.jsonl",
+            id_column="id",
+            vector_column="embedding",
+            embedding_model="fake-embed",
+        ),
+        seeds=["alpha seed"],
         embedder=emb,
         out=False,
         cache=cache,
@@ -308,9 +320,9 @@ def test_the_pre006_seed_embedding_entry_is_a_hit(tmp_path):
 
 
 def test_embedding_model_mismatch_raises(tmp_path):
-    corpus = local(tmp_path, model="other")
+    corpus = local(model="other")
     with pytest.raises(ValueError, match="mismatch"):
-        search(corpus, ["alpha"], embedder=StubEmbedder(SEEDS), out=False)
+        get_candidates(corpus, seeds=["alpha"], embedder=StubEmbedder(SEEDS), out=False)
 
 
 def test_a_model_string_is_wrapped_and_names_the_cache_key(tmp_path, monkeypatch):
@@ -322,25 +334,31 @@ def test_a_model_string_is_wrapped_and_names_the_cache_key(tmp_path, monkeypatch
         return stub
 
     monkeypatch.setattr(candidates, "Embedder", fake)
-    corpus = local(tmp_path, model="openai:text-embedding-3-small")
-    search(corpus, ["alpha"], embedder="openai:text-embedding-3-small", out=False)
+    corpus = local(model="openai:text-embedding-3-small")
+    get_candidates(
+        corpus, seeds=["alpha"], embedder="openai:text-embedding-3-small", out=False
+    )
     assert made == ["openai:text-embedding-3-small"]
     key = cost.cache_key("openai:text-embedding-3-small", "embed_query", "alpha")
     assert (cost.cache_get(None, key) or {})["output"] == [1.0, 0.0, 0.0]
 
 
 def test_async_and_sync_agree_also_inside_a_running_loop(tmp_path):
-    corpus = local(tmp_path)
-    sync = search(corpus, ["alpha", "beta"], embedder=StubEmbedder(SEEDS), out=False)
+    corpus = local()
+    sync = get_candidates(
+        corpus, seeds=["alpha", "beta"], embedder=StubEmbedder(SEEDS), out=False
+    )
     assert ids(sync) == WANT
 
 
-async def test_asearch_and_search_in_a_running_loop_agree(tmp_path):
-    corpus = local(tmp_path)
-    a = await asearch(
-        corpus, ["alpha", "beta"], embedder=StubEmbedder(SEEDS), out=False
+async def test_aget_candidates_and_get_candidates_in_a_running_loop_agree(tmp_path):
+    corpus = local()
+    a = await aget_candidates(
+        corpus, seeds=["alpha", "beta"], embedder=StubEmbedder(SEEDS), out=False
     )
-    b = search(corpus, ["alpha", "beta"], embedder=StubEmbedder(SEEDS), out=False)
+    b = get_candidates(
+        corpus, seeds=["alpha", "beta"], embedder=StubEmbedder(SEEDS), out=False
+    )
     assert ids(a) == WANT and a.rows == b.rows
 
 
@@ -373,7 +391,9 @@ def test_pgvector_exact_is_one_query_and_merges_like_the_per_seed_path(monkeypat
     monkeypatch.setattr(candidates, "search_pg_exact", stub)
     monkeypatch.setattr(candidates, "search_vectors", no_per_seed)
     pg = PgCorpus("t")
-    c = search(pg, ["alpha", "beta"], embedder=StubEmbedder(SEEDS), out=False)
+    c = get_candidates(
+        pg, seeds=["alpha", "beta"], embedder=StubEmbedder(SEEDS), out=False
+    )
     assert calls == [(pg, [[1, 0, 0], [0, 1, 0]], 0.6)]
     assert [(r["id"], r["best_seed"], r["max_similarity"]) for r in c.rows] == PG_WANT
     # i1: alpha 0.8 ties beta 0.8 -> earlier seed; i5: beta 0.75 beats alpha 0.7
@@ -389,7 +409,9 @@ def test_pgvector_exact_queries_once_however_many_seeds(monkeypatch):
 
     monkeypatch.setattr(candidates, "search_pg_exact", stub)
     vec = {"a": [1], "b": [2], "c": [3], "d": [4]}
-    c = search(PgCorpus("t"), list(vec), embedder=StubEmbedder(vec), out=False)
+    c = get_candidates(
+        PgCorpus("t"), seeds=list(vec), embedder=StubEmbedder(vec), out=False
+    )
     assert calls == [4] and c.rows == [] and c.capped is False
 
 
@@ -407,8 +429,12 @@ def test_other_corpora_search_once_per_seed(monkeypatch, kind):
 
     monkeypatch.setattr(candidates, "search_vectors", per_seed)
     monkeypatch.setattr(candidates, "search_pg_exact", no_exact)
-    c = search(
-        corpus, ["alpha", "beta"], embedder=StubEmbedder(SEEDS), floor=0.7, out=False
+    c = get_candidates(
+        corpus,
+        seeds=["alpha", "beta"],
+        embedder=StubEmbedder(SEEDS),
+        floor=0.7,
+        out=False,
     )
     assert calls == [([1, 0, 0], 0.7, "m"), ([0, 1, 0], 0.7, "m")]
     assert ids(c) == [("i0", "alpha")] and c.floor == 0.7
@@ -416,9 +442,9 @@ def test_other_corpora_search_once_per_seed(monkeypatch, kind):
 
 
 def test_floor_is_applied_and_recorded(tmp_path):
-    c = search(
-        local(tmp_path),
-        ["alpha", "beta"],
+    c = get_candidates(
+        local(),
+        seeds=["alpha", "beta"],
         embedder=StubEmbedder(SEEDS),
         floor=0.7,
         out=False,
@@ -467,3 +493,332 @@ def test_top_seeds_function_at_two_thresholds():
     assert candidates.top_seeds(rows, 0.6) == [("A", 3), ("B", 2)]
     assert candidates.top_seeds(rows, 0.7) == [("B", 2)]
     assert len(candidates.top_seeds(rows, 0.6, n=1)) == 1
+
+
+# --- source: lists that did not come from seeds ---------------------------------------------------
+
+
+def kw_list():
+    rows = [
+        {"id": "a", "text": "one", "terms_matched": 2, "matches": 3},
+        {"id": "b", "text": "two", "terms_matched": 1, "matches": 1},
+    ]
+    return Candidates(rows, floor=None, source="keywords")
+
+
+def all_list():
+    return Candidates(
+        [{"id": "a", "text": "one"}, {"id": "b", "text": "two"}],
+        floor=None,
+        source="all",
+    )
+
+
+def test_source_defaults_to_seeds_and_other_fields_are_none_outside_seeds():
+    assert Candidates([]).source == "seeds"
+    c = kw_list()
+    assert c.floor is None and c.seeds_digest is None and c.embedding_model is None
+    assert c.capped is False
+
+
+@pytest.mark.parametrize("make", [kw_list, all_list])
+@pytest.mark.parametrize("call", ["above", "bands", "top_seeds"])
+def test_similarity_operations_refuse_other_sources(make, call):
+    c = make()
+    args = {"above": (0.7,), "bands": (), "top_seeds": (0.7,)}[call]
+    with pytest.raises(
+        ValueError, match=rf"{call} needs similarity scores.*{c.source}"
+    ):
+        getattr(c, call)(*args)
+
+
+def test_seed_operations_are_unchanged_by_the_source_field():
+    c = Candidates([{"id": "x", "text": "t", "max_similarity": 0.7, "best_seed": "s"}])
+    assert c.above(0.7).rows == c.rows and c.bands()[4] == 1
+
+
+def test_non_seed_lists_round_trip_with_source_and_rank_values(tmp_path):
+    for c in (kw_list(), all_list()):
+        c.write(tmp_path / "c.jsonl")
+        meta = json.loads((tmp_path / "c.meta.json").read_text())
+        assert meta["source"] == c.source and meta["floor"] is None
+        back = Candidates.read(tmp_path / "c.jsonl")
+        assert back.rows == c.rows and back.source == c.source and back.floor is None
+
+
+def test_a_file_without_source_loads_as_seeds_with_its_bands():
+    c = Candidates.read(FIXTURES / "candidates.jsonl")
+    assert c.source == "seeds" and c.bands()[:2] == [0, 0] and sum(c.bands()) == 2
+
+
+def test_other_sources_repr_says_where_they_came_from_and_never_mentions_scores():
+    assert repr(kw_list()) == "2 candidates (from keywords)"
+    assert repr(all_list()) == "2 candidates (whole corpus)"
+    for c in (kw_list(), all_list()):
+        both = (repr(c) + c._repr_html_()).lower()
+        for word in ("floor", "similarity", "seed", "band"):
+            assert word not in both, (c.source, word)
+    html = kw_list()._repr_html_()
+    assert "terms matched" in html and "<td" in html
+
+
+def test_sample_and_frames_work_on_every_source():
+    for c in (kw_list(), all_list()):
+        got = c.sample(1, seed=1)
+        assert got.source == c.source and len(got.rows) == 1
+        assert c.to_polars().height == 2 and len(c.to_pandas()) == 2
+
+
+def test_limit_keeps_the_most_similar():
+    got = get_candidates(
+        local(),
+        seeds=["alpha", "beta"],
+        embedder=StubEmbedder(SEEDS),
+        limit=2,
+        out=False,
+    )
+    assert ids(got) == WANT[:2]
+
+
+def test_limit_and_seeds_are_checked():
+    emb = StubEmbedder(SEEDS)
+    with pytest.raises(ValueError, match="limit"):
+        get_candidates(local(), seeds=["alpha"], embedder=emb, limit=0, out=False)
+    with pytest.raises(ValueError, match="seeds"):
+        get_candidates(local(), seeds=[], embedder=emb, out=False)
+    assert emb.calls == []
+
+
+def test_seeds_and_embedder_are_keyword_only():
+    with pytest.raises(TypeError):
+        get_candidates(local(), ["alpha"], embedder=StubEmbedder(SEEDS))  # ty: ignore[too-many-positional-arguments]
+
+
+# --- no filter: the whole corpus ------------------------------------------------------------------
+
+
+def plain(n=4):
+    return Table(
+        [{"id": f"r{i}", "text": f"text {i}"} for i in range(n)], id_column="id"
+    )
+
+
+def test_no_filter_returns_the_whole_corpus_in_table_order():
+    got = get_candidates(plain(), out=False)
+    assert got.source == "all" and got.floor is None and got.capped is False
+    assert got.rows == [{"id": f"r{i}", "text": f"text {i}"} for i in range(4)]
+    assert repr(got) == "4 candidates (whole corpus)"
+
+
+def test_limit_keeps_the_first_rows_of_the_table():
+    assert [r["id"] for r in get_candidates(plain(), limit=2, out=False).rows] == [
+        "r0",
+        "r1",
+    ]
+
+
+def test_an_empty_corpus_gives_an_empty_result_that_says_so():
+    got = get_candidates(Table([]), out=False)
+    assert got.rows == [] and repr(got) == "0 candidates (whole corpus)"
+
+
+def test_the_same_text_under_two_ids_stays_two_rows():
+    table = Table(
+        [{"id": "a", "text": "same"}, {"id": "b", "text": "same"}], id_column="id"
+    )
+    assert [r["id"] for r in get_candidates(table, out=False).rows] == ["a", "b"]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "word"),
+    [
+        ({"embedder": "x"}, "embedder"),
+        ({"floor": 0.7}, "floor"),
+        ({"cache": False}, "cache"),
+    ],
+)
+def test_seed_only_arguments_are_refused_without_seeds(kwargs, word):
+    with pytest.raises(ValueError, match=word):
+        get_candidates(plain(), out=False, **kwargs)
+
+
+def test_seeds_without_an_embedder_are_refused():
+    with pytest.raises(ValueError, match="embedder"):
+        get_candidates(plain(), seeds=["alpha"], out=False)
+
+
+def test_the_read_runs_off_the_event_loop_thread(monkeypatch):
+    seen = []
+    real = candidates.table_rows
+    monkeypatch.setattr(
+        candidates,
+        "table_rows",
+        lambda *a, **k: seen.append(threading.get_ident()) or real(*a, **k),
+    )
+    get_candidates(plain(), out=False)
+    assert seen and seen[0] != threading.get_ident()
+
+
+async def test_the_sync_form_works_inside_a_running_loop():
+    assert len(get_candidates(plain(), out=False).rows) == 4
+
+
+def test_only_seed_results_write_the_default_file(tmp_path):
+    get_candidates(local(), seeds=["alpha"], embedder=StubEmbedder(SEEDS))
+    path = tmp_path / "root" / "candidates.jsonl"
+    before = (path.read_bytes(), path.with_suffix(".meta.json").read_bytes())
+    get_candidates(plain(), limit=5)
+    assert (path.read_bytes(), path.with_suffix(".meta.json").read_bytes()) == before
+
+
+def test_a_path_writes_the_whole_corpus_list_and_nothing_else_does(tmp_path):
+    get_candidates(plain())
+    assert not (tmp_path / "root").exists()
+    out = tmp_path / "x" / "all.jsonl"
+    got = get_candidates(plain(), out=out)
+    back = Candidates.read(out)
+    assert back.rows == got.rows and back.source == "all"
+
+
+# --- keywords ---------------------------------------------------------------------------------------
+
+KW = [
+    {"id": "p0", "text": "Ballot box. The ballot is secret."},
+    {"id": "p1", "text": "Vote early. Vote often. Election day."},
+    {"id": "p2", "text": "Nice\nweather today."},
+    {"id": "p3", "text": "election results and a ballot count."},
+    {"id": "p4", "text": "Straße ist gesperrt."},
+]
+
+
+def kw(*terms, **kwargs):
+    kwargs.setdefault("out", False)
+    got = get_candidates(Table(KW, id_column="id"), keywords=list(terms), **kwargs)
+    return [(r["id"], r["terms_matched"], r["matches"]) for r in got.rows]
+
+
+def test_any_term_matches_each_item_once_and_ranks_by_terms_then_matches():
+    # p3: both terms, 1 + 1 hits; p0: ballot twice; p1: election once
+    assert kw("ballot", "election") == [("p3", 2, 2), ("p0", 1, 2), ("p1", 1, 1)]
+
+
+def test_the_result_is_a_keyword_list():
+    got = get_candidates(Table(KW, id_column="id"), keywords=["ballot"], out=False)
+    assert got.source == "keywords" and got.floor is None and got.capped is False
+    assert set(got.rows[0]) == {"id", "text", "terms_matched", "matches"}
+    assert got.rows[0]["text"] == "Ballot box. The ballot is secret."
+    assert repr(got) == "2 candidates (from keywords)"
+
+
+def test_plain_strings_ignore_case_literally():
+    assert kw("BALLOT") == [("p0", 1, 2), ("p3", 1, 1)]
+    assert kw("straße") == [("p4", 1, 1)]
+    assert kw("strasse") == []  # no case folding beyond IGNORECASE: ss is not ß
+
+
+def test_the_same_string_is_literal_or_a_pattern():
+    assert kw("Vote.*early") == []
+    assert kw("Vote.*early", regex=True) == [("p1", 1, 1)]
+    assert kw("vote", regex=True) == []  # a pattern string keeps its own case
+    assert kw("(?i)vote", regex=True) == [("p1", 1, 2)]
+
+
+def test_compiled_patterns_keep_only_their_own_flags():
+    loud = re.compile("vote", re.IGNORECASE)  # matches Vote twice
+    exact = re.compile(
+        "Election"
+    )  # not case-insensitive: p3's lowercase one is not a hit
+    dotall = re.compile("Nice.weather", re.DOTALL)  # the dot crosses the newline in p2
+    assert kw(loud, exact, dotall) == [("p1", 2, 3), ("p2", 1, 1)]
+    assert kw(re.compile("Nice.weather")) == []  # no re.S, no match
+
+
+def test_a_tie_keeps_table_order():
+    assert kw("ballot", "weather") == [("p0", 1, 2), ("p2", 1, 1), ("p3", 1, 1)]
+
+
+def test_limit_keeps_the_best_of_ten_hits():
+    table = Table(
+        [{"id": f"r{i}", "text": "x " * (i + 1)} for i in range(10)], id_column="id"
+    )
+    got = get_candidates(table, keywords=["x"], limit=3, out=False)
+    assert [(r["id"], r["matches"]) for r in got.rows] == [
+        ("r9", 10),
+        ("r8", 9),
+        ("r7", 8),
+    ]
+
+
+def test_no_match_is_an_empty_result_that_says_so():
+    got = get_candidates(Table(KW, id_column="id"), keywords=["zzz"], out=False)
+    assert got.rows == [] and repr(got) == "0 candidates (from keywords)"
+
+
+@pytest.mark.parametrize(
+    ("terms", "kwargs", "message"),
+    [
+        (["ballot", "  "], {}, "blank"),
+        ([""], {}, "blank"),
+        (["a*"], {"regex": True}, "'a\\*'.*empty string"),
+        ([re.compile("b?")], {}, "'b\\?'.*empty string"),
+        (["("], {"regex": True}, r"invalid regular expression '\('"),
+        ([5], {}, "keywords"),
+    ],
+)
+def test_bad_terms_are_refused_before_the_corpus_is_read(
+    monkeypatch, terms, kwargs, message
+):
+    def boom(*a, **k):
+        raise AssertionError("the corpus must not be read")
+
+    monkeypatch.setattr(candidates, "table_rows", boom)
+    with pytest.raises((ValueError, TypeError, re.error), match=message):
+        get_candidates(plain(), keywords=terms, out=False, **kwargs)
+
+
+def test_keyword_argument_rules():
+    emb = StubEmbedder(SEEDS)
+    with pytest.raises(ValueError, match="one filter per call"):
+        get_candidates(plain(), seeds=["a"], embedder=emb, keywords=["a"], out=False)
+    with pytest.raises(ValueError, match="keywords"):
+        get_candidates(plain(), keywords=[], out=False)
+    with pytest.raises(TypeError, match="keywords"):
+        get_candidates(plain(), keywords="ballot", out=False)
+    with pytest.raises(ValueError, match="regex"):
+        get_candidates(plain(), regex=True, out=False)
+    with pytest.raises(ValueError, match="embedder"):
+        get_candidates(plain(), keywords=["a"], embedder=emb, out=False)
+
+
+def test_a_keyword_list_refuses_similarity_operations():
+    got = get_candidates(plain(), keywords=["text"], out=False)
+    with pytest.raises(ValueError, match="keywords"):
+        got.above(0.7)
+
+
+def test_garbage_vectors_do_not_stop_a_keyword_search():
+    table = Table(
+        [{"id": "a", "text": "ballot", "v": "garbage"}],
+        id_column="id",
+        vector_column="v",
+        embedding_model="m",
+    )
+    assert len(get_candidates(table, keywords=["ballot"], out=False).rows) == 1
+
+
+def test_keyword_lists_are_written_only_to_a_path(tmp_path):
+    get_candidates(Table(KW, id_column="id"), keywords=["ballot"])
+    assert not (tmp_path / "root").exists()
+    out = tmp_path / "k.jsonl"
+    got = get_candidates(Table(KW, id_column="id"), keywords=["ballot"], out=out)
+    back = Candidates.read(out)
+    assert back.source == "keywords" and back.rows == got.rows
+
+
+def test_a_table_that_cannot_answer_seeds_is_refused_before_any_embedding():
+    emb = StubEmbedder(SEEDS)
+    with pytest.raises(ValueError, match="no embedding column"):
+        get_candidates(plain(), seeds=["alpha"], embedder=emb, out=False)
+    with pytest.raises(ValueError, match="mismatch"):
+        get_candidates(local(model="other"), seeds=["alpha"], embedder=emb, out=False)
+    assert emb.calls == []

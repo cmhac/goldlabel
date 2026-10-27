@@ -1,7 +1,7 @@
 [project]
 name = "hunches"
 version = "0.1.0"
-description = "Content analysis over an already-embedded corpus, as a Python library."
+description = "Content analysis over a corpus (semantic search, keywords or the whole corpus, then an LLM classifier checked against human labels), as a Python library."
 readme = "README.md"
 authors = [{ name = "Chris Hacker", email = "c.m.hacker1997@gmail.com" }]
 requires-python = ">=3.12"
@@ -49,5 +49,4 @@ testpaths = ["tests"]
 
 [tool.ty.src]
 # specs: design handoff files import textual, which is no longer a dependency.
-# examples: ty reads `hn.search` as the submodule `hunches.search`, which the package shadows with the function.
-exclude = ["specs", "examples"]
+exclude = ["specs"]

@@ -25,7 +25,7 @@ import hunches as hn
 from hunches import _label
 from hunches.classifier import CostLimit
 
-SAMPLE = Path(__file__).parent.parent / "examples" / "sample" / "corpus"
+SAMPLE = Path(__file__).parent.parent / "examples" / "sample" / "corpus.jsonl"
 
 # What the people labelling decided, written by hand for the five items above the 0.60 floor.
 HUMAN = {
@@ -118,8 +118,8 @@ def simulated_human(url: str) -> threading.Thread:
 
 def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    corpus_dir = tmp_path / "corpus"
-    shutil.copytree(SAMPLE, corpus_dir)
+    corpus_file = tmp_path / "corpus.jsonl"
+    shutil.copy(SAMPLE, corpus_file)
     humans = []
     monkeypatch.setattr(
         _label.webbrowser, "open", lambda url: humans.append(simulated_human(url))
@@ -128,9 +128,15 @@ def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     # 1. search: embeds the seeds (one live call per seed), calls no classifier model
     fake = FakeModel()
     embedder = HandEmbedder()
-    # ty sees the submodule `hunches.search` here; at run time `hn.search` is the function
-    candidates = hn.search(  # ty: ignore[call-non-callable]
-        hn.LocalCorpus(corpus_dir), ["I lost my job"], embedder=embedder
+    candidates = hn.get_candidates(
+        hn.Table(
+            corpus_file,
+            id_column="id",
+            vector_column="embedding",
+            embedding_model="hand-built-2d",
+        ),
+        seeds=["I lost my job"],
+        embedder=embedder,
     )
     assert embedder.calls == 1
     assert fake.calls == 0

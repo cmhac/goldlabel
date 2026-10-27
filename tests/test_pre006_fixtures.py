@@ -14,7 +14,7 @@ from hunches import candidates, classifier
 from hunches.classifier import Classifier
 from hunches.cost import breakdown, cache_get, cache_key
 from hunches.gold import Gold
-from hunches.search import LocalCorpus, search_vectors
+from hunches.search import Table, search_table, table_rows
 from hunches.settings import settings
 from hunches.taxonomy import Taxonomy
 
@@ -69,15 +69,19 @@ def test_files_are_well_formed(project):
     assert [("run" in r) for r in results] == [True, False]
 
 
-def test_corpus_is_well_formed(project):
-    corpus = project / ".hunches" / "corpus"
-    assert json.loads((corpus / "meta.json").read_text()) == {
-        "embedding_model": "fake-embed"
-    }
-    assert len((corpus / "items.jsonl").read_text().splitlines()) == 4
-    import numpy as np
+def fixture_table(project):
+    return Table(
+        project / ".hunches" / "corpus.jsonl",
+        id_column="id",
+        vector_column="embedding",
+        embedding_model="fake-embed",
+    )
 
-    assert np.load(corpus / "vectors.npy").shape == (4, 3)
+
+def test_corpus_is_well_formed(project):
+    rows = table_rows(fixture_table(project), with_vectors=True)
+    assert [r["id"] for r in rows] == ["a1", "a2", "b1", "c1"]
+    assert [len(r["vector"]) for r in rows] == [3, 3, 3, 3]
 
 
 def test_cache_and_cost_are_well_formed(project, expected):
@@ -110,12 +114,12 @@ def test_expected_matches_current_code(project, expected):
     assert cache_key(emb["model"], "embed_query", emb["seed"]) == emb["cache_key"]
 
 
-def test_local_search_matches_recorded(project, expected):
+def test_table_search_matches_recorded(project, expected):
     want = expected["search"]
-    corpus = LocalCorpus(project / ".hunches" / "corpus")
-    hits, capped = search_vectors(
-        corpus, want["query"], want["floor"], embedding_model="fake-embed"
+    (hits,), capped = search_table(
+        fixture_table(project), [want["query"]], want["floor"], "fake-embed"
     )
-    assert [list(h) for h in hits] == want["hits"]
+    assert [list(h[:2]) for h in hits] == [h[:2] for h in want["hits"]]
+    assert [h[2] for h in hits] == pytest.approx([h[2] for h in want["hits"]])
     assert capped is want["capped"]
     assert [h[0] for h in hits] == ["a1", "a2"]

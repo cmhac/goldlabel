@@ -1,10 +1,10 @@
 import importlib
-import json
 
 import numpy as np
 import pytest
 
-from hunches.search import LocalCorpus, S3Corpus
+from hunches.candidates import get_candidates
+from hunches.search import S3Corpus, Table
 
 search = importlib.import_module("hunches.search")  # `hunches.search` is the function
 
@@ -14,59 +14,56 @@ def project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
 
-def local_corpus(tmp_path, model="m"):
+def table():
     # unit vectors at known angles to the query [1, 0]
     vectors = np.array(
         [[1, 0], [0.6, 0.8], [0.5, 0.8660254], [0.59, 0.80752], [0, 1]], np.float32
     )
-    d = tmp_path / "corpus"
-    d.mkdir()
-    np.save(d / "vectors.npy", vectors * 3)  # un-normalised on purpose
-    items = [{"id": f"i{i}", "text": f"t{i}"} for i in range(5)]
-    (d / "items.jsonl").write_text("".join(json.dumps(r) + "\n" for r in items))
-    (d / "meta.json").write_text(json.dumps({"embedding_model": model}))
-    return d
+    rows = [
+        {
+            "id": f"i{i}",
+            "text": f"t{i}",
+            "v": (v * 3).tolist(),
+        }  # un-normalised on purpose
+        for i, v in enumerate(vectors)
+    ]
+    return Table(rows, id_column="id", vector_column="v", embedding_model="m")
 
 
-def test_local_floor_inclusive_and_sorted(tmp_path):
-    corpus = LocalCorpus(local_corpus(tmp_path))
-    hits, capped = search.search_vectors(
-        corpus, [2.0, 0.0], 0.6, embedding_model="m"
-    )  # i1 is exactly 0.6; i3 is 0.59
+def test_table_floor_inclusive_and_sorted():
+    (hits,), capped = search.search_table(table(), [[2.0, 0.0]], 0.6, "m")
+    # i1 is exactly 0.6; i3 is 0.59
     assert not capped
     assert [h[0] for h in hits] == ["i0", "i1"]
     assert hits[0] == ("i0", "t0", pytest.approx(1.0))
     assert hits[1][2] == pytest.approx(0.6, abs=1e-6)
 
 
-def test_local_model_mismatch_refused(tmp_path):
-    corpus = LocalCorpus(local_corpus(tmp_path, model="other"))
-    with pytest.raises(ValueError, match="mismatch"):
-        search.search_vectors(corpus, [1.0, 0.0], 0.6, embedding_model="m")
-
-
-def test_local_row_count_mismatch(tmp_path):
-    d = local_corpus(tmp_path)
-    (d / "items.jsonl").write_text('{"id": "a", "text": "b"}\n')
-    with pytest.raises(ValueError, match="rows"):
-        search.search_vectors(LocalCorpus(d), [1.0, 0.0], 0.6, embedding_model="m")
-
-
 class FakeS3:
-    def __init__(self, pages):
+    """Only the read calls exist: any write call fails with AttributeError."""
+
+    def __init__(self, pages, listing=()):
         self.pages, self.calls = pages, []
+        self.listing, self.list_calls = list(listing), []
 
     def query_vectors(self, **kw):
         self.calls.append(kw)
         return self.pages[len(self.calls) - 1]
+
+    def list_vectors(self, **kw):
+        self.list_calls.append(kw)
+        page = self.listing[len(self.list_calls) - 1]
+        if isinstance(page, Exception):
+            raise page
+        return page
 
 
 def vec(key, distance):
     return {"key": key, "distance": distance, "metadata": {"text": f"text {key}"}}
 
 
-def s3_setup(monkeypatch, pages):
-    fake = FakeS3(pages)
+def s3_setup(monkeypatch, pages, listing=()):
+    fake = FakeS3(pages, listing)
     monkeypatch.setattr("boto3.client", lambda name, **kw: fake)
     return fake
 
@@ -114,3 +111,80 @@ def test_s3_uses_the_configured_region(monkeypatch):
     made.clear()
     s3_search()  # no region: boto3's own resolution
     assert made == [("s3vectors", {"region_name": None})]
+
+
+# --- listing without vectors (whole corpus and keywords) -------------------------------------------
+
+
+def listed(key, text=None):
+    return {"key": key, "metadata": {"text": text or f"text {key}"}}
+
+
+PAGES = [
+    {"vectors": [listed("k1"), listed("k2", "a needle")], "nextToken": "t"},
+    {"vectors": [listed("k3", "needle needle")]},
+]
+
+
+def test_s3_whole_corpus_lists_every_page_without_vectors(monkeypatch):
+    fake = s3_setup(monkeypatch, [], PAGES)
+    got = get_candidates(S3Corpus("b", "i"), out=False)
+    assert got.source == "all"
+    assert [(r["id"], r["text"]) for r in got.rows] == [
+        ("k1", "text k1"),
+        ("k2", "a needle"),
+        ("k3", "needle needle"),
+    ]
+    first, second = fake.list_calls
+    assert first == {
+        "vectorBucketName": "b",
+        "indexName": "i",
+        "returnMetadata": True,
+        "maxResults": 1000,
+    }
+    assert "returnData" not in first and "returnData" not in second
+    assert second["nextToken"] == "t"
+    assert fake.calls == []  # no query
+
+
+def test_s3_keywords_keep_only_hits(monkeypatch):
+    s3_setup(monkeypatch, [], PAGES)
+    got = get_candidates(S3Corpus("b", "i"), keywords=["needle"], out=False)
+    assert [(r["id"], r["matches"]) for r in got.rows] == [("k3", 2), ("k2", 1)]
+
+
+def test_s3_limit_keeps_the_first_listed_and_stops_asking(monkeypatch):
+    fake = s3_setup(monkeypatch, [], PAGES)
+    got = get_candidates(S3Corpus("b", "i"), limit=1, out=False)
+    assert [r["id"] for r in got.rows] == ["k1"] and len(fake.list_calls) == 1
+
+
+def test_s3_access_denied_names_both_permissions(monkeypatch):
+    from botocore.exceptions import ClientError
+
+    denied = ClientError({"Error": {"Code": "AccessDeniedException"}}, "ListVectors")
+    s3_setup(monkeypatch, [], [denied])
+    with pytest.raises(
+        RuntimeError, match="s3vectors:ListVectors.*s3vectors:GetVectors"
+    ):
+        get_candidates(S3Corpus("b", "i"), out=False)
+
+
+def test_s3_other_errors_are_not_rewritten(monkeypatch):
+    from botocore.exceptions import ClientError
+
+    other = ClientError({"Error": {"Code": "NotFoundException"}}, "ListVectors")
+    s3_setup(monkeypatch, [], [other])
+    with pytest.raises(ClientError, match="NotFoundException"):
+        get_candidates(S3Corpus("b", "i"), out=False)
+
+
+def test_s3_an_item_without_text_is_an_error(monkeypatch):
+    s3_setup(monkeypatch, [], [{"vectors": [{"key": "k", "metadata": {}}]}])
+    with pytest.raises(KeyError, match="text"):
+        get_candidates(S3Corpus("b", "i"), out=False)
+
+
+def test_a_corpus_of_the_wrong_kind_is_refused():
+    with pytest.raises(TypeError, match="Table.*S3Corpus.*PgCorpus"):
+        get_candidates("corpus/", out=False)  # ty: ignore[invalid-argument-type]

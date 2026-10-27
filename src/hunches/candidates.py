@@ -1,13 +1,18 @@
 import asyncio
 import csv
 import hashlib
+import heapq
 import io
 import json
 import random
+import re
+import warnings
 from collections import Counter
 from collections.abc import Collection, Sequence
+from contextlib import closing
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from itertools import islice
 from pathlib import Path
 
 from pydantic_ai import Embedder
@@ -16,11 +21,16 @@ from hunches import _frame, _html
 from hunches._sync import run
 from hunches.cost import cache_get, cache_key, cache_put, embedding_dollars, record
 from hunches.search import (
-    LocalCorpus,
     PgCorpus,
     S3Corpus,
+    Table,
+    check_table_for_seeds,
+    pg_items,
+    s3_items,
     search_pg_exact,
+    search_table,
     search_vectors,
+    table_rows,
 )
 from hunches.settings import resolve
 
@@ -72,18 +82,30 @@ def top_seeds(rows: list[dict], threshold: float, n: int = 10) -> list[tuple[str
 
 @dataclass(frozen=True)
 class Candidates:
-    """Items found by a search: rows `{id, text, max_similarity, best_seed}`, best first."""
+    """Candidate items. `source` says where they came from: "seeds" (rows `{id, text, max_similarity,
+    best_seed}`, best first), "keywords" (`{id, text, terms_matched, matches}`, best first) or
+    "all" (`{id, text}`, corpus order). Floor, digest and model are None outside seeds."""
 
     rows: list[dict]
     capped: bool = False  # a backend cap may have hidden hits above the floor
-    floor: float = FLOOR
+    floor: float | None = FLOOR
     seeds_digest: str | None = None
     embedding_model: str | None = None
+    source: str = "seeds"
+
+    def _need_seeds(self, name: str) -> None:
+        if self.source != "seeds":
+            raise ValueError(
+                f"{name} needs similarity scores, but this list was built from "
+                f"{self.source}, not from seeds"
+            )
 
     def above(self, t: float) -> "Candidates":
+        self._need_seeds("above")
         return replace(self, rows=[r for r in self.rows if r["max_similarity"] >= t])
 
     def bands(self) -> list[int]:
+        self._need_seeds("bands")
         return band_counts(self.rows)
 
     def sample(self, n: int, seed=None, exclude: Collection[str] = ()) -> "Candidates":
@@ -92,6 +114,7 @@ class Candidates:
         return replace(self, rows=random.Random(seed).sample(pool, min(n, len(pool))))
 
     def top_seeds(self, threshold: float, n: int = 10) -> list[tuple[str, int]]:
+        self._need_seeds("top_seeds")
         return top_seeds(self.rows, threshold, n)
 
     @classmethod
@@ -106,6 +129,7 @@ class Candidates:
             floor=meta.get("floor", FLOOR),
             seeds_digest=meta.get("seeds_digest"),
             embedding_model=meta.get("embedding_model"),
+            source=meta.get("source", "seeds"),
         )
 
     def write(self, path) -> None:
@@ -118,6 +142,7 @@ class Candidates:
             "floor": self.floor,
             "embedding_model": self.embedding_model,
             "capped": self.capped,
+            "source": self.source,
         }
         path.with_suffix(".meta.json").write_text(json.dumps(meta))
 
@@ -127,13 +152,32 @@ class Candidates:
     def to_pandas(self):
         return _frame.to_pandas(self.rows)
 
+    def _headline(self) -> str:
+        if self.source == "keywords":
+            return f"{len(self.rows)} candidates (from keywords)"
+        if self.source == "all":
+            return f"{len(self.rows)} candidates (whole corpus)"
+        return f"{len(self.rows)} candidates (floor {self.floor:.2f})"
+
     def _repr_html_(self) -> str:
+        if self.source == "keywords":
+            return _html.line(self._headline()) + _html.table(
+                ["id", "text", "terms matched", "matches"],
+                [
+                    (r["id"], r["text"], r["terms_matched"], r["matches"])
+                    for r in self.rows
+                ],
+            )
+        if self.source == "all":
+            return _html.line(self._headline()) + _html.table(
+                ["id", "text"], [(r["id"], r["text"]) for r in self.rows]
+            )
         rows = [
             (r["id"], r["text"], f"{r['max_similarity']:.3f}", r["best_seed"])
             for r in self.rows
         ]
         out = [
-            _html.line(f"{len(self.rows)} candidates (floor {self.floor:.2f})"),
+            _html.line(self._headline()),
             _html.bars([(_band_name(i), n) for i, n in enumerate(self.bands())]),
         ]
         if self.capped:
@@ -142,7 +186,9 @@ class Candidates:
         return "".join(out)
 
     def __repr__(self) -> str:
-        lines = [f"{len(self.rows)} candidates (floor {self.floor:.2f})"]
+        if self.source != "seeds":
+            return self._headline()
+        lines = [self._headline()]
         for i, count in enumerate(self.bands()):
             lines.append(f"  {_band_name(i)}  {count}")
         if self.capped:
@@ -174,32 +220,195 @@ async def embed_seeds(
     return vectors
 
 
-async def asearch(
-    corpus: LocalCorpus | S3Corpus | PgCorpus,
-    seeds: Sequence[str],
+def _items(corpus, guard: bool = False, limit: int | None = None, match=None):
+    """(id, text) of every item in the corpus's own order, as a generator to close."""
+    if isinstance(corpus, Table):
+        return ((r["id"], r["text"]) for r in table_rows(corpus))
+    if isinstance(corpus, PgCorpus):
+        return pg_items(corpus, guard, limit, match)
+    return s3_items(corpus)
+
+
+def _compile(keywords, regex: bool, uncompiled: list | None = None) -> list[re.Pattern]:
+    """Terms as patterns. With `uncompiled`, a string Python cannot compile is added to it and
+    skipped instead of raising (server-side regexes are in the database's syntax)."""
+    patterns = []
+    for term in keywords:
+        if isinstance(term, re.Pattern):
+            pattern = term
+        elif isinstance(term, str):
+            if not term.strip():
+                raise ValueError("keywords has a blank term")
+            try:
+                pattern = (
+                    re.compile(term)
+                    if regex
+                    else re.compile(re.escape(term), re.IGNORECASE)
+                )
+            except re.error as e:
+                if uncompiled is None:
+                    raise re.error(
+                        f"invalid regular expression {term!r}: {e}"
+                    ) from None
+                uncompiled.append(term)
+                continue
+        else:
+            raise TypeError(
+                f"keywords must be strings or compiled patterns, not {type(term).__name__}"
+            )
+        # shortcut: only patterns matching the empty string are refused, zero-width ones like \b
+        # still match every word, tell the user in the docs
+        if pattern.match(""):
+            raise ValueError(
+                f"keyword {pattern.pattern!r} matches the empty string, so it would match every item"
+            )
+        patterns.append(pattern)
+    return patterns
+
+
+def _rank(
+    items, patterns: list[re.Pattern], limit: int | None, keep_zero: bool = False
+) -> list[dict]:
+    """Items matching any pattern, best first: distinct patterns matched, then total matches, then
+    corpus order. With a limit only that many are held at a time. `keep_zero` also keeps items
+    that match none (the database said they match), last."""
+
+    def hits():
+        for index, (id, text) in enumerate(items):
+            counts = [sum(1 for _ in p.finditer(text)) for p in patterns]
+            if (terms := sum(c > 0 for c in counts)) or keep_zero:
+                yield -terms, -sum(counts), index, id, text
+
+    ranked = heapq.nsmallest(limit, hits()) if limit else sorted(hits())
+    return [
+        {"id": id, "text": text, "terms_matched": -t, "matches": -m}
+        for t, m, _, id, text in ranked
+    ]
+
+
+def _warn_if_recount_differs(rows: list[dict], uncompiled: list[str]) -> None:
+    zero = sum(r["terms_matched"] == 0 for r in rows)
+    notes = []
+    if uncompiled:
+        notes.append(
+            f"Python could not compile {uncompiled!r}, so they are not counted"
+        )
+    if zero:
+        notes.append(
+            f"{zero} returned row{'s' * (zero > 1)} matched on the server but not in Python "
+            "(case folding or regular-expression syntax differ) and rank last"
+        )
+    if notes:
+        warnings.warn(
+            "server-side ranking is approximate: " + "; ".join(notes), stacklevel=3
+        )
+
+
+async def aget_candidates(
+    corpus: Table | S3Corpus | PgCorpus,
     *,
-    embedder: str | Embedder,
-    floor: float = FLOOR,
+    seeds: Sequence[str] | None = None,
+    embedder: str | Embedder | None = None,
+    floor: float | None = None,
+    keywords: Sequence[str | re.Pattern] | None = None,
+    regex: bool = False,
+    server_side: bool = False,
+    limit: int | None = None,
     out=None,
     cache=None,
 ) -> Candidates:
-    """Items whose maximum similarity to any seed is at least `floor`; ties go to the earlier seed.
+    """The corpus's candidate items, filtered by at most one of `seeds` or `keywords`.
 
-    `embedder` is a pydantic-ai model string or an `Embedder`. `out`: None writes
-    `<settings.root>/candidates.jsonl` (+ `.meta.json`), False writes nothing, a path writes there.
-    `cache`: a directory, None for `<settings.root>/cache`, False for none.
+    No filter: every item in the corpus's order. `seeds`: the items whose maximum similarity to
+    any seed is at least `floor` (None: 0.60), best first; ties go to the earlier seed.
+    `keywords`: the items containing any term, best first (distinct terms matched, then total
+    matches, then corpus order). A term is a plain string (literal, case-insensitive) or a
+    compiled `re.Pattern` that keeps its own flags; `regex=True` makes strings patterns, as written.
+    `server_side=True` (a PgCorpus only) lets the database do the matching: plain terms with ILIKE,
+    regex strings with `~` in Postgres syntax (so no compiled patterns); ranking stays here.
+
+    `embedder` (a pydantic-ai model string or an `Embedder`), `floor` and `cache` (a directory,
+    None for `<settings.root>/cache`, False for none) belong to `seeds`. `limit` keeps the first N
+    items, or the best N. `out`: a path writes the list there (+ `.meta.json`), False writes
+    nothing, None writes `<settings.root>/candidates.jsonl` for seeds only.
     """
+    if not isinstance(corpus, (Table, S3Corpus, PgCorpus)):
+        raise TypeError(
+            f"corpus must be a Table, S3Corpus or PgCorpus, not {type(corpus).__name__}"
+        )
     if isinstance(seeds, str):
         raise TypeError(
             "seeds must be a list of strings; use read_seeds(path) for a CSV"
         )
-    seeds = list(seeds)
+    if isinstance(keywords, str):
+        raise TypeError("keywords must be a list; use keywords=['term'] for one term")
+    if seeds is not None and keywords is not None:
+        raise ValueError("give seeds or keywords, not both: one filter per call")
+    if keywords is not None and not keywords:
+        raise ValueError("keywords is empty; give at least one term")
+    if keywords is None and (regex or server_side):
+        raise ValueError(
+            f"{'regex' if regex else 'server_side'} is only used with keywords"
+        )
+    if server_side and not isinstance(corpus, PgCorpus):
+        raise ValueError(
+            "server_side needs a PgCorpus: only Postgres can filter on the server"
+        )
+    for term in keywords or () if server_side else ():
+        if isinstance(term, re.Pattern):
+            raise ValueError(  # noqa: TRY004  an argument rule, a ValueError like the others
+                f"server_side cannot use the compiled pattern {term.pattern!r}: server-side "
+                "regular expressions are strings with regex=True, in Postgres syntax"
+            )
+    if seeds is None:
+        for name, value in (("embedder", embedder), ("floor", floor), ("cache", cache)):
+            if value is not None:
+                raise ValueError(f"{name} is only used with seeds")
+    else:
+        seeds = list(seeds)
+        if not seeds:
+            raise ValueError("seeds is empty; give at least one seed phrase")
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be 1 or more")
+    if seeds is None:
+        uncompiled: list[str] = []
+        patterns = (
+            _compile(keywords, regex, uncompiled if server_side else None)
+            if keywords is not None
+            else None
+        )
+        match = (list(keywords), regex) if server_side and keywords else None
+
+        def read():
+            with closing(_items(corpus, patterns is None, limit, match)) as items:
+                if patterns is None:
+                    return [{"id": i, "text": t} for i, t in islice(items, limit)]
+                return _rank(items, patterns, limit, keep_zero=server_side)
+
+        rows = await asyncio.to_thread(read)
+        if server_side:
+            _warn_if_recount_differs(rows, uncompiled)
+        result = Candidates(
+            rows, floor=None, source="all" if patterns is None else "keywords"
+        )
+        if out is not None and out is not False:
+            result.write(resolve(out, "candidates.jsonl"))
+        return result
+    if embedder is None:
+        raise ValueError("embedder is required with seeds")
+    floor = FLOOR if floor is None else floor
     if isinstance(embedder, str):
         model, embedder = embedder, Embedder(embedder)
     else:
         model = _model_name(embedder)
+    if isinstance(corpus, Table):
+        check_table_for_seeds(corpus, model)  # before the embedding calls cost anything
     vectors = await embed_seeds(seeds, embedder, model, cache)
-    if isinstance(corpus, PgCorpus) and corpus.search == "exact":
+    if isinstance(corpus, Table):
+        per_seed, capped = await asyncio.to_thread(
+            search_table, corpus, vectors, floor, model
+        )
+    elif isinstance(corpus, PgCorpus) and corpus.search == "exact":
         per_seed, capped = await asyncio.to_thread(
             search_pg_exact, corpus, vectors, floor
         )
@@ -221,23 +430,38 @@ async def asearch(
                     "max_similarity": sim,
                     "best_seed": seed,
                 }
-    rows = sorted(best.values(), key=lambda r: (-r["max_similarity"], r["id"]))
+    rows = sorted(best.values(), key=lambda r: (-r["max_similarity"], r["id"]))[:limit]
     result = Candidates(rows, capped, floor, seeds_digest(seeds), model)
     if out is not False:
         result.write(resolve(out, "candidates.jsonl"))
     return result
 
 
-def search(
-    corpus: LocalCorpus | S3Corpus | PgCorpus,
-    seeds: Sequence[str],
+def get_candidates(
+    corpus: Table | S3Corpus | PgCorpus,
     *,
-    embedder: str | Embedder,
-    floor: float = FLOOR,
+    seeds: Sequence[str] | None = None,
+    embedder: str | Embedder | None = None,
+    floor: float | None = None,
+    keywords: Sequence[str | re.Pattern] | None = None,
+    regex: bool = False,
+    server_side: bool = False,
+    limit: int | None = None,
     out=None,
     cache=None,
 ) -> Candidates:
-    """`asearch` for scripts and notebooks; also works inside a running event loop."""
+    """`aget_candidates` for scripts and notebooks; also works inside a running event loop."""
     return run(
-        asearch(corpus, seeds, embedder=embedder, floor=floor, out=out, cache=cache)
+        aget_candidates(
+            corpus,
+            seeds=seeds,
+            embedder=embedder,
+            floor=floor,
+            keywords=keywords,
+            regex=regex,
+            server_side=server_side,
+            limit=limit,
+            out=out,
+            cache=cache,
+        )
     )

@@ -1,4 +1,4 @@
-"""Content analysis over an already-embedded corpus, as a library.
+"""Content analysis over a corpus (seeds, keywords or the whole corpus, then an LLM classifier), as a library.
 
 Importing reads, writes and networks nothing. Two exported names shadow submodules of the package
 (`hunches.cost` is the function, `hunches.settings` the object): inside the package and in tests
@@ -9,7 +9,12 @@ from importlib.metadata import PackageNotFoundError, version
 
 from hunches._gold_rule import GOLD_RULE_FULL, GOLD_RULE_SHORT, GoldError
 from hunches._label import label
-from hunches.candidates import Candidates, asearch, read_seeds, search
+from hunches.candidates import (
+    Candidates,
+    aget_candidates,
+    get_candidates,
+    read_seeds,
+)
 from hunches.classifier import Classifier, CostLimit, Estimate, Predictions
 from hunches.cost import Cost, cost
 from hunches.evaluation import (
@@ -22,7 +27,7 @@ from hunches.evaluation import (
     evaluate,
 )
 from hunches.gold import Gold, GoldSet
-from hunches.search import LocalCorpus, PgCorpus, S3Corpus
+from hunches.search import PgCorpus, S3Corpus, Table
 from hunches.settings import settings
 from hunches.taxonomy import Taxonomy
 
@@ -45,20 +50,20 @@ __all__ = [
     "Gold",
     "GoldError",
     "GoldSet",
-    "LocalCorpus",
     "PgCorpus",
     "Predictions",
     "S3Corpus",
+    "Table",
     "Taxonomy",
     "__version__",
     "aevaluate",
-    "asearch",
+    "aget_candidates",
     "band_sample",
     "cost",
     "eval_log",
     "evaluate",
+    "get_candidates",
     "label",
     "read_seeds",
-    "search",
     "settings",
 ]

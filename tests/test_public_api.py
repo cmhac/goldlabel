@@ -1,4 +1,5 @@
 import importlib
+import inspect
 import os
 import subprocess
 import sys
@@ -6,12 +7,12 @@ import tomllib
 from pathlib import Path
 
 PUBLIC = [
-    "LocalCorpus",
     "S3Corpus",
     "PgCorpus",
+    "Table",
     "read_seeds",
-    "search",
-    "asearch",
+    "get_candidates",
+    "aget_candidates",
     "Candidates",
     "Taxonomy",
     "Classifier",
@@ -115,9 +116,7 @@ def test_name_shadowing_the_package_attributes_is_the_documented_one():
     assert isinstance(hunches.settings, Settings)  # the object, not the submodule
     assert hunches.settings.root == Path(".hunches")
     assert callable(hunches.cost) and hunches.cost.__module__ == "hunches.cost"
-    assert callable(hunches.search) and hunches.search.__module__ == (
-        "hunches.candidates"
-    )
+    assert inspect.ismodule(hunches.search)  # only cost and settings shadow submodules
     assert resolve(None, "gold.jsonl") == hunches.settings.root / "gold.jsonl"
     assert importlib.import_module("hunches.settings").resolve is resolve
     assert hasattr(importlib.import_module("hunches.cost"), "cache_key")

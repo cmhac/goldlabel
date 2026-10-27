@@ -7,13 +7,14 @@ Remember the gold rule in `SKILL.md`: you never create or edit a gold label. Whe
 ## 1. Ask before writing code
 
 - **The brief.** What is being looked for, in one or two sentences, and what would make an item a match? Write it in the notebook's first cell as a comment or a markdown cell so the reader sees what the numbers are about.
+- **The candidates.** Seeds, keywords or the whole corpus (see section 2)? Keywords are cheap and exact; seeds find what is worded differently; the whole corpus is for a corpus that is already small or already filtered.
 - **The seeds.** Short phrases that would be true of a match (not keywords: sentences a matching item could contain). Ask the user for them or propose a handful and ask which are right. Keep them in `seeds.csv` (one per line, header `seed`) or in a list in the notebook.
 - **`single` or `multi`.** Is each item exactly one label (`single`), or can it carry several (`multi`)? `off_topic` is always there, exclusive, and means "not a match"; do not define it yourself.
 - **Label descriptions.** One or two sentences per label that say what it is and how it differs from the nearest label ("Offers a prize or payout in exchange for a fee or personal data. Not satire, and not a genuine promotion by a named brand."). Ask the user to confirm them; they decide where the lines fall.
 
-## 2. Corpus and search
+## 2. Corpus and candidates
 
-The corpus is already embedded; the library only reads it.
+`get_candidates` returns the items to classify. Ask which kind of list the user wants: **seeds** (semantic search; needs embeddings and an embedder), **keywords** (literal terms or regular expressions; no embeddings), or **the whole corpus** (no filter at all; the classifier then reads every item, so show the estimate first).
 
 ```python
 import hunches as hn
@@ -21,14 +22,29 @@ import hunches as hn
 # one of:
 corpus = hn.PgCorpus(url_env="HUNCHES_PG_URL", table="posts", text_column="body")
 # corpus = hn.S3Corpus(bucket="my-vectors", index="posts", region="us-east-1")
-# corpus = hn.LocalCorpus("corpus/")  # vectors.npy, items.jsonl, meta.json
+# corpus = hn.Table("posts.parquet", text_column="body", id_column="post_id")
 
+# seeds: semantic search (the corpus must have embeddings; see the table format below)
 seeds = hn.read_seeds("seeds.csv")  # or a plain list[str]
-candidates = hn.search(corpus, seeds, embedder="openai:text-embedding-3-small")
+candidates = hn.get_candidates(
+    corpus, seeds=seeds, embedder="openai:text-embedding-3-small"
+)
 candidates  # count, similarity bands, and a WARNING if the backend capped the results
+
+# keywords: ranked by distinct terms matched, then total matches (terms_matched, matches)
+hits = hn.get_candidates(corpus, keywords=["ballot", "poll worker"], limit=500)
+
+# the whole corpus, in the corpus's order
+everything = hn.get_candidates(corpus)
 ```
 
-`embedder` must be the model the corpus was embedded with. `search` writes `.hunches/candidates.jsonl`; running it again with one changed seed re-embeds only that seed. Show `candidates.bands()` and `candidates.top_seeds(0.70)` to the user: which seeds bring in the items, and are the top items what they meant? A seed that brings in junk is a reason to reword the seed, not to change the classifier.
+One filter per call, `seeds=` or `keywords=`. For seeds, `embedder` must be the model the corpus was embedded with. A seed search writes `.hunches/candidates.jsonl` (keyword and whole-corpus lists are written only when `out=` is a path); running it again with one changed seed re-embeds only that seed. Show `candidates.bands()` and `candidates.top_seeds(0.70)` to the user: which seeds bring in the items, and are the top items what they meant? A seed that brings in junk is a reason to reword the seed, not to change the classifier. Keyword and whole-corpus lists have no similarity scores, so they have no bands, no floor and no `top_seeds`; look at the first rows with `hits.sample(20)` instead.
+
+**Keywords.** A plain string is a literal, case-insensitive term. A compiled `re.Pattern` keeps its own flags, and each term is searched separately (a pattern with `re.IGNORECASE` does not make the next one case-insensitive). `regex=True` makes the strings patterns, written as they are (use `(?i)` for case-insensitive). A term that matches the empty string is refused, but zero-width patterns such as `\b` still match every word, so do not use them alone.
+
+**On the server (`PgCorpus` only).** `server_side=True` has the database do the matching, which suits a table too large to read: plain terms use `ILIKE`; with `regex=True` the strings are sent as they are and use Postgres syntax (compiled patterns are refused). Ranking and `limit` stay in the library, which warns if its own count of a returned row disagrees with the server's. Postgres rows are read in ascending id order. For S3 Vectors the order is the service's, so a `limit` there is not repeatable.
+
+**The table format.** `hn.Table` takes a `.csv`, `.parquet` or `.jsonl` file, a list of row dicts, or a pandas or polars DataFrame. It needs a text column (`text_column`, a non-empty string in every row) and optionally an `id_column` (unique; the row's position is the id otherwise). For seeds it also needs `vector_column` (one list of numbers per row; not possible in a CSV) and `embedding_model` (the model that made them, which must equal the `embedder`). A Postgres table needs only its id and text columns unless seeds are used. The first bad row is named in the error; nothing is dropped or repaired.
 
 For a database, `corpus.check()` (on `PgCorpus` only) reports problems with the table and column before searching. The URL stays in the environment variable; never type it into the notebook.
 
@@ -95,9 +111,9 @@ If your tools cannot edit `.ipynb` JSON reliably, write the pipeline as a plain 
 import hunches as hn
 
 # %% Search
-candidates = hn.search(
+candidates = hn.get_candidates(
     hn.PgCorpus(table="posts", text_column="body"),
-    hn.read_seeds("seeds.csv"),
+    seeds=hn.read_seeds("seeds.csv"),
     embedder="openai:text-embedding-3-small",
 )
 print(candidates)

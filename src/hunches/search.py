@@ -1,8 +1,10 @@
+import csv
 import json
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote, urlsplit
 
 import numpy as np
@@ -22,11 +24,171 @@ PG_ROW_OVERHEAD = 128
 MB = 1024 * 1024
 
 
-@dataclass(frozen=True)
-class LocalCorpus:
-    """vectors.npy, items.jsonl and meta.json in `dir`."""
+@dataclass(frozen=True, eq=False)
+class Table:
+    """Items in a table: a `.csv`, `.parquet` or `.jsonl` path, a list of row dicts, or a pandas or
+    polars DataFrame. `id_column` None means the row's position. Seed search also needs
+    `vector_column` (a list of numbers per row; not in a CSV) and `embedding_model`, the model
+    that made them; keyword search and the whole corpus need neither."""
 
-    dir: str | Path
+    source: Any
+    text_column: str = "text"
+    id_column: str | None = None
+    vector_column: str | None = None
+    embedding_model: str | None = None
+
+    def __post_init__(self):
+        if not self.text_column:
+            raise ValueError("Table: text_column is required")
+        is_path = isinstance(self.source, (str, Path))
+        if (
+            self.vector_column
+            and is_path
+            and Path(self.source).suffix.lower() == ".csv"
+        ):
+            raise ValueError(
+                "Table: a CSV file cannot hold vectors, so vector_column cannot be used; "
+                "use a .parquet or .jsonl file or a DataFrame"
+            )
+
+
+def _parquet_rows(path: Path) -> list[dict]:
+    try:
+        import polars
+
+        return polars.read_parquet(path).to_dicts()
+    except ImportError:
+        pass
+    try:
+        import pandas
+
+        return pandas.read_parquet(path).to_dict("records")
+    except ImportError as e:
+        raise ImportError(
+            "Reading a .parquet file needs polars or pandas (with pyarrow): "
+            "pip install polars"
+        ) from e
+
+
+def table_rows(table: Table, with_vectors: bool = False) -> list[dict]:
+    """The table as `{id, text}` rows in table order (plus `vector` when asked for), checked.
+
+    Raises ValueError naming the column or the first offending row (counting from 0); rows are
+    never dropped, repaired or invented."""
+    src = table.source
+    if isinstance(src, (str, Path)):
+        path = Path(src)
+        suffix = path.suffix.lower()
+        if suffix == ".csv":
+            with open(path, newline="", encoding="utf-8-sig") as f:
+                rows = list(csv.DictReader(f))
+        elif suffix == ".jsonl":
+            lines = path.read_text(encoding="utf-8").splitlines()
+            rows = [json.loads(x) for x in lines if x.strip()]
+        elif suffix == ".parquet":
+            rows = _parquet_rows(path)
+        else:
+            raise ValueError(
+                f"Table: cannot read {path.name!r}; use a .csv, .parquet or .jsonl file"
+            )
+    elif hasattr(src, "to_dicts"):  # polars
+        rows = src.to_dicts()
+    elif hasattr(src, "to_dict"):  # pandas
+        rows = src.to_dict("records")
+    else:
+        rows = list(src)
+    columns = [table.text_column]
+    columns += [c for c in (table.id_column, with_vectors and table.vector_column) if c]
+    out, seen = [], set()
+    for i, row in enumerate(rows):
+        for column in columns:
+            if column not in row:
+                raise ValueError(f"Table row {i}: no column {column!r}")
+        text = row[table.text_column]
+        if not (isinstance(text, str) and text.strip()):
+            raise ValueError(
+                f"Table row {i}: column {table.text_column!r} is not a non-empty string"
+            )
+        id_ = row[table.id_column] if table.id_column else i
+        if id_ is None or str(id_) == "":
+            raise ValueError(f"Table row {i}: column {table.id_column!r} is empty")
+        if str(id_) in seen:
+            raise ValueError(f"Table row {i}: repeated id {str(id_)!r}")
+        seen.add(str(id_))
+        item = {"id": str(id_), "text": text}
+        if with_vectors and table.vector_column:
+            item["vector"] = row[table.vector_column]
+        out.append(item)
+    return out
+
+
+def check_table_for_seeds(table: Table, embedding_model: str) -> None:
+    """Refuse a table that cannot answer a seed search. Cheap, so callers run it before they
+    spend money embedding the seeds."""
+    if table.vector_column is None:
+        raise ValueError(
+            "the table has no embedding column; seed search needs Table(vector_column=...) "
+            "(keywords and the whole corpus need none)"
+        )
+    if table.embedding_model is None:
+        raise ValueError(
+            "the table has no embedding_model; seed search needs the model that made the vectors"
+        )
+    if table.embedding_model != embedding_model:
+        raise ValueError(
+            f"embedding model mismatch: table uses {table.embedding_model!r}, "
+            f"the embedder is {embedding_model!r}"
+        )
+
+
+def search_table(
+    table: Table, vectors, floor: float, embedding_model: str
+) -> tuple[list[list[tuple[str, str, float]]], bool]:
+    """One pass over the table for every seed: ([(id, text, similarity) per seed], False), best
+    first, all with similarity >= floor. Never capped."""
+    check_table_for_seeds(table, embedding_model)
+    rows = table_rows(table, with_vectors=True)
+    if not rows:
+        return [[] for _ in vectors], False
+    matrix = []
+    for i, row in enumerate(rows):
+        try:
+            v = np.asarray(row["vector"], dtype=np.float32)
+        except (TypeError, ValueError):
+            v = None
+        if (
+            v is None
+            or v.ndim != 1
+            or v.size == 0
+            or v.size != len(matrix[0] if matrix else v)
+        ):
+            raise ValueError(
+                f"Table row {i}: column {table.vector_column!r} is not a list of numbers "
+                "of the same length as row 0"
+            )
+        matrix.append(v)
+    unit = np.stack(matrix)
+    if unit.shape[1] != len(vectors[0]):
+        raise ValueError(
+            f"the embedder's vectors have {len(vectors[0])} numbers, "
+            f"the table's have {unit.shape[1]}"
+        )
+    norms = np.linalg.norm(unit, axis=1)
+    norms[norms == 0] = 1
+    unit = unit / norms[:, None]
+    queries = np.asarray(vectors, dtype=np.float32)
+    sims = unit @ (queries / np.linalg.norm(queries, axis=1, keepdims=True)).T
+    per_seed = []
+    for j in range(len(vectors)):
+        order = np.argsort(-sims[:, j], kind="stable")
+        per_seed.append(
+            [
+                (rows[i]["id"], rows[i]["text"], float(sims[i, j]))
+                for i in order
+                if sims[i, j] >= floor
+            ]
+        )
+    return per_seed, False
 
 
 @dataclass(frozen=True)
@@ -102,10 +264,12 @@ def _cancel(conn):
     (getattr(conn, "cancel_safe", None) or conn.cancel)()
 
 
-def _too_large(text: str, limit_mb: int) -> RuntimeError:
+def _too_large(
+    text: str, limit_mb: int, hint: str = "Use fewer seeds or raise the limit"
+) -> RuntimeError:
     return RuntimeError(
         f"{text} which exceeds the result limit of {limit_mb} MB. "
-        "Use fewer seeds or raise the limit in PgCorpus(max_result_mb=...)."
+        f"{hint} in PgCorpus(max_result_mb=...)."
     )
 
 
@@ -408,6 +572,102 @@ def search_pg_exact(
         conn.close()
 
 
+def pg_items(
+    corpus: PgCorpus,
+    guard: bool = False,
+    limit: int | None = None,
+    match: tuple[list[str], bool] | None = None,
+):
+    """Yield (id, text) of every item in ascending id order, never touching the vectors.
+
+    `guard`: the caller keeps everything it reads, so refuse up front from the planner statistics
+    (rows, or `limit` if smaller) and abort while streaming past corpus.max_result_mb (0 = none).
+    `match` = (terms, regex): only rows whose text matches any term, filtered by the database
+    (ILIKE for plain terms, `~` for regex strings); the terms are bound parameters only.
+    Close the generator to close the connection."""
+    limit_mb = corpus.max_result_mb
+    hint = "Use a keyword filter, a limit, or raise the limit"
+    conn = pg_connect(corpus)
+    try:
+        from psycopg import sql
+
+        table = sql.Identifier(*corpus.table.split(".", 1))
+        text_table, text_id = text_source(corpus)
+        if guard and limit_mb:
+            rows, width = table_estimates(conn, text_table, corpus.text_column)
+            if (
+                rows is not None and width is not None
+            ):  # no statistics: only the stream checks
+                per_row = width + PG_ROW_OVERHEAD
+                worst = min(rows, limit or rows) * per_row
+                if worst > limit_mb * MB:
+                    raise _too_large(
+                        f"Reading the corpus would return up to ~{worst / MB:.0f} MB "
+                        f"({min(rows, limit or rows):,} rows × ~{per_row} bytes)",
+                        limit_mb,
+                        hint,
+                    )
+        names: dict[str, Any] = {
+            "id": sql.Identifier(corpus.id_column),
+            "text": sql.Identifier(corpus.text_column),
+            "table": table,
+            "text_table": sql.Identifier(*text_table.split(".", 1)),
+            "text_id": sql.Identifier(text_id),
+        }
+        params = None
+        if match:
+            terms, is_regex = match
+            names["op"] = sql.SQL("~" if is_regex else "ILIKE")
+            # LIKE's default escape character is the backslash
+            params = (
+                terms
+                if is_regex
+                else ["%" + re.sub(r"([\\%_])", r"\\\1", t) + "%" for t in terms],
+            )
+        if corpus.text_table and match:
+            query = sql.SQL(
+                "SELECT t.{id}, x.{text} FROM {table} t JOIN {text_table} x "
+                "ON x.{text_id} = t.{id} WHERE x.{text} {op} ANY(%s::text[]) ORDER BY t.{id}"
+            )
+        elif corpus.text_table:
+            query = sql.SQL(
+                "SELECT t.{id}, x.{text} FROM {table} t LEFT JOIN {text_table} x "
+                "ON x.{text_id} = t.{id} ORDER BY t.{id}"
+            )
+        elif match:
+            query = sql.SQL(
+                "SELECT {id}, {text} FROM {table} WHERE {text} {op} ANY(%s::text[]) "
+                "ORDER BY {id}"
+            )
+        else:
+            query = sql.SQL("SELECT {id}, {text} FROM {table} ORDER BY {id}")
+        query = query.format(**names)
+        received = rows_in = 0
+        with conn.cursor(name="hunches_items") as cur:
+            cur.itersize = PG_BATCH
+            cur.execute(query, params)
+            for id_, text in cur:
+                if text is None:
+                    raise RuntimeError(f"no text row for id {str(id_)!r}")
+                rows_in += 1
+                received += len(str(id_)) + len(text.encode()) + PG_ROW_OVERHEAD
+                if guard and limit_mb and received > limit_mb * MB:
+                    raise _too_large(
+                        f"Reading has already received {received / MB:.1f} MB "
+                        f"({rows_in:,} rows),",
+                        limit_mb,
+                        hint,
+                    )
+                yield str(id_), text
+    except Exception as e:  # noqa: BLE001  the driver's own classes are not imported here
+        message = pg_message(e, corpus)
+        if match and match[1]:
+            message += f"\nServer-side regular expressions use Postgres syntax; the terms were {match[0]!r}."
+        raise RuntimeError(message) from None
+    finally:
+        conn.close()
+
+
 def is_approximate(corpus) -> bool:
     """True when the pgvector search may hide hits above the floor (index mode)."""
     return isinstance(corpus, PgCorpus) and corpus.search == "index"
@@ -471,7 +731,7 @@ def _search_pg_index(
 
 
 def search_vectors(
-    corpus: LocalCorpus | S3Corpus | PgCorpus,
+    corpus: S3Corpus | PgCorpus,
     vector: list[float],
     floor: float,
     *,
@@ -480,39 +740,9 @@ def search_vectors(
     """Return ([(id, text, similarity)], capped), best first, all with similarity >= floor.
 
     `capped` is True when the S3 per-query topK limit may have hidden hits above the floor
-    (the highest-scoring hits are returned); show a warning. Local is never capped.
-    `embedding_model` is only checked against a local corpus's meta.json. pgvector `exact`
-    search answers every seed at once: use search_pg_exact.
+    (the highest-scoring hits are returned); show a warning. pgvector `exact` search answers
+    every seed at once: use search_pg_exact; a Table: use search_table.
     """
-    if isinstance(corpus, LocalCorpus):
-        folder = Path(corpus.dir)
-        meta_model = json.loads((folder / "meta.json").read_text())["embedding_model"]
-        if meta_model != embedding_model:
-            raise ValueError(
-                f"embedding model mismatch: corpus uses {meta_model!r}, "
-                f"the embedder is {embedding_model!r}"
-            )
-        vectors = np.load(folder / "vectors.npy").astype(np.float32)
-        items = [
-            json.loads(line)
-            for line in (folder / "items.jsonl").read_text().splitlines()
-            if line.strip()
-        ]
-        if len(items) != len(vectors):
-            raise ValueError(
-                f"items.jsonl has {len(items)} rows but vectors.npy has {len(vectors)}"
-            )
-        query = np.asarray(vector, dtype=np.float32)
-        norms = np.linalg.norm(vectors, axis=1)
-        norms[norms == 0] = 1
-        sims = (vectors / norms[:, None]) @ (query / np.linalg.norm(query))
-        order = np.argsort(-sims)
-        return [
-            (items[i]["id"], items[i]["text"], float(sims[i]))
-            for i in order
-            if sims[i] >= floor
-        ], False
-
     if isinstance(corpus, PgCorpus):
         if corpus.search != "index":
             raise RuntimeError(
@@ -549,6 +779,38 @@ def search_vectors(
             break
         response = client.query_vectors(**params, nextToken=response["nextToken"])
     return hits, len(hits) >= S3_TOP_K and not below_floor
+
+
+def s3_items(corpus: S3Corpus):
+    """Yield (key, text) of every vector in the index, in the service's own order, with the
+    vectors themselves never requested."""
+    try:
+        import boto3
+        from botocore.exceptions import ClientError
+    except ImportError as e:
+        raise ImportError("The S3 backend needs boto3: pip install hunches[s3]") from e
+    client = boto3.client("s3vectors", region_name=corpus.region)
+    params = {
+        "vectorBucketName": corpus.bucket,
+        "indexName": corpus.index,
+        "returnMetadata": True,
+        "maxResults": 1000,
+    }
+    while True:
+        try:
+            response = client.list_vectors(**params)
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "AccessDeniedException":
+                raise
+            raise RuntimeError(
+                f"Access denied listing {corpus.bucket}/{corpus.index}: reading every item "
+                "needs the permissions s3vectors:ListVectors and s3vectors:GetVectors"
+            ) from None
+        for v in response["vectors"]:
+            yield v["key"], v["metadata"]["text"]
+        if not response.get("nextToken"):
+            return
+        params["nextToken"] = response["nextToken"]
 
 
 POOLER_HINT = (

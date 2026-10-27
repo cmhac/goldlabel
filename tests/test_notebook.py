@@ -33,6 +33,15 @@ def candidates(n=3, capped=True):
     return Candidates(rows, capped=capped)
 
 
+def other_sources():
+    kw = [{"id": "k", "text": HOSTILE, "terms_matched": 1, "matches": 2}]
+    both = [{"id": "w", "text": HOSTILE}]
+    return {
+        "keywords": Candidates(kw, source="keywords"),
+        "all": Candidates(both, source="all"),
+    }
+
+
 def predictions(cost=None):
     rows = [
         {
@@ -159,6 +168,9 @@ def test_every_object_returns_a_string_and_escapes_item_text(tmp_path):
         assert "<script" not in out and "<i>" not in out and "<b>x" not in out, name
     for name in ("Candidates", "Predictions", "GoldSet", "Evaluation", "Taxonomy"):
         assert ESCAPED in everything(tmp_path)[name]._repr_html_(), name
+    for name, c in other_sources().items():
+        out = c._repr_html_()
+        assert ESCAPED in out and "<script" not in out, name
     assert "&lt;i&gt;m&lt;/i&gt;" in eval_log()._repr_html_()
     assert "m&lt;1&gt;" in cost_obj()._repr_html_()
     assert ESCAPED in classifier()._repr_html_()
@@ -182,6 +194,7 @@ def test_no_colour_anywhere(tmp_path):
         band_report(cost=0.1),
         cost_obj(unknown=False),
         candidates(60),
+        *other_sources().values(),
     ]
     for obj in objs:
         assert not bad.search(obj._repr_html_()), type(obj).__name__

@@ -117,6 +117,17 @@ def test_draw_appends_pending_rows_with_null_labels(tmp_path):
     assert Gold(path).pending.rows == drawn.rows
 
 
+def test_draw_works_on_a_whole_corpus_list(tmp_path):
+    whole = Candidates(
+        [{"id": f"w{i}", "text": f"w text {i}"} for i in range(5)],
+        floor=None,
+        source="all",
+    )
+    drawn = Gold(tmp_path / "g.jsonl").draw(whole, n=3, seed=1)
+    assert len(drawn) == 3 and all(r.labels is None for r in drawn.rows)
+    assert {r.id for r in drawn.rows} <= {f"w{i}" for i in range(5)}
+
+
 def test_draw_never_repeats_an_id_across_dev_and_test(tmp_path):
     g = Gold(tmp_path / "g.jsonl")
     dev = g.draw(cands(10), n=5, split="dev", seed=3)
