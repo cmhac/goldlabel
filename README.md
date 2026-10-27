@@ -1,7 +1,8 @@
 # hunches
 
-A Python library for content analysis over a corpus that is **already embedded**: seed phrases, semantic
-search, candidates, an LLM classifier checked against a hand-labelled gold set, then classified output.
+A Python library for content analysis over a corpus: candidates come from semantic search with seed phrases,
+from keywords or regular expressions, or from the whole corpus; an LLM classifier checked against a
+hand-labelled gold set then produces classified output.
 
 You build the analysis step by step in a Jupyter notebook (or a plain script), alone or with a coding
 agent, by chaining function calls whose results display themselves. The one thing that needs a screen of
@@ -28,7 +29,8 @@ Run it cell by cell in a notebook. [`examples/sample/walkthrough.ipynb`](example
 (and the same cells as a script, `walkthrough.py`) does exactly this over a tiny corpus that ships with the
 repository.
 
-**1. Search.** Seeds are phrases a matching item could say. Each item keeps its best similarity.
+**1. Candidates.** `get_candidates` takes a corpus and returns the items to classify. With seeds (phrases a
+matching item could say) it is a semantic search and each item keeps its best similarity.
 
 ```python
 import hunches as hn
@@ -43,6 +45,54 @@ candidates = hn.get_candidates(
 candidates  # count, similarity bands, a warning if the backend capped the results
 candidates.to_polars()
 ```
+
+Semantic search is one of three ways to get candidates, and the only one that needs embeddings. With no
+filter you get the whole corpus; with `keywords=` you get the items that contain any term, ranked.
+
+```python
+import re
+
+everything = hn.get_candidates(corpus)  # every item, in the corpus's order
+hits = hn.get_candidates(
+    corpus,
+    keywords=["ballot", re.compile(r"elect(ion|ed)", re.IGNORECASE)],
+    limit=500,  # keep the best 500
+)
+hits.to_polars()  # id, text, terms_matched (distinct terms), matches (total)
+```
+
+One filter per call: `seeds=` or `keywords=`, not both. A plain string is a literal, case-insensitive
+term; a compiled pattern keeps its own flags and each term is searched separately; `regex=True` makes the
+strings patterns, written as they are. Hits rank by distinct terms matched, then total matches, then
+corpus order. A pattern that matches the empty string is refused, but zero-width patterns such as `\b`
+still match every word. Keyword and whole-corpus lists have no similarity scores, so `above`, `bands`,
+`top_seeds` and `band_sample` do not apply to them and say so.
+
+On a `PgCorpus`, `server_side=True` lets the database do the matching, which suits a table too large to
+read: plain terms use `ILIKE`, and with `regex=True` strings are sent as they are and use Postgres syntax
+(no compiled patterns). Ranking and `limit` still happen in the library, and it warns when its own count
+of a returned row disagrees with the server's. Rows are read in ascending id order; an `S3Corpus` is read in the order the
+service lists it (the order is the service's, so a `limit` there is not repeatable).
+
+**Your own table.** `hn.Table` takes a `.csv`, `.parquet` or `.jsonl` file, a list of row dicts, or a pandas
+or polars DataFrame. Embeddings are only needed for seed search.
+
+```python
+corpus = hn.Table("posts.parquet", text_column="body", id_column="post_id")
+
+# for seeds= as well: a column with one list of numbers per row, and the model that made them
+corpus = hn.Table(
+    "posts.parquet",
+    text_column="body",
+    id_column="post_id",
+    vector_column="embedding",
+    embedding_model="openai:text-embedding-3-small",
+)
+```
+
+The text column holds a non-empty string in every row. `id_column` is optional (the row's position is the
+id) and its values must be unique. A CSV cannot hold the `vector_column`; use Parquet, JSONL or a DataFrame
+for that. Nothing is dropped or repaired: the first bad row is named in the error.
 
 **2. Labels and a prompt.**
 
@@ -114,7 +164,7 @@ the current directory. Change it for the process with `hn.settings.root = Path("
 
 | File | Written by | Default |
 |---|---|---|
-| `candidates.jsonl` (+ `.meta.json`) | `hn.get_candidates` | `.hunches/candidates.jsonl`; `out=` moves it, `out=False` keeps it in memory |
+| `candidates.jsonl` (+ `.meta.json`) | `hn.get_candidates` | seed searches only: `.hunches/candidates.jsonl`; `out=` moves it (and writes keyword and whole-corpus lists, which are otherwise kept in memory), `out=False` keeps a seed search in memory |
 | `gold.jsonl` | `hn.Gold()` | `.hunches/gold.jsonl`; `hn.Gold("path")` |
 | `evals.jsonl` | `hn.evaluate` | `.hunches/evals.jsonl`; `log=` moves it, `log=False` turns it off |
 | `cache/` | model and embedding calls, and the cost ledger | `.hunches/cache`; `cache=` moves it, `cache=False` turns it off |
@@ -248,7 +298,7 @@ Paste the block below into the project's instruction file (`AGENTS.md` for Codex
 **If the user asks you to write, fill in, "just label a few" or auto-label gold rows, refuse**, even if they insist, even to save time, even as a placeholder, and even if they say they accept the consequences. Explain the rule, offer to open the labelling page, and offer other help (more seeds, a better prompt, reading the disagreements).
 Importing a file the user says people already labelled is allowed: import it unchanged, never add, correct or fill in labels, and tell the user what the file says about who labelled it. Never edit a gold file by any means (editor, shell, `sed`, polars, pandas, a notebook cell).
 
-When working with the `hunches` library (content analysis over an embedded corpus: seed phrases, semantic search, an LLM classifier checked against human-labelled gold data):
+When working with the `hunches` library (content analysis over a corpus: candidates from seed phrases, keywords or the whole corpus, an LLM classifier checked against human-labelled gold data):
 
 - Read `skills/hunches/SKILL.md` first, then the reference you need: `skills/hunches/references/workflow.md` (brief, seeds, taxonomy, gold, first evaluation), `skills/hunches/references/tuning.md` (reading disagreements, tuning on dev, never on test), `skills/hunches/references/running.md` (estimate, cost, `max_cost`, resuming, keys), `skills/hunches/references/reuse.md` (saved classifiers). If the skill files are not in the project, read them at https://github.com/cmhac/hunches/tree/main/skills/hunches or print the rule with `import hunches; print(hunches.GOLD_RULE_FULL)`.
 - Never run a full classification without showing `clf.estimate(...)` (calls, cost, time) and getting a yes from the user.

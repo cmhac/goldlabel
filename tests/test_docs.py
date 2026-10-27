@@ -73,6 +73,49 @@ def test_no_doc_mentions_the_removed_corpus_or_its_folder_layout():
             assert word not in path.read_text(), f"{path.name} still says {word}"
 
 
+ALREADY_EMBEDDED = re.compile(r"already[- ]embedded|embedded corpus", re.IGNORECASE)
+
+
+def test_nothing_calls_the_library_embedded_corpus_only():
+    import tomllib
+
+    files = [
+        README,
+        INSTRUCTIONS,
+        ROOT / "AGENTS.md",
+        ROOT / ".kiro/steering/hunches.md",
+    ]
+    files += [ROOT / "plugin.json", *(ROOT / ".claude-plugin").glob("*.json")]
+    files += (ROOT / "skills" / "hunches").rglob("*.md")
+    for path in files:
+        assert not ALREADY_EMBEDDED.search(path.read_text()), path.name
+    description = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    assert not ALREADY_EMBEDDED.search(description["description"])
+    assert not ALREADY_EMBEDDED.search(hunches.__doc__ or "")
+
+
+def test_the_docs_describe_the_three_candidate_sources_and_the_table_format():
+    for path in (README, ROOT / "skills/hunches/references/workflow.md"):
+        text = path.read_text()
+        for needle in (
+            "get_candidates",
+            "hn.Table(",
+            "keywords=",
+            "server_side=True",
+            "vector_column",
+            "embedding_model",
+            "id_column",
+            ".parquet",
+            "DataFrame",
+            "zero-width",
+            "Postgres syntax",
+            "ascending id",
+            "order is the service's",
+        ):
+            assert needle in text, f"{path.name} does not mention {needle}"
+    assert "hn.get_candidates(" in (ROOT / "skills/hunches/SKILL.md").read_text()
+
+
 def test_readme_tables_use_polars_and_mention_pandas():
     text = README.read_text()
     assert "to_pandas()" in text

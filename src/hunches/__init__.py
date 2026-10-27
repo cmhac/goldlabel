@@ -1,4 +1,4 @@
-"""Content analysis over an already-embedded corpus, as a library.
+"""Content analysis over a corpus (seeds, keywords or the whole corpus, then an LLM classifier), as a library.
 
 Importing reads, writes and networks nothing. Two exported names shadow submodules of the package
 (`hunches.cost` is the function, `hunches.settings` the object): inside the package and in tests
