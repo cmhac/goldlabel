@@ -24,6 +24,7 @@ from hunches.search import (
     S3Corpus,
     Table,
     pg_items,
+    s3_items,
     search_pg_exact,
     search_table,
     search_vectors,
@@ -223,7 +224,7 @@ def _items(corpus, guard: bool = False, limit: int | None = None):
         return ((r["id"], r["text"]) for r in table_rows(corpus))
     if isinstance(corpus, PgCorpus):
         return pg_items(corpus, guard, limit)
-    raise NotImplementedError("whole-corpus reads arrive with the Postgres/S3 reader")
+    return s3_items(corpus)
 
 
 def _compile(keywords, regex: bool) -> list[re.Pattern]:
@@ -298,6 +299,10 @@ async def aget_candidates(
     items, or the best N. `out`: a path writes the list there (+ `.meta.json`), False writes
     nothing, None writes `<settings.root>/candidates.jsonl` for seeds only.
     """
+    if not isinstance(corpus, (Table, S3Corpus, PgCorpus)):
+        raise TypeError(
+            f"corpus must be a Table, S3Corpus or PgCorpus, not {type(corpus).__name__}"
+        )
     if isinstance(seeds, str):
         raise TypeError(
             "seeds must be a list of strings; use read_seeds(path) for a CSV"

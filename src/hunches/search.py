@@ -747,6 +747,38 @@ def search_vectors(
     return hits, len(hits) >= S3_TOP_K and not below_floor
 
 
+def s3_items(corpus: S3Corpus):
+    """Yield (key, text) of every vector in the index, in the service's own order, with the
+    vectors themselves never requested."""
+    try:
+        import boto3
+        from botocore.exceptions import ClientError
+    except ImportError as e:
+        raise ImportError("The S3 backend needs boto3: pip install hunches[s3]") from e
+    client = boto3.client("s3vectors", region_name=corpus.region)
+    params = {
+        "vectorBucketName": corpus.bucket,
+        "indexName": corpus.index,
+        "returnMetadata": True,
+        "maxResults": 1000,
+    }
+    while True:
+        try:
+            response = client.list_vectors(**params)
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "AccessDeniedException":
+                raise
+            raise RuntimeError(
+                f"Access denied listing {corpus.bucket}/{corpus.index}: reading every item "
+                "needs the permissions s3vectors:ListVectors and s3vectors:GetVectors"
+            ) from None
+        for v in response["vectors"]:
+            yield v["key"], v["metadata"]["text"]
+        if not response.get("nextToken"):
+            return
+        params["nextToken"] = response["nextToken"]
+
+
 POOLER_HINT = (
     "The URL looks like a transaction pooler (port 6543 or a pooler. host). Long "
     "searches can be cut off there; consider the direct or session-mode URL."
