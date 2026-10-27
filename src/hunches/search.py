@@ -1,8 +1,10 @@
+import csv
 import json
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote, urlsplit
 
 import numpy as np
@@ -27,6 +29,167 @@ class LocalCorpus:
     """vectors.npy, items.jsonl and meta.json in `dir`."""
 
     dir: str | Path
+
+
+@dataclass(frozen=True, eq=False)
+class Table:
+    """Items in a table: a `.csv`, `.parquet` or `.jsonl` path, a list of row dicts, or a pandas or
+    polars DataFrame. `id_column` None means the row's position. Seed search also needs
+    `vector_column` (a list of numbers per row; not in a CSV) and `embedding_model`, the model
+    that made them; keyword search and the whole corpus need neither."""
+
+    source: Any
+    text_column: str = "text"
+    id_column: str | None = None
+    vector_column: str | None = None
+    embedding_model: str | None = None
+
+    def __post_init__(self):
+        if not self.text_column:
+            raise ValueError("Table: text_column is required")
+        is_path = isinstance(self.source, (str, Path))
+        if (
+            self.vector_column
+            and is_path
+            and Path(self.source).suffix.lower() == ".csv"
+        ):
+            raise ValueError(
+                "Table: a CSV file cannot hold vectors, so vector_column cannot be used; "
+                "use a .parquet or .jsonl file or a DataFrame"
+            )
+
+
+def _parquet_rows(path: Path) -> list[dict]:
+    try:
+        import polars
+
+        return polars.read_parquet(path).to_dicts()
+    except ImportError:
+        pass
+    try:
+        import pandas
+
+        return pandas.read_parquet(path).to_dict("records")
+    except ImportError as e:
+        raise ImportError(
+            "Reading a .parquet file needs polars or pandas (with pyarrow): "
+            "pip install polars"
+        ) from e
+
+
+def table_rows(table: Table, with_vectors: bool = False) -> list[dict]:
+    """The table as `{id, text}` rows in table order (plus `vector` when asked for), checked.
+
+    Raises ValueError naming the column or the first offending row (counting from 0); rows are
+    never dropped, repaired or invented."""
+    src = table.source
+    if isinstance(src, (str, Path)):
+        path = Path(src)
+        suffix = path.suffix.lower()
+        if suffix == ".csv":
+            with open(path, newline="", encoding="utf-8-sig") as f:
+                rows = list(csv.DictReader(f))
+        elif suffix == ".jsonl":
+            lines = path.read_text(encoding="utf-8").splitlines()
+            rows = [json.loads(x) for x in lines if x.strip()]
+        elif suffix == ".parquet":
+            rows = _parquet_rows(path)
+        else:
+            raise ValueError(
+                f"Table: cannot read {path.name!r}; use a .csv, .parquet or .jsonl file"
+            )
+    elif hasattr(src, "to_dicts"):  # polars
+        rows = src.to_dicts()
+    elif hasattr(src, "to_dict"):  # pandas
+        rows = src.to_dict("records")
+    else:
+        rows = list(src)
+    columns = [table.text_column]
+    columns += [c for c in (table.id_column, with_vectors and table.vector_column) if c]
+    out, seen = [], set()
+    for i, row in enumerate(rows):
+        for column in columns:
+            if column not in row:
+                raise ValueError(f"Table row {i}: no column {column!r}")
+        text = row[table.text_column]
+        if not (isinstance(text, str) and text.strip()):
+            raise ValueError(
+                f"Table row {i}: column {table.text_column!r} is not a non-empty string"
+            )
+        id_ = row[table.id_column] if table.id_column else i
+        if id_ is None or str(id_) == "":
+            raise ValueError(f"Table row {i}: column {table.id_column!r} is empty")
+        if str(id_) in seen:
+            raise ValueError(f"Table row {i}: repeated id {str(id_)!r}")
+        seen.add(str(id_))
+        item = {"id": str(id_), "text": text}
+        if with_vectors and table.vector_column:
+            item["vector"] = row[table.vector_column]
+        out.append(item)
+    return out
+
+
+def search_table(
+    table: Table, vectors, floor: float, embedding_model: str
+) -> tuple[list[list[tuple[str, str, float]]], bool]:
+    """One pass over the table for every seed: ([(id, text, similarity) per seed], False), best
+    first, all with similarity >= floor. Never capped."""
+    if table.vector_column is None:
+        raise ValueError(
+            "the table has no embedding column; seed search needs Table(vector_column=...) "
+            "(keywords and the whole corpus need none)"
+        )
+    if table.embedding_model is None:
+        raise ValueError(
+            "the table has no embedding_model; seed search needs the model that made the vectors"
+        )
+    if table.embedding_model != embedding_model:
+        raise ValueError(
+            f"embedding model mismatch: table uses {table.embedding_model!r}, "
+            f"the embedder is {embedding_model!r}"
+        )
+    rows = table_rows(table, with_vectors=True)
+    if not rows:
+        return [[] for _ in vectors], False
+    matrix = []
+    for i, row in enumerate(rows):
+        try:
+            v = np.asarray(row["vector"], dtype=np.float32)
+        except (TypeError, ValueError):
+            v = None
+        if (
+            v is None
+            or v.ndim != 1
+            or v.size == 0
+            or v.size != len(matrix[0] if matrix else v)
+        ):
+            raise ValueError(
+                f"Table row {i}: column {table.vector_column!r} is not a list of numbers "
+                "of the same length as row 0"
+            )
+        matrix.append(v)
+    unit = np.stack(matrix)
+    if unit.shape[1] != len(vectors[0]):
+        raise ValueError(
+            f"the embedder's vectors have {len(vectors[0])} numbers, "
+            f"the table's have {unit.shape[1]}"
+        )
+    norms = np.linalg.norm(unit, axis=1)
+    norms[norms == 0] = 1
+    unit = unit / norms[:, None]
+    queries = np.asarray(vectors, dtype=np.float32)
+    sims = unit @ (queries / np.linalg.norm(queries, axis=1, keepdims=True)).T
+    per_seed = []
+    for j in range(len(vectors)):
+        order = np.argsort(-sims[:, j], kind="stable")
+        per_seed.append(
+            [
+                (rows[i]["id"], rows[i]["text"], float(sims[i, j]))
+                for i in order
+                if sims[i, j] >= floor
+            ]
+        )
+    return per_seed, False
 
 
 @dataclass(frozen=True)

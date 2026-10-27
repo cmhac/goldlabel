@@ -9,6 +9,7 @@ PUBLIC = [
     "LocalCorpus",
     "S3Corpus",
     "PgCorpus",
+    "Table",
     "read_seeds",
     "search",
     "asearch",

@@ -19,7 +19,9 @@ from hunches.search import (
     LocalCorpus,
     PgCorpus,
     S3Corpus,
+    Table,
     search_pg_exact,
+    search_table,
     search_vectors,
 )
 from hunches.settings import resolve
@@ -211,7 +213,7 @@ async def embed_seeds(
 
 
 async def asearch(
-    corpus: LocalCorpus | S3Corpus | PgCorpus,
+    corpus: Table | LocalCorpus | S3Corpus | PgCorpus,
     seeds: Sequence[str],
     *,
     embedder: str | Embedder,
@@ -235,7 +237,11 @@ async def asearch(
     else:
         model = _model_name(embedder)
     vectors = await embed_seeds(seeds, embedder, model, cache)
-    if isinstance(corpus, PgCorpus) and corpus.search == "exact":
+    if isinstance(corpus, Table):
+        per_seed, capped = await asyncio.to_thread(
+            search_table, corpus, vectors, floor, model
+        )
+    elif isinstance(corpus, PgCorpus) and corpus.search == "exact":
         per_seed, capped = await asyncio.to_thread(
             search_pg_exact, corpus, vectors, floor
         )
