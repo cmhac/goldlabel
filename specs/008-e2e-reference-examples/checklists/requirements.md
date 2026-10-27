@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain (one open: Q1, where the human-labelled rows come from)
+- [x] No [NEEDS CLARIFICATION] markers remain (Q1 resolved: the maintainer labels and commits the rows)
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -31,6 +31,6 @@
 
 ## Notes
 
-- Q1 blocks only the classification example's data, not the other examples.
+- Q1 resolved: option A. The classification example's evaluation waits on the maintainer's committed gold file.
 - FR-016 needs a constitution amendment (MINOR) with the user's approval; the user's 2026-10-27 statement on Principle IV is the basis. Principle I is untouched.
 - The agent was asked to write demonstration gold labels and declined (gold rule); the spec records that and uses human-labelled rows instead.

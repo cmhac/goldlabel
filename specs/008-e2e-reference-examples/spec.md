@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-27
 
-**Status**: Draft, one question open (see "Open question"); ready for `/speckit-clarify` or `/speckit-plan` once it is answered
+**Status**: Draft, Q1 resolved 2026-10-27 (ready for `/speckit-clarify`, then `/speckit-plan`)
 
 **Input**: User description: "Runnable end-to-end reference examples in an e2e/ folder, one per primary path a user can take with the hunches library, each runnable fully locally against podman-run emulators (Postgres, Postgres with pgvector, Floci for S3 Vectors) plus a required real LLM API key for the classifier, never run in local pre-commit hooks or CI by default, kept up to date as source code and pointed to from the README as the reference for different implementations."
 
@@ -258,14 +258,14 @@ This was raised and decided on 2026-10-27: the request to let an agent write dem
 labels was declined because the rule can only be changed by amending Principle I, which was not
 done.
 
-## Open question
+## Resolved question
 
-- **Q1: where do the human-labelled rows come from?** [NEEDS CLARIFICATION: the classification
-  example needs a small set of rows that people labelled, with provenance. Options: (A) the
-  maintainer labels a few dozen rows once in the labelling page and commits the file; (B) a
-  public dataset that people labelled, imported unchanged with its source and licence recorded;
-  (C) no labelled rows are shipped, and the example pauses each run at the labelling page for the
-  person running it to label.] This does not block the table, Postgres and S3 examples.
+- **Q1: where do the human-labelled rows come from?** Decided by the user on 2026-10-27, option A:
+  the maintainer labels a few dozen rows in the labelling page and commits the resulting gold file
+  and its provenance note with the classification example. No dataset is imported from elsewhere
+  and the example does not pause for labelling. The file is committed exactly as the labelling page
+  wrote it; nothing edits it afterwards. Until the file is committed, the classification example's
+  evaluation step cannot run and says so; the other examples do not depend on it.
 
 ## Success Criteria *(mandatory)*
 
