@@ -37,6 +37,8 @@ dev = [
     "types-pyyaml",
     "polars",
     "pandas",
+    "nbclient>=0.11.0",
+    "ipykernel>=7.4.0",
 ]
 
 [tool.pytest.ini_options]
@@ -46,6 +48,7 @@ testpaths = ["tests"]
 
 [tool.ruff.lint.per-file-ignores]
 "examples/**" = ["B018"]  # a notebook cell ends with the value it displays
+"e2e/**" = ["B018"]
 
 [tool.ty.src]
 # specs: design handoff files import textual, which is no longer a dependency.
