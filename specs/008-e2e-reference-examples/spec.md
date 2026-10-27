@@ -10,13 +10,22 @@
 
 **Decisions already made (user, 2026-10-27)**: a real API key is acceptable for the examples that call a model; no visual checks; Floci is sufficient for S3 Vectors, no real AWS behaviour; the folder is called `e2e/`, not `examples/`, and the README tells users to use it as the reference for their kind of setup; these runs are not part of the pre-commit hooks or CI, and how often CI runs them is a later decision that depends on what they cost to run; the constitution's rule against tests that depend on real services was meant to keep tests off real external services, not off isolated local emulators, so these runs are allowed to use them. The gold rule is **not** relaxed (see "Gold labels" below).
 
+## Clarifications
+
+### Session 2026-10-27
+
+- Q: Should each example be a plain script, an automated test, or both? → A: Plain scripts, one per example folder, that check their own results and exit non-zero on failure, plus one run-all script that prints a single summary. A thin test wrapper may be added later without changing the examples. The project's default test run only collects `tests/`, so `e2e/` is never run by it.
+- Q: Should the examples share one data file? → A: No. Each example folder is self-contained: it defines its own small data and expected values, and does not import another example's files. The container start and stop code is repeated in each example that needs it. Agreement between the examples' data is held by a fast offline check in `tests/`.
+- Q: Which local file inputs are covered? → A: All of them, in every mode. CSV, Parquet read through polars, Parquet read through pandas, JSONL, a polars DataFrame, a pandas DataFrame and a list of rows each go through the whole corpus and keywords; seed search goes through every form that can hold vectors, and a CSV with a vector column is checked to be refused.
+- Note: "a user can copy a folder" was an assumption in the first draft, not a requirement from the user. The goal is that a reader can use each folder as a reference for that setup.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Table paths run with nothing installed but Python (Priority: P1)
 
 A user whose corpus is a file or a DataFrame wants a worked, runnable example of each way to get
 candidates from it: the whole corpus, keywords and regular expressions (with flags, ranking and a
-limit), and seed phrases. They copy the folder, run one command, and see the candidates and a
+limit), and seed phrases. They read the folder, run one command, and see the candidates and a
 pass or fail summary. No container, database or key is needed.
 
 **Why this priority**: it is the path most users take first, it needs no setup, and it carries the
@@ -28,15 +37,18 @@ values written in the example.
 
 **Acceptance Scenarios**:
 
-1. **Given** a small corpus supplied as a CSV file, a Parquet file, a JSONL file, a polars
-   DataFrame, a pandas DataFrame and a list of rows, **When** the example asks for the whole
-   corpus from each, **Then** all six give the same ids in the same order.
-2. **Given** that corpus, **When** the example searches by keywords and regular expressions,
-   **Then** the ranked hits, their term and match counts, and a limited list all equal the values
-   written in the example by hand.
-3. **Given** a corpus that carries embeddings, **When** the example searches by seed phrases with
-   a stand-in embedder, **Then** the similarities, bands and best seeds equal the hand-computed
-   values, and no key is needed.
+1. **Given** a small corpus supplied as a CSV file, a Parquet file read through polars, a Parquet
+   file read through pandas, a JSONL file, a polars DataFrame, a pandas DataFrame and a list of
+   rows, **When** the example asks for the whole corpus from each, **Then** all seven give the
+   same ids in the same order.
+2. **Given** that corpus in each of the seven forms, **When** the example searches by keywords and
+   regular expressions, **Then** the ranked hits, their term and match counts, and a limited list
+   all equal the values written in the example by hand, and are the same for every form.
+3. **Given** the corpus with embeddings in every form that can hold them (Parquet through each
+   engine, JSONL, both DataFrames, a list of rows), **When** the example searches by seed phrases
+   with a stand-in embedder, **Then** the similarities, bands and best seeds equal the
+   hand-computed values for every form, and no key is needed. **And** a CSV given a vector column
+   is refused with a message that names the reason.
 4. **Given** any expected value that is wrong, **When** the example runs, **Then** it stops with a
    message that names the check that failed and both values.
 
@@ -58,7 +70,7 @@ creates its database, finishes with a pass summary, and leaves no container behi
 
 **Acceptance Scenarios**:
 
-1. **Given** the shared small corpus loaded into a plain Postgres table, **When** the example
+1. **Given** the example corpus loaded into a plain Postgres table, **When** the example
    asks for the whole corpus and for keywords, **Then** the results equal the table example's.
 2. **Given** the same text split across two tables, **When** the example repeats those calls,
    **Then** the results are identical to the one-table results.
@@ -78,7 +90,7 @@ creates its database, finishes with a pass summary, and leaves no container behi
 
 A user whose corpus lives in an S3 Vectors index wants an example of the whole corpus, keywords
 and seed search against it, without an AWS account. The example starts an S3 emulator, creates a
-vector bucket and index, loads the shared corpus, runs, checks, and removes the emulator.
+vector bucket and index, loads the example corpus, runs, checks, and removes the emulator.
 
 **Why this priority**: it is the only way to exercise the S3 reader and the S3 seed search
 without AWS, and only one of the three backends.
@@ -88,7 +100,7 @@ and cleans up.
 
 **Acceptance Scenarios**:
 
-1. **Given** the shared corpus loaded into an index, **When** the example asks for the whole
+1. **Given** the example corpus loaded into an index, **When** the example asks for the whole
    corpus, **Then** it gets every item once, including when the index holds more items than one
    page of the listing.
 2. **Given** that index, **When** the example searches by keywords and by seeds, **Then** the
@@ -164,8 +176,8 @@ checks fail. Start the default checks with no container tool, no network and no 
   refusal, before spending anything where possible.
 - Two examples run at once: they do not collide (separate ports, names and data directories) or
   the second one says why it cannot start.
-- A Parquet-through-pandas check needs a library that is not installed: that check says so and is
-  skipped without failing the rest.
+- The pandas Parquet engine is not installed: the Parquet-through-pandas check says so by name and
+  is reported as skipped, not passed, and does not hide a failure of the other forms.
 - The example writes files: they go to a temporary folder, not the repository.
 
 ## Requirements *(mandatory)*
@@ -173,20 +185,26 @@ checks fail. Start the default checks with no container tool, no network and no 
 ### Functional Requirements
 
 - **FR-001**: The repository MUST have an `e2e/` folder with one example for each of these paths,
-  and no path without one: file and DataFrame tables (whole corpus, keywords and regular
-  expressions, seeds); Postgres without embeddings (whole corpus, keywords, server-side
+  and no path without one: file and DataFrame tables (CSV, Parquet through polars, Parquet through
+  pandas, JSONL, polars and pandas DataFrames, a list of rows; each through whole corpus,
+  keywords and regular expressions, and seeds where the form can hold embeddings); Postgres without embeddings (whole corpus, keywords, server-side
   filtering) in one-table and two-table layouts; Postgres with pgvector (seeds, exact and index
   modes); S3 Vectors (whole corpus, keywords, seeds); classify, estimate and evaluate.
-- **FR-002**: Each example MUST be a folder with a README (what it shows, what it needs, the one
-  command that runs it, what a pass looks like), the code, and its own small data. A user MUST be
-  able to copy a folder and adapt it.
+- **FR-002**: Each example MUST be a self-contained folder with a README (what it shows, what it
+  needs, the one command that runs it, what a pass looks like), a single script, and its own small
+  data and expected values. An example MUST NOT import or read another example's files. Each folder
+  MUST be readable on its own as the reference for that setup.
+- **FR-018**: Each example MUST be run by a plain command and exit with a non-zero status on any
+  failed check. One run-all command MUST run every example, print one summary line per example
+  and a final one, and exit non-zero if any failed. A test-tool wrapper is NOT required.
 - **FR-003**: Each example MUST check its own results against expected values written in the
   example by hand, MUST stop with a message that names the failed check and both values, and MUST
   end with a one-line pass or fail summary.
-- **FR-004**: The same small corpus, with the same texts, ids and embeddings, MUST be used across
-  the table, Postgres and S3 examples, so a reader can compare them, and each example MUST assert
-  that its candidates equal the table example's for the same filter (except where the order is
-  the service's, which it MUST say).
+- **FR-004**: The table, Postgres and S3 examples MUST each define the same small corpus (the same
+  texts, ids and embeddings, where embeddings apply) and the same expected results for the same
+  filters, so a reader can compare them. A fast offline check MUST fail if those definitions drift
+  apart. Where the order of a result is the service's own, the example MUST say so instead of
+  asserting an order.
 - **FR-005**: Examples that need a database or an S3 service MUST start it themselves in a
   throwaway container, wait until it is ready, load the data, and remove the container when done,
   also when the run fails or is interrupted.
@@ -210,7 +228,7 @@ checks fail. Start the default checks with no container tool, no network and no 
   that each folder has the parts in FR-002, that the README links each, and that an example uses
   only names the library exports.
 - **FR-011**: The README MUST tell users to use `e2e/` as the reference for different
-  implementations, and name which folder to copy for which corpus kind. The agent-facing texts
+  implementations, and name which folder to read for which corpus kind. The agent-facing texts
   that name the example folder (`AGENTS.md`, the skill) MUST be updated to say `e2e/`.
 - **FR-012**: The existing `examples/sample` walkthrough MUST be moved into `e2e/` as part of the
   classification path, `examples/` retired, and every reference to the old path (README, project
@@ -239,8 +257,9 @@ checks fail. Start the default checks with no container tool, no network and no 
 
 - **Example**: a folder under `e2e/` for one path. Has a README, runnable code, its data, expected
   values, and the list of what it needs.
-- **Shared corpus**: the small set of items (ids, texts, embeddings) used by the table, Postgres
-  and S3 examples so their results can be compared.
+- **Example corpus**: the small set of items (ids, texts, embeddings) that the table, Postgres and
+  S3 examples each define for themselves, kept identical by an offline check, so their results
+  can be compared.
 - **Throwaway service**: a container started by an example for the length of one run: a plain
   Postgres, a Postgres with pgvector, or an S3 Vectors emulator.
 - **Expected values**: results written by hand in an example and compared with what the library
