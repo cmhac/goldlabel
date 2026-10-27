@@ -49,7 +49,7 @@ Nothing in this repository may add a way to set a gold label. Only the labelling
 - Every I/O function has an async and a sync form; the sync form works inside a notebook's running event loop (`_sync.run`).
 - Result objects have a plain `__repr__` and a `_repr_html_` that escapes everything, sets no colour and says state in words (PASS/FAIL, `cost ?`, WARNING). Tables export `.to_polars()` and `.to_pandas()` together, never one alone; docs and examples use polars.
 - Check every Pydantic AI, `Embedder`, psycopg, boto3 and standard-library API against the installed version and current docs before using it. Do not code from memory. Pydantic AI docs: https://pydantic.dev/docs/ai/ (`llms.txt` index).
-- Never call a real LLM, AWS API, database, keyring or browser in tests: `TestModel`/`FunctionModel`, stubbed boto3, the fake `psycopg`, tiny hand-built vectors.
+- Never call a real LLM, AWS API, database, keyring or browser in the default tests (the opt-in `e2e/` runs may use local Podman containers and the model provider, constitution v1.3.0): `TestModel`/`FunctionModel`, stubbed boto3, the fake `psycopg`, tiny hand-built vectors.
 - Never show a cost of $0 when the price is unknown. Unknown is `?` with a warning, and `max_cost` refuses.
 - Evaluations are logged (`evals.jsonl`, append-only); the test split is evaluated once, at the end.
 

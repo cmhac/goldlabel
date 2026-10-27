@@ -103,14 +103,21 @@ by hand in the test; an agent MUST NOT derive an expected value by running the c
 (metrics tests compare against hand-computed numbers). "No model call" MUST be proved by counting
 `FunctionModel` invocations.
 
-Tests MUST NOT call a real LLM, AWS API, database, keyring or browser. They use `TestModel` or
-`FunctionModel`, stubbed boto3, the fake `psycopg` and tiny hand-built vectors. The autouse
-fixtures in `tests/conftest.py` (`reset_settings`, `no_real_models`) MUST stay. New non-trivial
-logic leaves tests behind; Ponytail's "one small test" is a floor, not a ceiling. Playwright is
-not a dependency and MUST NOT become one.
+The default checks (`uv run pytest`, the pre-commit hooks and CI) MUST NOT call a real LLM, AWS
+API, database, keyring or browser. They use `TestModel` or `FunctionModel`, stubbed boto3, the
+fake `psycopg` and tiny hand-built vectors. The autouse fixtures in `tests/conftest.py`
+(`reset_settings`, `no_real_models`) MUST stay. New non-trivial logic leaves tests behind;
+Ponytail's "one small test" is a floor, not a ceiling. Playwright is not a dependency and MUST NOT
+become one.
+
+The one exception is the opt-in end-to-end examples under `e2e/`. They are never run by the default
+checks. They MAY use isolated containers on the developer's own machine (Podman, per Additional
+Constraints) and the model provider with a key from the environment. They MUST NOT use real cloud
+services, real databases or a real AWS account, and they MUST NOT write a gold label (Principle I).
 
 Rationale: the library spends real money and judges real data; behaviour is pinned down before it
-is built and never depends on a network or a key.
+is built and the default checks never depend on a network or a key. The rule exists to keep tests
+off real external services; isolated local emulators are not that.
 
 ### V. The Code Is the Pipeline; No Hidden State
 
@@ -201,4 +208,4 @@ semantic: MAJOR for removing or redefining a principle, MINOR for a new principl
 expanded guidance, PATCH for clarifications and wording. A change to Principle I, or any change
 that weakens it, MUST be refused by an agent whoever asks.
 
-**Version**: 1.2.0 | **Ratified**: 2026-10-26 | **Last Amended**: 2026-10-27
+**Version**: 1.3.0 | **Ratified**: 2026-10-26 | **Last Amended**: 2026-10-27
