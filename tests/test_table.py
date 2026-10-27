@@ -8,7 +8,7 @@ from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
 from pydantic_ai.usage import RequestUsage
 
-from hunches.candidates import aget_candidates
+from hunches.candidates import aget_candidates, get_candidates
 from hunches.search import Table, search_table, table_rows
 from hunches.settings import settings
 
@@ -63,6 +63,26 @@ def test_the_same_five_rows_from_polars_pandas_and_parquet(tmp_path):
         tmp_path / "t.parquet",
     ):
         assert table_rows(Table(source, **COLS)) == WANT
+
+
+def test_every_form_gives_the_same_get_candidates_result(tmp_path):
+    pl = pytest.importorskip("polars")
+    pd = pytest.importorskip("pandas")
+    write_csv(tmp_path / "t.csv")
+    write_jsonl(tmp_path / "t.jsonl")
+    pl.DataFrame(FIVE).write_parquet(tmp_path / "t.parquet")
+    sources = [
+        tmp_path / "t.csv",
+        tmp_path / "t.jsonl",
+        tmp_path / "t.parquet",
+        pl.DataFrame(FIVE),
+        pd.DataFrame(FIVE),
+        FIVE,
+    ]
+    for source in sources:
+        got = get_candidates(Table(source, **COLS), out=False)
+        assert got.rows == WANT, source
+    assert not (tmp_path / "root").exists()
 
 
 def test_parquet_through_pandas_when_polars_is_missing(tmp_path, monkeypatch):

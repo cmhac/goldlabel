@@ -8,6 +8,7 @@ from collections import Counter
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from itertools import islice
 from pathlib import Path
 
 from pydantic_ai import Embedder
@@ -22,6 +23,7 @@ from hunches.search import (
     search_pg_exact,
     search_table,
     search_vectors,
+    table_rows,
 )
 from hunches.settings import resolve
 
@@ -211,32 +213,56 @@ async def embed_seeds(
     return vectors
 
 
+def _items(corpus):
+    """(id, text) of every item in the corpus's own order."""
+    if isinstance(corpus, Table):
+        return ((r["id"], r["text"]) for r in table_rows(corpus))
+    raise NotImplementedError("whole-corpus reads arrive with the Postgres/S3 reader")
+
+
 async def aget_candidates(
     corpus: Table | S3Corpus | PgCorpus,
     *,
-    seeds: Sequence[str],
-    embedder: str | Embedder,
+    seeds: Sequence[str] | None = None,
+    embedder: str | Embedder | None = None,
     floor: float | None = None,
     limit: int | None = None,
     out=None,
     cache=None,
 ) -> Candidates:
-    """Items whose maximum similarity to any seed is at least `floor` (None: 0.60), best first;
-    ties go to the earlier seed.
+    """The corpus's candidate items. With no filter, every item in the corpus's order; with
+    `seeds`, the items whose maximum similarity to any seed is at least `floor` (None: 0.60),
+    best first; ties go to the earlier seed.
 
-    `embedder` is a pydantic-ai model string or an `Embedder`. `limit` keeps the most similar N.
-    `out`: None writes `<settings.root>/candidates.jsonl` (+ `.meta.json`), False writes nothing,
-    a path writes there. `cache`: a directory, None for `<settings.root>/cache`, False for none.
+    `embedder` (a pydantic-ai model string or an `Embedder`), `floor` and `cache` (a directory,
+    None for `<settings.root>/cache`, False for none) belong to `seeds`. `limit` keeps the first
+    N items, or the N most similar. `out`: a path writes the list there (+ `.meta.json`), False
+    writes nothing, None writes `<settings.root>/candidates.jsonl` for seeds only.
     """
     if isinstance(seeds, str):
         raise TypeError(
             "seeds must be a list of strings; use read_seeds(path) for a CSV"
         )
-    seeds = list(seeds)
-    if not seeds:
-        raise ValueError("seeds is empty; give at least one seed phrase")
+    if seeds is None:
+        for name, value in (("embedder", embedder), ("floor", floor), ("cache", cache)):
+            if value is not None:
+                raise ValueError(f"{name} is only used with seeds")
+    else:
+        seeds = list(seeds)
+        if not seeds:
+            raise ValueError("seeds is empty; give at least one seed phrase")
     if limit is not None and limit < 1:
         raise ValueError("limit must be 1 or more")
+    if seeds is None:
+        items = await asyncio.to_thread(lambda: list(islice(_items(corpus), limit)))
+        result = Candidates(
+            [{"id": i, "text": t} for i, t in items], floor=None, source="all"
+        )
+        if out is not None and out is not False:
+            result.write(resolve(out, "candidates.jsonl"))
+        return result
+    if embedder is None:
+        raise ValueError("embedder is required with seeds")
     floor = FLOOR if floor is None else floor
     if isinstance(embedder, str):
         model, embedder = embedder, Embedder(embedder)
@@ -279,8 +305,8 @@ async def aget_candidates(
 def get_candidates(
     corpus: Table | S3Corpus | PgCorpus,
     *,
-    seeds: Sequence[str],
-    embedder: str | Embedder,
+    seeds: Sequence[str] | None = None,
+    embedder: str | Embedder | None = None,
     floor: float | None = None,
     limit: int | None = None,
     out=None,

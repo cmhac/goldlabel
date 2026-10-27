@@ -2,6 +2,7 @@ import importlib
 import json
 import math
 import shutil
+import threading
 from pathlib import Path
 
 import pytest
@@ -589,4 +590,90 @@ def test_limit_and_seeds_are_checked():
 
 def test_seeds_and_embedder_are_keyword_only():
     with pytest.raises(TypeError):
-        get_candidates(local(), ["alpha"], embedder=StubEmbedder(SEEDS))  # ty: ignore[missing-argument, too-many-positional-arguments]
+        get_candidates(local(), ["alpha"], embedder=StubEmbedder(SEEDS))  # ty: ignore[too-many-positional-arguments]
+
+
+# --- no filter: the whole corpus ------------------------------------------------------------------
+
+
+def plain(n=4):
+    return Table(
+        [{"id": f"r{i}", "text": f"text {i}"} for i in range(n)], id_column="id"
+    )
+
+
+def test_no_filter_returns_the_whole_corpus_in_table_order():
+    got = get_candidates(plain(), out=False)
+    assert got.source == "all" and got.floor is None and got.capped is False
+    assert got.rows == [{"id": f"r{i}", "text": f"text {i}"} for i in range(4)]
+    assert repr(got) == "4 candidates (whole corpus)"
+
+
+def test_limit_keeps_the_first_rows_of_the_table():
+    assert [r["id"] for r in get_candidates(plain(), limit=2, out=False).rows] == [
+        "r0",
+        "r1",
+    ]
+
+
+def test_an_empty_corpus_gives_an_empty_result_that_says_so():
+    got = get_candidates(Table([]), out=False)
+    assert got.rows == [] and repr(got) == "0 candidates (whole corpus)"
+
+
+def test_the_same_text_under_two_ids_stays_two_rows():
+    table = Table(
+        [{"id": "a", "text": "same"}, {"id": "b", "text": "same"}], id_column="id"
+    )
+    assert [r["id"] for r in get_candidates(table, out=False).rows] == ["a", "b"]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "word"),
+    [
+        ({"embedder": "x"}, "embedder"),
+        ({"floor": 0.7}, "floor"),
+        ({"cache": False}, "cache"),
+    ],
+)
+def test_seed_only_arguments_are_refused_without_seeds(kwargs, word):
+    with pytest.raises(ValueError, match=word):
+        get_candidates(plain(), out=False, **kwargs)
+
+
+def test_seeds_without_an_embedder_are_refused():
+    with pytest.raises(ValueError, match="embedder"):
+        get_candidates(plain(), seeds=["alpha"], out=False)
+
+
+def test_the_read_runs_off_the_event_loop_thread(monkeypatch):
+    seen = []
+    real = candidates.table_rows
+    monkeypatch.setattr(
+        candidates,
+        "table_rows",
+        lambda *a, **k: seen.append(threading.get_ident()) or real(*a, **k),
+    )
+    get_candidates(plain(), out=False)
+    assert seen and seen[0] != threading.get_ident()
+
+
+async def test_the_sync_form_works_inside_a_running_loop():
+    assert len(get_candidates(plain(), out=False).rows) == 4
+
+
+def test_only_seed_results_write_the_default_file(tmp_path):
+    get_candidates(local(), seeds=["alpha"], embedder=StubEmbedder(SEEDS))
+    path = tmp_path / "root" / "candidates.jsonl"
+    before = (path.read_bytes(), path.with_suffix(".meta.json").read_bytes())
+    get_candidates(plain(), limit=5)
+    assert (path.read_bytes(), path.with_suffix(".meta.json").read_bytes()) == before
+
+
+def test_a_path_writes_the_whole_corpus_list_and_nothing_else_does(tmp_path):
+    get_candidates(plain())
+    assert not (tmp_path / "root").exists()
+    out = tmp_path / "x" / "all.jsonl"
+    got = get_candidates(plain(), out=out)
+    back = Candidates.read(out)
+    assert back.rows == got.rows and back.source == "all"

@@ -280,6 +280,22 @@ def test_items_as_strings_dicts_and_objects_with_rows():
     assert [r["id"] for r in c.classify(holder).rows] == ["p9", "p8"]
 
 
+def test_a_whole_corpus_list_estimates_and_classifies():
+    from hunches.candidates import Candidates
+
+    whole = Candidates(
+        [{"id": "w0", "text": "t0"}, {"id": "w1", "text": "t1"}],
+        floor=None,
+        source="all",
+    )
+    model, calls = scripted(["a"])
+    c = clf(model)
+    est = c.estimate(whole)
+    assert (est.n, est.live) == (2, 2) and calls == []
+    got = c.classify(whole)
+    assert [r["id"] for r in got.rows] == ["w0", "w1"] and len(calls) == 2
+
+
 # --- sync, async, running loop -------------------------------------------------------------------
 
 
