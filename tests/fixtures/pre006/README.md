@@ -14,7 +14,7 @@ Generated at commit `345c4ff63d7e23bc56e690dc8c21b0bd2878fd3a`.
 - `candidates.jsonl`, `candidates.meta.json`: written by `candidates.build_candidates` against `corpus/`.
 - `gold.jsonl`: `files.write_gold`; two dev rows, two test rows, one of them with `labels: []` (the old format's pending-looking row).
 - `results.jsonl`: one row with `run`, one without (a row from before 004).
-- `corpus/`: local backend, 4 items, 3-dimensional `vectors.npy`, `meta.json` with `embedding_model: fake-embed`.
+- `corpus.jsonl`: 4 items with a 3-dimensional `embedding` column (model `fake-embed`). The pre-006 code wrote this as a `corpus/` folder; it was converted to one table file when that corpus kind was removed (007), with the same ids, texts and numbers. Every other file here is unchanged pre-006 output.
 - `expected.json`: the exact `system_prompt`, `cache_key`, `run_digest`, the seed-embedding cache key and vector, and one local search (query `[1, 0.2, 0]`, floor 0.60) with ids and similarities.
 - No `config.toml` (it held a temp path); `tests/test_pre006_fixtures.py` writes one.
 
@@ -24,6 +24,8 @@ Generated at commit `345c4ff63d7e23bc56e690dc8c21b0bd2878fd3a`.
 - Test files at this point (tests/): test_app.py test_assistant_context.py test_assistant_thinking.py test_brief.py test_browse_screen.py test_candidates.py test_chat.py test_classifier.py test_cost.py test_e2e.py test_files.py test_final_screen.py test_gold_orphan_screen.py test_gold_orphans.py test_gold_screen.py test_history.py test_history_screens.py test_isolation.py test_keys.py test_metrics.py test_model_picker.py test_models.py test_new_project.py test_paths.py test_pg_integration.py test_pre006_fixtures.py test_progress.py test_project_settings.py test_projects.py test_rail.py test_redo_plan.py test_run_screen.py test_search.py test_search_pg_check.py test_search_pg_connect.py test_search_pg_exact.py test_search_pg_guards.py test_search_pg_index.py test_search_pg_probes.py test_search_screen.py test_sizes.py test_stale_ui.py test_status.py test_system.py test_system_screen.py test_taxonomy_screen.py test_theme.py test_threshold_screen.py test_tune_screen.py test_versions.py 
 
 ## Generator (one-off, not committed as code; only works on the pre-006 code)
+
+It still writes the old `corpus/` folder; `corpus.jsonl` was converted from that output.
 
 Run from the repo root: `uv run python gen_pre006.py tests/fixtures/pre006`
 

@@ -16,7 +16,6 @@ from hunches import _frame, _html
 from hunches._sync import run
 from hunches.cost import cache_get, cache_key, cache_put, embedding_dollars, record
 from hunches.search import (
-    LocalCorpus,
     PgCorpus,
     S3Corpus,
     Table,
@@ -213,7 +212,7 @@ async def embed_seeds(
 
 
 async def asearch(
-    corpus: Table | LocalCorpus | S3Corpus | PgCorpus,
+    corpus: Table | S3Corpus | PgCorpus,
     seeds: Sequence[str],
     *,
     embedder: str | Embedder,
@@ -271,7 +270,7 @@ async def asearch(
 
 
 def search(
-    corpus: LocalCorpus | S3Corpus | PgCorpus,
+    corpus: Table | S3Corpus | PgCorpus,
     seeds: Sequence[str],
     *,
     embedder: str | Embedder,

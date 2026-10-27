@@ -1,10 +1,9 @@
 import importlib
-import json
 
 import numpy as np
 import pytest
 
-from hunches.search import LocalCorpus, S3Corpus
+from hunches.search import S3Corpus, Table
 
 search = importlib.import_module("hunches.search")  # `hunches.search` is the function
 
@@ -14,42 +13,29 @@ def project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
 
-def local_corpus(tmp_path, model="m"):
+def table():
     # unit vectors at known angles to the query [1, 0]
     vectors = np.array(
         [[1, 0], [0.6, 0.8], [0.5, 0.8660254], [0.59, 0.80752], [0, 1]], np.float32
     )
-    d = tmp_path / "corpus"
-    d.mkdir()
-    np.save(d / "vectors.npy", vectors * 3)  # un-normalised on purpose
-    items = [{"id": f"i{i}", "text": f"t{i}"} for i in range(5)]
-    (d / "items.jsonl").write_text("".join(json.dumps(r) + "\n" for r in items))
-    (d / "meta.json").write_text(json.dumps({"embedding_model": model}))
-    return d
+    rows = [
+        {
+            "id": f"i{i}",
+            "text": f"t{i}",
+            "v": (v * 3).tolist(),
+        }  # un-normalised on purpose
+        for i, v in enumerate(vectors)
+    ]
+    return Table(rows, id_column="id", vector_column="v", embedding_model="m")
 
 
-def test_local_floor_inclusive_and_sorted(tmp_path):
-    corpus = LocalCorpus(local_corpus(tmp_path))
-    hits, capped = search.search_vectors(
-        corpus, [2.0, 0.0], 0.6, embedding_model="m"
-    )  # i1 is exactly 0.6; i3 is 0.59
+def test_table_floor_inclusive_and_sorted():
+    (hits,), capped = search.search_table(table(), [[2.0, 0.0]], 0.6, "m")
+    # i1 is exactly 0.6; i3 is 0.59
     assert not capped
     assert [h[0] for h in hits] == ["i0", "i1"]
     assert hits[0] == ("i0", "t0", pytest.approx(1.0))
     assert hits[1][2] == pytest.approx(0.6, abs=1e-6)
-
-
-def test_local_model_mismatch_refused(tmp_path):
-    corpus = LocalCorpus(local_corpus(tmp_path, model="other"))
-    with pytest.raises(ValueError, match="mismatch"):
-        search.search_vectors(corpus, [1.0, 0.0], 0.6, embedding_model="m")
-
-
-def test_local_row_count_mismatch(tmp_path):
-    d = local_corpus(tmp_path)
-    (d / "items.jsonl").write_text('{"id": "a", "text": "b"}\n')
-    with pytest.raises(ValueError, match="rows"):
-        search.search_vectors(LocalCorpus(d), [1.0, 0.0], 0.6, embedding_model="m")
 
 
 class FakeS3:

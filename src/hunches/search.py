@@ -24,13 +24,6 @@ PG_ROW_OVERHEAD = 128
 MB = 1024 * 1024
 
 
-@dataclass(frozen=True)
-class LocalCorpus:
-    """vectors.npy, items.jsonl and meta.json in `dir`."""
-
-    dir: str | Path
-
-
 @dataclass(frozen=True, eq=False)
 class Table:
     """Items in a table: a `.csv`, `.parquet` or `.jsonl` path, a list of row dicts, or a pandas or
@@ -634,7 +627,7 @@ def _search_pg_index(
 
 
 def search_vectors(
-    corpus: LocalCorpus | S3Corpus | PgCorpus,
+    corpus: S3Corpus | PgCorpus,
     vector: list[float],
     floor: float,
     *,
@@ -643,39 +636,9 @@ def search_vectors(
     """Return ([(id, text, similarity)], capped), best first, all with similarity >= floor.
 
     `capped` is True when the S3 per-query topK limit may have hidden hits above the floor
-    (the highest-scoring hits are returned); show a warning. Local is never capped.
-    `embedding_model` is only checked against a local corpus's meta.json. pgvector `exact`
-    search answers every seed at once: use search_pg_exact.
+    (the highest-scoring hits are returned); show a warning. pgvector `exact` search answers
+    every seed at once: use search_pg_exact; a Table: use search_table.
     """
-    if isinstance(corpus, LocalCorpus):
-        folder = Path(corpus.dir)
-        meta_model = json.loads((folder / "meta.json").read_text())["embedding_model"]
-        if meta_model != embedding_model:
-            raise ValueError(
-                f"embedding model mismatch: corpus uses {meta_model!r}, "
-                f"the embedder is {embedding_model!r}"
-            )
-        vectors = np.load(folder / "vectors.npy").astype(np.float32)
-        items = [
-            json.loads(line)
-            for line in (folder / "items.jsonl").read_text().splitlines()
-            if line.strip()
-        ]
-        if len(items) != len(vectors):
-            raise ValueError(
-                f"items.jsonl has {len(items)} rows but vectors.npy has {len(vectors)}"
-            )
-        query = np.asarray(vector, dtype=np.float32)
-        norms = np.linalg.norm(vectors, axis=1)
-        norms[norms == 0] = 1
-        sims = (vectors / norms[:, None]) @ (query / np.linalg.norm(query))
-        order = np.argsort(-sims)
-        return [
-            (items[i]["id"], items[i]["text"], float(sims[i]))
-            for i in order
-            if sims[i] >= floor
-        ], False
-
     if isinstance(corpus, PgCorpus):
         if corpus.search != "index":
             raise RuntimeError(

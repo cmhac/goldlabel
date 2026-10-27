@@ -6,7 +6,6 @@ import tomllib
 from pathlib import Path
 
 PUBLIC = [
-    "LocalCorpus",
     "S3Corpus",
     "PgCorpus",
     "Table",

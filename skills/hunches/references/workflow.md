@@ -21,7 +21,7 @@ import hunches as hn
 # one of:
 corpus = hn.PgCorpus(url_env="HUNCHES_PG_URL", table="posts", text_column="body")
 # corpus = hn.S3Corpus(bucket="my-vectors", index="posts", region="us-east-1")
-# corpus = hn.LocalCorpus("corpus/")  # vectors.npy, items.jsonl, meta.json
+# corpus = hn.Table("posts.parquet", text_column="body", vector_column="embedding", embedding_model="openai:text-embedding-3-small")
 
 seeds = hn.read_seeds("seeds.csv")  # or a plain list[str]
 candidates = hn.search(corpus, seeds, embedder="openai:text-embedding-3-small")

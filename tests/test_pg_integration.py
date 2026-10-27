@@ -8,7 +8,6 @@ or are written by hand, never from the code under test.
 """
 
 import importlib
-import json
 import os
 import threading
 import time
@@ -22,7 +21,7 @@ from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
 from pydantic_ai.usage import RequestUsage
 
 from hunches import candidates
-from hunches.search import LocalCorpus, PgCorpus
+from hunches.search import PgCorpus, Table
 
 search = importlib.import_module("hunches.search")  # `hunches.search` is the function
 
@@ -99,12 +98,9 @@ def project(tmp_path, monkeypatch):
     last: list = []
 
     def use(**fields) -> Any:
-        """The corpus: a PgCorpus (pg_* fields, minus the prefix) or a LocalCorpus."""
-        if fields.get("backend") == "local":
-            last[:] = [LocalCorpus(fields["corpus_dir"])]
-        else:
-            names = {k.removeprefix("pg_"): v for k, v in fields.items()}
-            last[:] = [PgCorpus(**names)]
+        """The PgCorpus (pg_* fields, minus the prefix)."""
+        names = {k.removeprefix("pg_"): v for k, v in fields.items()}
+        last[:] = [PgCorpus(**names)]
         return last[0]
 
     use.last = last  # ty: ignore[unresolved-attribute]
@@ -199,14 +195,12 @@ def make_table(
     return [str(i) for i in ids]
 
 
-def local_corpus(tmp_path, ids, vectors):
-    folder = tmp_path / "corpus"
-    folder.mkdir(exist_ok=True)
-    np.save(folder / "vectors.npy", vectors)
-    rows = [{"id": i, "text": f"text of {i}"} for i in ids]
-    (folder / "items.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-    (folder / "meta.json").write_text(json.dumps({"embedding_model": "m"}))
-    return folder
+def local_corpus(ids, vectors):
+    rows = [
+        {"id": i, "text": f"text of {i}", "v": [float(x) for x in v]}
+        for i, v in zip(ids, vectors)
+    ]
+    return Table(rows, id_column="id", vector_column="v", embedding_model="m")
 
 
 class VectorEmbedder(Embedder):
@@ -251,12 +245,8 @@ def assert_same(got, want, tol=1e-5, boundary=None):
         ), i
 
 
-async def compare(
-    tmp_path, project, monkeypatch, schema, table, ids, vectors, seeds, **kw
-):
-    folder = local_corpus(tmp_path, ids, vectors)
-    local = project(backend="local", corpus_dir=str(folder))
-    want = await run_candidates(monkeypatch, seeds, local)
+async def compare(project, monkeypatch, schema, table, ids, vectors, seeds, **kw):
+    want = await run_candidates(monkeypatch, seeds, local_corpus(ids, vectors))
     pg = project(pg_table=f"{schema}.{table}", pg_search="exact")
     got = await run_candidates(monkeypatch, seeds, pg)
     assert len(want) > 20
@@ -267,12 +257,10 @@ async def compare(
 
 
 @pytest.mark.parametrize("index", [None, "hnsw"], ids=["no-index", "hnsw"])
-async def test_exact_equals_numpy(admin, schema, project, tmp_path, monkeypatch, index):
+async def test_exact_equals_numpy(admin, schema, project, monkeypatch, index):
     vectors, seeds = corpus()
     ids = make_table(admin, schema, "docs", vectors, index=index)
-    got = await compare(
-        tmp_path, project, monkeypatch, schema, "docs", ids, vectors, seeds
-    )
+    got = await compare(project, monkeypatch, schema, "docs", ids, vectors, seeds)
     # the tie: rows 5 and 299 share one vector, hence one similarity and one best seed
     a, b = got[ids[5]], got[ids[299]]
     assert a["max_similarity"] == b["max_similarity"]
@@ -322,12 +310,11 @@ async def test_exact_reads_the_table_once_and_uses_no_ann_index(
     assert not [n for n in nodes if "Index" in n["Node Type"]]
 
 
-async def test_halfvec(admin, schema, project, tmp_path, monkeypatch):
+async def test_halfvec(admin, schema, project, monkeypatch):
     vectors, seeds = corpus()
     ids = make_table(admin, schema, "docs", vectors, vtype="halfvec", index="hnsw")
     # half precision: similarities within 3e-3, a row near the floor may fall either side
     await compare(
-        tmp_path,
         project,
         monkeypatch,
         schema,
@@ -341,38 +328,34 @@ async def test_halfvec(admin, schema, project, tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("idtype", ["bigint", "uuid"])
-async def test_integer_and_uuid_ids(
-    admin, schema, project, tmp_path, monkeypatch, idtype
-):
+async def test_integer_and_uuid_ids(admin, schema, project, monkeypatch, idtype):
     vectors, seeds = corpus()
     ids = make_table(admin, schema, "docs", vectors, idtype=idtype)
-    await compare(tmp_path, project, monkeypatch, schema, "docs", ids, vectors, seeds)
+    await compare(project, monkeypatch, schema, "docs", ids, vectors, seeds)
 
 
-async def test_partitioned_table(admin, schema, project, tmp_path, monkeypatch):
+async def test_partitioned_table(admin, schema, project, monkeypatch):
     vectors, seeds = corpus()
     ids = make_table(admin, schema, "docs", vectors, partitioned=True)
-    await compare(tmp_path, project, monkeypatch, schema, "docs", ids, vectors, seeds)
+    await compare(project, monkeypatch, schema, "docs", ids, vectors, seeds)
     report = pg_check(project)
     assert report["errors"] == {}
     assert (report["type"], report["dimension"]) == ("vector", D)
 
 
-async def test_view(admin, schema, project, tmp_path, monkeypatch):
+async def test_view(admin, schema, project, monkeypatch):
     vectors, seeds = corpus()
     ids = make_table(admin, schema, "base", vectors)
     admin.execute(
         f"CREATE VIEW {schema}.docs AS SELECT id, text, embedding FROM {schema}.base"
     )
-    await compare(tmp_path, project, monkeypatch, schema, "docs", ids, vectors, seeds)
+    await compare(project, monkeypatch, schema, "docs", ids, vectors, seeds)
     report = pg_check(project)
     assert report["errors"] == {}
     assert report["sample"] is not None
 
 
-async def test_extension_in_a_non_default_schema(
-    scratch_db, project, tmp_path, monkeypatch
-):
+async def test_extension_in_a_non_default_schema(scratch_db, project, monkeypatch):
     _, conninfo = scratch_db
     monkeypatch.setenv("HUNCHES_PG_URL", conninfo)
     vectors, seeds = corpus()
@@ -384,7 +367,7 @@ async def test_extension_in_a_non_default_schema(
         make_table(db, "hn", "docs", vectors, ext="extensions.")
         assert db.execute("SHOW search_path").fetchone()[0] == '"$user", public'
         ids = [r[0] for r in db.execute("SELECT id FROM hn.docs ORDER BY id")]
-    await compare(tmp_path, project, monkeypatch, "hn", "docs", ids, vectors, seeds)
+    await compare(project, monkeypatch, "hn", "docs", ids, vectors, seeds)
     report = pg_check(project)
     assert report["schema"] == "extensions"
 

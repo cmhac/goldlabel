@@ -22,7 +22,7 @@ from hunches.evaluation import (
     evaluate,
 )
 from hunches.gold import Gold, GoldSet
-from hunches.search import LocalCorpus, PgCorpus, S3Corpus, Table
+from hunches.search import PgCorpus, S3Corpus, Table
 from hunches.settings import settings
 from hunches.taxonomy import Taxonomy
 
@@ -45,7 +45,6 @@ __all__ = [
     "Gold",
     "GoldError",
     "GoldSet",
-    "LocalCorpus",
     "PgCorpus",
     "Predictions",
     "S3Corpus",

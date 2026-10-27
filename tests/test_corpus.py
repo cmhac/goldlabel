@@ -2,7 +2,7 @@ import dataclasses
 
 import pytest
 
-from hunches.search import LocalCorpus, PgCorpus, S3Corpus
+from hunches.search import PgCorpus, S3Corpus
 
 
 def test_pg_defaults_are_the_old_pg_defaults():
@@ -16,10 +16,9 @@ def test_pg_defaults_are_the_old_pg_defaults():
     assert c.max_result_mb == 512
 
 
-def test_s3_and_local_fields():
+def test_s3_fields():
     assert S3Corpus("b", "i").region is None
     assert S3Corpus("b", "i", region="eu-west-1").region == "eu-west-1"
-    assert LocalCorpus("some/dir").dir == "some/dir"
 
 
 @pytest.mark.parametrize(
@@ -52,9 +51,7 @@ def test_the_error_names_the_field():
         PgCorpus("t", search="fast")
 
 
-@pytest.mark.parametrize(
-    "corpus", [LocalCorpus("d"), S3Corpus("b", "i"), PgCorpus("t")]
-)
+@pytest.mark.parametrize("corpus", [S3Corpus("b", "i"), PgCorpus("t")])
 def test_frozen(corpus):
     field = dataclasses.fields(corpus)[0].name
     with pytest.raises(dataclasses.FrozenInstanceError):
@@ -65,7 +62,6 @@ def test_frozen(corpus):
 
 def test_only_pgvector_has_a_check():
     assert hasattr(PgCorpus("t"), "check")
-    assert not hasattr(LocalCorpus("d"), "check")
     assert not hasattr(S3Corpus("b", "i"), "check")
 
 

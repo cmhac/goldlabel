@@ -56,6 +56,23 @@ def test_readme_python_blocks_use_public_names_only():
     assert any(".to_polars()" in b for b in blocks)
 
 
+REMOVED = ("LocalCorpus", "vectors.npy", "items.jsonl")
+
+
+def test_no_doc_mentions_the_removed_corpus_or_its_folder_layout():
+    files = [
+        README,
+        INSTRUCTIONS,
+        ROOT / "AGENTS.md",
+        ROOT / ".kiro/steering/hunches.md",
+    ]
+    files += (ROOT / "skills" / "hunches").rglob("*.md")
+    files += [SAMPLE / "README.md", PY, IPYNB]
+    for path in files:
+        for word in REMOVED:
+            assert word not in path.read_text(), f"{path.name} still says {word}"
+
+
 def test_readme_tables_use_polars_and_mention_pandas():
     text = README.read_text()
     assert "to_pandas()" in text

@@ -280,3 +280,9 @@ def test_claude_plugin_validate():
         check=False,
     )
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_the_skill_and_its_references_never_mention_the_removed_corpus():
+    for path in [SKILL, *(SKILL_DIR / "references" / r for r in REFS)]:
+        for word in ("LocalCorpus", "vectors.npy", "items.jsonl"):
+            assert word not in path.read_text(), f"{path.name} still says {word}"

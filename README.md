@@ -35,7 +35,7 @@ import hunches as hn
 
 corpus = hn.PgCorpus(
     table="posts", text_column="body"
-)  # or hn.S3Corpus(...), hn.LocalCorpus("corpus")
+)  # or hn.S3Corpus(...), hn.Table("posts.parquet", ...)
 seeds = hn.read_seeds("seeds.csv")  # or a plain list of strings
 candidates = hn.search(corpus, seeds, embedder="openai:text-embedding-3-small")
 candidates  # count, similarity bands, a warning if the backend capped the results

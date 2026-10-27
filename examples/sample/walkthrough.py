@@ -1,7 +1,7 @@
 # %% [markdown]
 # # hunches walkthrough
 #
-# Eight short posts with hand-built 2-D vectors live in `corpus/`. Every cell below is one step of
+# Eight short posts with hand-built 2-D vectors live in `corpus.jsonl`. Every cell below is one step of
 # the analysis; run them in order, in Jupyter, marimo, or as a plain script (`# %%` marks the cells).
 #
 # What needs you: a classifier model and its key (`ANTHROPIC_API_KEY` in the environment; nothing
@@ -44,7 +44,12 @@ class HandEmbedder(Embedder):
 # and keeps each item's best similarity. The result is saved to `.hunches/candidates.jsonl`.
 
 # %%
-corpus = hn.LocalCorpus("corpus")
+corpus = hn.Table(
+    "corpus.jsonl",
+    id_column="id",
+    vector_column="embedding",
+    embedding_model="hand-built-2d",
+)
 seeds = ["I just lost my job"]
 candidates = hn.search(corpus, seeds, embedder=HandEmbedder())
 candidates

@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from hunches.search import LocalCorpus, PgCorpus, S3Corpus
+from hunches.search import PgCorpus, S3Corpus
 
 search = importlib.import_module("hunches.search")  # `hunches.search` is the function
 
@@ -198,7 +198,6 @@ def test_is_approximate():
     assert not search.is_approximate(PgCorpus("t", search="exact"))
     assert not search.is_approximate(PgCorpus("t"))
     assert not search.is_approximate(S3Corpus("b", "i"))
-    assert not search.is_approximate(LocalCorpus("d"))
 
 
 def test_two_tables_reads_the_text_in_a_second_query(monkeypatch):
