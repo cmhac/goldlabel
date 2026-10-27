@@ -24,6 +24,7 @@ from hunches.search import (
     PgCorpus,
     S3Corpus,
     Table,
+    check_table_for_seeds,
     pg_items,
     s3_items,
     search_pg_exact,
@@ -400,6 +401,8 @@ async def aget_candidates(
         model, embedder = embedder, Embedder(embedder)
     else:
         model = _model_name(embedder)
+    if isinstance(corpus, Table):
+        check_table_for_seeds(corpus, model)  # before the embedding calls cost anything
     vectors = await embed_seeds(seeds, embedder, model, cache)
     if isinstance(corpus, Table):
         per_seed, capped = await asyncio.to_thread(

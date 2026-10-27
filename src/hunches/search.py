@@ -122,11 +122,9 @@ def table_rows(table: Table, with_vectors: bool = False) -> list[dict]:
     return out
 
 
-def search_table(
-    table: Table, vectors, floor: float, embedding_model: str
-) -> tuple[list[list[tuple[str, str, float]]], bool]:
-    """One pass over the table for every seed: ([(id, text, similarity) per seed], False), best
-    first, all with similarity >= floor. Never capped."""
+def check_table_for_seeds(table: Table, embedding_model: str) -> None:
+    """Refuse a table that cannot answer a seed search. Cheap, so callers run it before they
+    spend money embedding the seeds."""
     if table.vector_column is None:
         raise ValueError(
             "the table has no embedding column; seed search needs Table(vector_column=...) "
@@ -141,6 +139,14 @@ def search_table(
             f"embedding model mismatch: table uses {table.embedding_model!r}, "
             f"the embedder is {embedding_model!r}"
         )
+
+
+def search_table(
+    table: Table, vectors, floor: float, embedding_model: str
+) -> tuple[list[list[tuple[str, str, float]]], bool]:
+    """One pass over the table for every seed: ([(id, text, similarity) per seed], False), best
+    first, all with similarity >= floor. Never capped."""
+    check_table_for_seeds(table, embedding_model)
     rows = table_rows(table, with_vectors=True)
     if not rows:
         return [[] for _ in vectors], False

@@ -813,3 +813,12 @@ def test_keyword_lists_are_written_only_to_a_path(tmp_path):
     got = get_candidates(Table(KW, id_column="id"), keywords=["ballot"], out=out)
     back = Candidates.read(out)
     assert back.source == "keywords" and back.rows == got.rows
+
+
+def test_a_table_that_cannot_answer_seeds_is_refused_before_any_embedding():
+    emb = StubEmbedder(SEEDS)
+    with pytest.raises(ValueError, match="no embedding column"):
+        get_candidates(plain(), seeds=["alpha"], embedder=emb, out=False)
+    with pytest.raises(ValueError, match="mismatch"):
+        get_candidates(local(model="other"), seeds=["alpha"], embedder=emb, out=False)
+    assert emb.calls == []
