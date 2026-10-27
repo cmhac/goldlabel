@@ -566,11 +566,18 @@ def search_pg_exact(
         conn.close()
 
 
-def pg_items(corpus: PgCorpus, guard: bool = False, limit: int | None = None):
+def pg_items(
+    corpus: PgCorpus,
+    guard: bool = False,
+    limit: int | None = None,
+    match: tuple[list[str], bool] | None = None,
+):
     """Yield (id, text) of every item in ascending id order, never touching the vectors.
 
     `guard`: the caller keeps everything it reads, so refuse up front from the planner statistics
     (rows, or `limit` if smaller) and abort while streaming past corpus.max_result_mb (0 = none).
+    `match` = (terms, regex): only rows whose text matches any term, filtered by the database
+    (ILIKE for plain terms, `~` for regex strings); the terms are bound parameters only.
     Close the generator to close the connection."""
     limit_mb = corpus.max_result_mb
     hint = "Use a keyword filter, a limit, or raise the limit"
@@ -594,27 +601,45 @@ def pg_items(corpus: PgCorpus, guard: bool = False, limit: int | None = None):
                         limit_mb,
                         hint,
                     )
-        if corpus.text_table:
+        names: dict[str, Any] = {
+            "id": sql.Identifier(corpus.id_column),
+            "text": sql.Identifier(corpus.text_column),
+            "table": table,
+            "text_table": sql.Identifier(*text_table.split(".", 1)),
+            "text_id": sql.Identifier(text_id),
+        }
+        params = None
+        if match:
+            terms, is_regex = match
+            names["op"] = sql.SQL("~" if is_regex else "ILIKE")
+            # LIKE's default escape character is the backslash
+            params = (
+                terms
+                if is_regex
+                else ["%" + re.sub(r"([\\%_])", r"\\\1", t) + "%" for t in terms],
+            )
+        if corpus.text_table and match:
             query = sql.SQL(
-                "SELECT t.{id}, x.{text} FROM {table} t "
-                "LEFT JOIN {text_table} x ON x.{text_id} = t.{id} ORDER BY t.{id}"
-            ).format(
-                id=sql.Identifier(corpus.id_column),
-                text=sql.Identifier(corpus.text_column),
-                table=table,
-                text_table=sql.Identifier(*text_table.split(".", 1)),
-                text_id=sql.Identifier(text_id),
+                "SELECT t.{id}, x.{text} FROM {table} t JOIN {text_table} x "
+                "ON x.{text_id} = t.{id} WHERE x.{text} {op} ANY(%s::text[]) ORDER BY t.{id}"
+            )
+        elif corpus.text_table:
+            query = sql.SQL(
+                "SELECT t.{id}, x.{text} FROM {table} t LEFT JOIN {text_table} x "
+                "ON x.{text_id} = t.{id} ORDER BY t.{id}"
+            )
+        elif match:
+            query = sql.SQL(
+                "SELECT {id}, {text} FROM {table} WHERE {text} {op} ANY(%s::text[]) "
+                "ORDER BY {id}"
             )
         else:
-            query = sql.SQL("SELECT {id}, {text} FROM {table} ORDER BY {id}").format(
-                id=sql.Identifier(corpus.id_column),
-                text=sql.Identifier(corpus.text_column),
-                table=table,
-            )
+            query = sql.SQL("SELECT {id}, {text} FROM {table} ORDER BY {id}")
+        query = query.format(**names)
         received = rows_in = 0
         with conn.cursor(name="hunches_items") as cur:
             cur.itersize = PG_BATCH
-            cur.execute(query)
+            cur.execute(query, params)
             for id_, text in cur:
                 if text is None:
                     raise RuntimeError(f"no text row for id {str(id_)!r}")
@@ -629,7 +654,10 @@ def pg_items(corpus: PgCorpus, guard: bool = False, limit: int | None = None):
                     )
                 yield str(id_), text
     except Exception as e:  # noqa: BLE001  the driver's own classes are not imported here
-        raise RuntimeError(pg_message(e, corpus)) from None
+        message = pg_message(e, corpus)
+        if match and match[1]:
+            message += f"\nServer-side regular expressions use Postgres syntax; the terms were {match[0]!r}."
+        raise RuntimeError(message) from None
     finally:
         conn.close()
 

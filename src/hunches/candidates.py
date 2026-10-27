@@ -6,6 +6,7 @@ import io
 import json
 import random
 import re
+import warnings
 from collections import Counter
 from collections.abc import Collection, Sequence
 from contextlib import closing
@@ -218,16 +219,18 @@ async def embed_seeds(
     return vectors
 
 
-def _items(corpus, guard: bool = False, limit: int | None = None):
+def _items(corpus, guard: bool = False, limit: int | None = None, match=None):
     """(id, text) of every item in the corpus's own order, as a generator to close."""
     if isinstance(corpus, Table):
         return ((r["id"], r["text"]) for r in table_rows(corpus))
     if isinstance(corpus, PgCorpus):
-        return pg_items(corpus, guard, limit)
+        return pg_items(corpus, guard, limit, match)
     return s3_items(corpus)
 
 
-def _compile(keywords, regex: bool) -> list[re.Pattern]:
+def _compile(keywords, regex: bool, uncompiled: list | None = None) -> list[re.Pattern]:
+    """Terms as patterns. With `uncompiled`, a string Python cannot compile is added to it and
+    skipped instead of raising (server-side regexes are in the database's syntax)."""
     patterns = []
     for term in keywords:
         if isinstance(term, re.Pattern):
@@ -242,7 +245,12 @@ def _compile(keywords, regex: bool) -> list[re.Pattern]:
                     else re.compile(re.escape(term), re.IGNORECASE)
                 )
             except re.error as e:
-                raise re.error(f"invalid regular expression {term!r}: {e}") from None
+                if uncompiled is None:
+                    raise re.error(
+                        f"invalid regular expression {term!r}: {e}"
+                    ) from None
+                uncompiled.append(term)
+                continue
         else:
             raise TypeError(
                 f"keywords must be strings or compiled patterns, not {type(term).__name__}"
@@ -257,14 +265,17 @@ def _compile(keywords, regex: bool) -> list[re.Pattern]:
     return patterns
 
 
-def _rank(items, patterns: list[re.Pattern], limit: int | None) -> list[dict]:
+def _rank(
+    items, patterns: list[re.Pattern], limit: int | None, keep_zero: bool = False
+) -> list[dict]:
     """Items matching any pattern, best first: distinct patterns matched, then total matches, then
-    corpus order. With a limit only that many are held at a time."""
+    corpus order. With a limit only that many are held at a time. `keep_zero` also keeps items
+    that match none (the database said they match), last."""
 
     def hits():
         for index, (id, text) in enumerate(items):
             counts = [sum(1 for _ in p.finditer(text)) for p in patterns]
-            if terms := sum(c > 0 for c in counts):
+            if (terms := sum(c > 0 for c in counts)) or keep_zero:
                 yield -terms, -sum(counts), index, id, text
 
     ranked = heapq.nsmallest(limit, hits()) if limit else sorted(hits())
@@ -272,6 +283,24 @@ def _rank(items, patterns: list[re.Pattern], limit: int | None) -> list[dict]:
         {"id": id, "text": text, "terms_matched": -t, "matches": -m}
         for t, m, _, id, text in ranked
     ]
+
+
+def _warn_if_recount_differs(rows: list[dict], uncompiled: list[str]) -> None:
+    zero = sum(r["terms_matched"] == 0 for r in rows)
+    notes = []
+    if uncompiled:
+        notes.append(
+            f"Python could not compile {uncompiled!r}, so they are not counted"
+        )
+    if zero:
+        notes.append(
+            f"{zero} returned row{'s' * (zero > 1)} matched on the server but not in Python "
+            "(case folding or regular-expression syntax differ) and rank last"
+        )
+    if notes:
+        warnings.warn(
+            "server-side ranking is approximate: " + "; ".join(notes), stacklevel=3
+        )
 
 
 async def aget_candidates(
@@ -282,6 +311,7 @@ async def aget_candidates(
     floor: float | None = None,
     keywords: Sequence[str | re.Pattern] | None = None,
     regex: bool = False,
+    server_side: bool = False,
     limit: int | None = None,
     out=None,
     cache=None,
@@ -293,6 +323,8 @@ async def aget_candidates(
     `keywords`: the items containing any term, best first (distinct terms matched, then total
     matches, then corpus order). A term is a plain string (literal, case-insensitive) or a
     compiled `re.Pattern` that keeps its own flags; `regex=True` makes strings patterns, as written.
+    `server_side=True` (a PgCorpus only) lets the database do the matching: plain terms with ILIKE,
+    regex strings with `~` in Postgres syntax (so no compiled patterns); ranking stays here.
 
     `embedder` (a pydantic-ai model string or an `Embedder`), `floor` and `cache` (a directory,
     None for `<settings.root>/cache`, False for none) belong to `seeds`. `limit` keeps the first N
@@ -313,8 +345,20 @@ async def aget_candidates(
         raise ValueError("give seeds or keywords, not both: one filter per call")
     if keywords is not None and not keywords:
         raise ValueError("keywords is empty; give at least one term")
-    if keywords is None and regex:
-        raise ValueError("regex is only used with keywords")
+    if keywords is None and (regex or server_side):
+        raise ValueError(
+            f"{'regex' if regex else 'server_side'} is only used with keywords"
+        )
+    if server_side and not isinstance(corpus, PgCorpus):
+        raise ValueError(
+            "server_side needs a PgCorpus: only Postgres can filter on the server"
+        )
+    for term in keywords or () if server_side else ():
+        if isinstance(term, re.Pattern):
+            raise ValueError(  # noqa: TRY004  an argument rule, a ValueError like the others
+                f"server_side cannot use the compiled pattern {term.pattern!r}: server-side "
+                "regular expressions are strings with regex=True, in Postgres syntax"
+            )
     if seeds is None:
         for name, value in (("embedder", embedder), ("floor", floor), ("cache", cache)):
             if value is not None:
@@ -326,18 +370,25 @@ async def aget_candidates(
     if limit is not None and limit < 1:
         raise ValueError("limit must be 1 or more")
     if seeds is None:
-        patterns = _compile(keywords, regex) if keywords is not None else None
+        uncompiled: list[str] = []
+        patterns = (
+            _compile(keywords, regex, uncompiled if server_side else None)
+            if keywords is not None
+            else None
+        )
+        match = (list(keywords), regex) if server_side and keywords else None
 
         def read():
-            with closing(_items(corpus, patterns is None, limit)) as items:
+            with closing(_items(corpus, patterns is None, limit, match)) as items:
                 if patterns is None:
                     return [{"id": i, "text": t} for i, t in islice(items, limit)]
-                return _rank(items, patterns, limit)
+                return _rank(items, patterns, limit, keep_zero=server_side)
 
+        rows = await asyncio.to_thread(read)
+        if server_side:
+            _warn_if_recount_differs(rows, uncompiled)
         result = Candidates(
-            await asyncio.to_thread(read),
-            floor=None,
-            source="all" if patterns is None else "keywords",
+            rows, floor=None, source="all" if patterns is None else "keywords"
         )
         if out is not None and out is not False:
             result.write(resolve(out, "candidates.jsonl"))
@@ -391,6 +442,7 @@ def get_candidates(
     floor: float | None = None,
     keywords: Sequence[str | re.Pattern] | None = None,
     regex: bool = False,
+    server_side: bool = False,
     limit: int | None = None,
     out=None,
     cache=None,
@@ -404,6 +456,7 @@ def get_candidates(
             floor=floor,
             keywords=keywords,
             regex=regex,
+            server_side=server_side,
             limit=limit,
             out=out,
             cache=cache,

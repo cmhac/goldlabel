@@ -1,4 +1,6 @@
 import importlib
+import re
+import warnings
 from typing import Any
 
 import pytest
@@ -7,7 +9,7 @@ from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
 from pydantic_ai.usage import RequestUsage
 
 from hunches.candidates import get_candidates
-from hunches.search import PgCorpus
+from hunches.search import PgCorpus, S3Corpus, Table
 from hunches.settings import settings
 
 search = importlib.import_module("hunches.search")  # for the pg_connect patch
@@ -234,3 +236,153 @@ def test_errors_are_scrubbed_of_the_url(monkeypatch):
     with pytest.raises(RuntimeError) as e:
         get_candidates(setup(monkeypatch, conn), out=False)
     assert "hunter2" not in str(e.value) and "***" in str(e.value)
+
+
+# --- server-side filtering -------------------------------------------------------------------------
+
+NEEDLE_ROWS = [
+    ("i4", "a needle here"),
+    ("i11", "needle and Needle"),
+    ("i20", "NEEDLE hay needle"),
+]
+
+
+def served(monkeypatch, answer, **fields):
+    conn = Conn(answer)
+    return conn, setup(monkeypatch, conn, **fields)
+
+
+def test_plain_terms_become_one_ilike_statement(monkeypatch):
+    conn, corpus = served(monkeypatch, NEEDLE_ROWS)
+    get_candidates(corpus, keywords=["needle", "hay"], server_side=True, out=False)
+    assert len(conn.executed) == 1
+    sql, params, name, itersize = conn.executed[0]
+    assert sql == (
+        'SELECT "id", "text" FROM "public"."docs" '
+        'WHERE "text" ILIKE ANY(%s::text[]) ORDER BY "id"'
+    )
+    assert params == (["%needle%", "%hay%"],)
+    assert name is not None and itersize == search.PG_BATCH
+
+
+def test_regex_strings_are_sent_unchanged_with_the_regex_operator(monkeypatch):
+    conn, corpus = served(monkeypatch, NEEDLE_ROWS)
+    get_candidates(
+        corpus, keywords=["ne+dle", "(?i)HAY"], regex=True, server_side=True, out=False
+    )
+    sql, params, *_ = conn.executed[0]
+    assert sql == (
+        'SELECT "id", "text" FROM "public"."docs" '
+        'WHERE "text" ~ ANY(%s::text[]) ORDER BY "id"'
+    )
+    assert params == (["ne+dle", "(?i)HAY"],)
+
+
+def test_two_tables_filter_the_joined_text(monkeypatch):
+    conn, corpus = served(
+        monkeypatch, NEEDLE_ROWS, text_table="public.texts", text_id_column="doc_id"
+    )
+    get_candidates(corpus, keywords=["needle"], server_side=True, out=False)
+    assert conn.executed[0][0] == (
+        'SELECT t."id", x."text" FROM "public"."docs" t '
+        'JOIN "public"."texts" x ON x."doc_id" = t."id" '
+        'WHERE x."text" ILIKE ANY(%s::text[]) ORDER BY t."id"'
+    )
+
+
+def test_like_wildcards_and_the_backslash_in_a_term_are_escaped(monkeypatch):
+    conn, corpus = served(monkeypatch, [])
+    get_candidates(corpus, keywords=["a%b_c\\d"], server_side=True, out=False)
+    assert conn.executed[0][1] == (["%a\\%b\\_c\\\\d%"],)  # %a\%b\_c\\d%
+
+
+def test_no_term_text_ever_reaches_the_statement(monkeypatch):
+    evil = "'; DROP TABLE docs; --"
+    for regex in (False, True):
+        conn, corpus = served(monkeypatch, [])
+        get_candidates(
+            corpus, keywords=[evil], regex=regex, server_side=True, out=False
+        )
+        sql, params, *_ = conn.executed[0]
+        assert "DROP" not in sql and "--" not in sql
+        assert any(evil in p for p in params[0])
+
+
+@pytest.mark.parametrize(
+    ("make", "message"),
+    [
+        (lambda: {"server_side": True}, "server_side.*keywords"),
+        (
+            lambda: {"keywords": [re.compile("a")], "server_side": True},
+            r"re\.compile\('a'\)|'a'.*regex=True",
+        ),
+    ],
+)
+def test_server_side_refusals_happen_before_any_connection(monkeypatch, make, message):
+    def no_connection(corpus):
+        raise AssertionError("must not connect")
+
+    monkeypatch.setattr(search, "pg_connect", no_connection)
+    with pytest.raises(ValueError, match=message):
+        get_candidates(PgCorpus("t"), out=False, **make())
+
+
+@pytest.mark.parametrize("corpus", [Table([{"text": "x"}]), S3Corpus("b", "i")])
+def test_only_a_postgres_corpus_can_filter_on_the_server(corpus):
+    with pytest.raises(ValueError, match="PgCorpus"):
+        get_candidates(corpus, keywords=["x"], server_side=True, out=False)
+
+
+def test_a_server_answer_is_ranked_and_limited_like_the_python_side(monkeypatch):
+    _, corpus = served(monkeypatch, NEEDLE_ROWS)
+    got = get_candidates(corpus, keywords=["needle"], server_side=True, out=False)
+    assert [(r["id"], r["terms_matched"], r["matches"]) for r in got.rows] == [
+        ("i11", 1, 2),
+        ("i20", 1, 2),
+        ("i4", 1, 1),
+    ]
+    _, corpus = served(monkeypatch, NEEDLE_ROWS)
+    limited = get_candidates(
+        corpus, keywords=["needle"], server_side=True, limit=2, out=False
+    )
+    assert [r["id"] for r in limited.rows] == ["i11", "i20"]
+
+
+def test_a_row_python_counts_as_zero_is_kept_last_with_one_warning(monkeypatch):
+    _, corpus = served(monkeypatch, [("z", "unrelated"), ("a", "needle")])
+    with pytest.warns(UserWarning, match="1 returned row") as caught:
+        got = get_candidates(corpus, keywords=["needle"], server_side=True, out=False)
+    assert len(caught) == 1
+    assert [(r["id"], r["terms_matched"]) for r in got.rows] == [("a", 1), ("z", 0)]
+
+
+def test_no_warning_when_python_agrees_with_the_server(monkeypatch):
+    _, corpus = served(monkeypatch, NEEDLE_ROWS)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        get_candidates(corpus, keywords=["needle"], server_side=True, out=False)
+
+
+def test_a_regex_python_cannot_compile_is_sent_and_named_in_the_warning(monkeypatch):
+    conn, corpus = served(monkeypatch, [("a", "x{1,2}")])
+    with pytest.warns(UserWarning, match=r"'\(\?<name>x'"):
+        got = get_candidates(
+            corpus, keywords=["(?<name>x"], regex=True, server_side=True, out=False
+        )
+    assert conn.executed[0][1] == (
+        ["(?<name>x"],
+    )  # the server was asked, Python was not
+    assert got.rows[0]["terms_matched"] == 0
+
+
+def test_a_server_regex_error_names_the_terms(monkeypatch):
+    conn = Conn(Exception("invalid regular expression: parentheses () not balanced"))
+    corpus = setup(monkeypatch, conn)
+    with pytest.raises(RuntimeError, match=r"(?s)not balanced.*terms were \['\('\]"):
+        get_candidates(corpus, keywords=["("], regex=True, server_side=True, out=False)
+
+
+def test_server_side_runs_only_select(monkeypatch):
+    conn, corpus = served(monkeypatch, NEEDLE_ROWS)
+    get_candidates(corpus, keywords=["needle"], server_side=True, out=False)
+    assert all(e[0].lstrip().upper().startswith("SELECT") for e in conn.executed)
