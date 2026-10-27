@@ -25,9 +25,8 @@ Python 3.12 or newer. Tables in the examples are polars (`pip install polars`); 
 
 ## The whole chain
 
-Run it cell by cell in a notebook. [`examples/sample/walkthrough.ipynb`](examples/sample/walkthrough.ipynb)
-(and the same cells as a script, `walkthrough.py`) does exactly this over a tiny corpus that ships with the
-repository.
+Run it cell by cell in a notebook. [`e2e/walkthrough/walkthrough.ipynb`](e2e/walkthrough/walkthrough.ipynb)
+does exactly this over a small corpus that ships with the repository.
 
 **1. Candidates.** `get_candidates` takes a corpus and returns the items to classify. With seeds (phrases a
 matching item could say) it is a semantic search and each item keeps its best similarity.

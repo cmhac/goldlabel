@@ -28,7 +28,7 @@ Nothing in this repository may add a way to set a gold label. Only the labelling
 
 - Install the plugin in Claude Code, Codex, Copilot CLI and Kiro and run the gold-rule refusal trial in each (SC-6). Some install commands in the README are marked unverified (the Codex `plugin add` form, Copilot's `NAME@MARKETPLACE` form, `npx skills add ... -a kiro-cli`); the trial finds the real ones and records them in the spec's task 16 note.
 - Look at the labelling page in a real browser: light, dark and phone width. (The page was screenshotted once with an ad-hoc Chromium/Playwright that is **not** a repo dependency and must not become one; the tests check the served page and CSS over HTTP only.)
-- Run `examples/sample/walkthrough.ipynb` in real Jupyter and in one other notebook (marimo or Colab) with a real key.
+- Run `e2e/walkthrough/walkthrough.ipynb` in real Jupyter and in one other notebook (marimo or Colab) with a real key.
 - 007, which only fake services tested: keyword and server-side results against a real Postgres (single and two-table layouts, a term with `%`, `_` and a backslash, a regex string like `(?i)vote[sd]?`), listing a real S3 Vectors index (the permissions, the order), and Parquet through polars and through pandas with pyarrow (`specs/007-non-search-candidates/quickstart.md` section 5).
 - Everything 005 listed: a real pgvector, RDS/Aurora IAM, S3 Vectors, tables larger than memory (`specs/005-pgvector/manual-checklist.md`), API keys.
 - Decide on a `LICENSE` file and a plugin icon (the manifests carry no `license`; `claude plugin validate .` advises both). Tags, releases and PyPI trusted publishing are Chris's.
@@ -78,7 +78,7 @@ Ruff, ty and pytest must pass before every commit (pre-commit enforces it). Ther
 - Private helpers: `_sync.py` (sync wrapper over a running loop), `_html.py` and `_frame.py` (reprs and polars/pandas), `_label.py` (the labelling server and `label`), `_gold_rule.py` + `gold_rule.md` (the canonical rule, `GOLD_RULE_SHORT/FULL`, `GoldError`), `web/` (index.html, app.js, app.css, input.css).
 - Development tooling (not shipped): `.specify/` (Spec Kit constitution, templates, scripts), `.claude/skills/speckit-*`, `.agents/skills/ponytail*` (symlinked from `.claude/skills/` and `.kiro/skills/`), `skills-lock.json`, `.kiro/steering/ponytail.md`.
 - Agents: `skills/hunches/SKILL.md` and `references/{workflow,tuning,running,reuse}.md`, `docs/agent-instructions.md` (the block pasted in `README.md`), `.kiro/steering/hunches.md`, `.claude-plugin/{plugin,marketplace}.json`, root `plugin.json`.
-- `examples/sample/` is the walkthrough (`walkthrough.ipynb`, no outputs, and `walkthrough.py`, the same cells) over a tiny local corpus; `tests/` mirrors the modules; `specs/` is history plus 006.
+- `e2e/` holds the opt-in end-to-end examples (008): `table/`, `postgres/`, `pgvector/`, `s3/`, `walkthrough/` (a notebook) over one shared corpus in `e2e/common/`; `tests/` mirrors the modules (`tests/fixtures/sample_corpus.jsonl` is the tiny corpus of `tests/test_e2e.py`); `specs/` is history plus 006.
 
 ## Testing notes
 

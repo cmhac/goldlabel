@@ -1,6 +1,6 @@
 """SC-1: the README chain end to end, with no real network.
 
-The corpus is the tiny hand-built one of `examples/sample`, the embedder and the classifier model
+The corpus is the tiny hand-built one in `tests/fixtures/sample_corpus.jsonl`, the embedder and the classifier model
 are fakes, and the gold labels come from a SIMULATED HUMAN: a background thread that labels over the
 labelling server's HTTP API, the way a browser tab would. This tests the pipeline; it is a test
 fixture, not an agent writing gold labels, and nothing in the library offers a way to do the same.
@@ -25,7 +25,7 @@ import hunches as hn
 from hunches import _label
 from hunches.classifier import CostLimit
 
-SAMPLE = Path(__file__).parent.parent / "examples" / "sample" / "corpus.jsonl"
+SAMPLE = Path(__file__).parent / "fixtures" / "sample_corpus.jsonl"
 
 # What the people labelling decided, written by hand for the five items above the 0.60 floor.
 HUMAN = {

@@ -48,8 +48,7 @@ testpaths = ["tests"]
 pythonpath = ["."]  # tests import e2e.common.support
 
 [tool.ruff.lint.per-file-ignores]
-"examples/**" = ["B018"]  # a notebook cell ends with the value it displays
-"e2e/**" = ["B018"]
+"e2e/**" = ["B018"]  # a notebook cell ends with the value it displays
 
 [tool.ty.src]
 # specs: design handoff files import textual, which is no longer a dependency.

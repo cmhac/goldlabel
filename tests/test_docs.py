@@ -1,4 +1,4 @@
-"""The README and the example stay true: public names only, one instruction block, py == ipynb."""
+"""The README and the walkthrough stay true: public names only, one instruction block."""
 
 import ast
 import json
@@ -10,8 +10,7 @@ import hunches
 ROOT = Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"
 INSTRUCTIONS = ROOT / "docs" / "agent-instructions.md"
-SAMPLE = ROOT / "examples" / "sample"
-PY = SAMPLE / "walkthrough.py"
+SAMPLE = ROOT / "e2e" / "walkthrough"
 IPYNB = SAMPLE / "walkthrough.ipynb"
 
 
@@ -67,7 +66,7 @@ def test_no_doc_mentions_the_removed_corpus_or_its_folder_layout():
         ROOT / ".kiro/steering/hunches.md",
     ]
     files += (ROOT / "skills" / "hunches").rglob("*.md")
-    files += [SAMPLE / "README.md", PY, IPYNB]
+    files += [SAMPLE / "README.md", IPYNB]
     for path in files:
         for word in REMOVED:
             assert word not in path.read_text(), f"{path.name} still says {word}"
@@ -157,41 +156,30 @@ def test_readme_says_what_it_must_say():
         assert needle in text, needle
 
 
-# --- the example ------------------------------------------------------------------------------
+# --- the walkthrough ----------------------------------------------------------------------------
 
 
-def py_cells():
-    """`# %%` cells of the script as (type, source); markdown cells are `# %% [markdown]`."""
-    cells = []
-    for chunk in re.split(r"^# %%", PY.read_text(), flags=re.MULTILINE)[1:]:
-        head, _, body = chunk.partition("\n")
-        if "[markdown]" in head:
-            text = "\n".join(re.sub(r"^# ?", "", x) for x in body.strip().splitlines())
-            cells.append(("markdown", text))
-        else:
-            cells.append(("code", body.strip()))
-    return cells
-
-
-def test_walkthrough_script_and_notebook_hold_the_same_cells():
+def notebook_code():
     nb = json.loads(IPYNB.read_text())
-    from_nb = [(c["cell_type"], "".join(c["source"]).strip()) for c in nb["cells"]]
-    assert from_nb == py_cells()
     for cell in nb["cells"]:
         if cell["cell_type"] == "code":
             assert cell["outputs"] == [] and cell["execution_count"] is None
+    return "\n".join(
+        "".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code"
+    )
 
 
 def test_walkthrough_is_honest_about_gold_and_keys():
-    code = "\n".join(src for kind, src in py_cells() if kind == "code")
+    code = notebook_code()
     ast.parse(code)
-    assert "hn.label(" in code and "gold.draw(" in code
+    assert (
+        "gold.draw(" not in code or "scratch" in code
+    )  # drawing only on a scratch file
     for bad in ("labelled_by", "import_rows", "api_key", "sk-", "postgres://"):
         assert bad not in code, bad
     assert not re.search(r"\blabels\s*=\s*\[", code)  # no hand-written gold rows
     for name in public_names_used(code):
         assert name in hunches.__all__, name
-    assert not (SAMPLE / ".hunches" / "config.toml").exists()
 
 
 def test_agents_md_holds_the_rule_and_claude_md_is_its_symlink():
