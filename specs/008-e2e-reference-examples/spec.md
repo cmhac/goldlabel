@@ -306,6 +306,18 @@ checks with no container tool, no network and no key; they pass.
 - **Human-labelled rows**: gold rows made by a person in the labelling page, committed as written
   with their provenance.
 
+## Deliberately skipped
+
+- A test-tool (pytest) wrapper around the examples, and any CI or pre-commit job for them.
+- Real AWS, a real database, IAM or RDS login checks, real embedding models, visual checks.
+- Running examples in parallel; `run_all` runs them one after another.
+- A configuration file, a base class or a plugin system for examples; one shared module of plain
+  functions (`e2e/common/support.py`) is the only common code.
+- Pinning model output: only a score lower bound is checked, not exact predictions.
+- Making each folder copyable on its own; each is a reference to read, not a template to copy.
+- An option to use Docker, or host networking, for containers.
+- Any way for an agent to write, complete or "bootstrap" a gold label.
+
 ## Gold labels
 
 Examples that evaluate need gold rows, and the gold rule says only people create them. These
