@@ -155,6 +155,22 @@ resumable: run the cell again and only the missing rows are classified.
 
 **7. Keep the classifier.** See [Reusing a classifier](#reusing-a-classifier).
 
+## Examples for your setup
+
+[`e2e/`](e2e/) holds one runnable example per way of setting the library up, all over the same small
+corpus; read the one that matches yours and copy the calls you need.
+
+| Your corpus is | Read |
+|---|---|
+| A file or a DataFrame | [`e2e/table/`](e2e/table/) |
+| A plain Postgres table | [`e2e/postgres/`](e2e/postgres/) |
+| A Postgres table with pgvector | [`e2e/pgvector/`](e2e/pgvector/) |
+| An S3 Vectors index | [`e2e/s3/`](e2e/s3/) |
+| Classify, estimate and evaluate, step by step | [`e2e/walkthrough/`](e2e/walkthrough/) |
+
+They run on your machine against throwaway Podman containers and need an Anthropic key for the
+classification; they are not part of the test suite. See [`e2e/README.md`](e2e/README.md).
+
 ## Where files go
 
 One rule everywhere: a path argument beats the setting beats the default. The default root is `.hunches/` in

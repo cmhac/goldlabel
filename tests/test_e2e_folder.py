@@ -237,3 +237,68 @@ def test_run_all_verdict_fails_on_a_failure_or_on_different_scores():
     assert run_all.overall({"a": ok, "b": ("skipped", "no key", None)}) == "skipped"
     assert run_all.overall({"a": ok, "b": ("fail", "x", None)}) == "fail"
     assert run_all.overall({"a": ok, "b": ("pass", "", 0.7)}) == "fail"
+
+
+# --- the folder is complete, linked and offline-safe ------------------------------------------------
+
+import tomllib
+
+from test_docs import public_names_used
+
+E2E = ROOT / "e2e"
+EXAMPLES = ["table", "postgres", "pgvector", "s3"]
+RUNNING_DOCKER = re.compile(
+    r"\bdocker\s+(run|pull|build|compose|exec|ps|rm|stop|start|images)\b"
+    r"|docker-compose|docker\.sock|docker daemon",
+    re.IGNORECASE,
+)
+
+
+def test_each_path_has_exactly_one_folder_with_its_parts():
+    folders = {p.name for p in E2E.iterdir() if p.is_dir()}
+    assert folders - {"__pycache__", ".cache"} == {*EXAMPLES, "walkthrough", "common"}
+    for name in EXAMPLES:
+        assert (E2E / name / "run.py").is_file(), name
+        assert "run(main)" in (E2E / name / "run.py").read_text(), name
+    assert (E2E / "walkthrough" / "walkthrough.ipynb").is_file()
+    assert (E2E / "run_all.py").is_file() and (E2E / "README.md").is_file()
+
+
+def test_every_readme_links_its_folders_and_states_command_needs_and_cost():
+    for name in [*EXAMPLES, "walkthrough"]:
+        text = (E2E / name / "README.md").read_text()
+        for heading in ("## Needs", "## Run", "## Cost"):
+            assert heading in text, f"{name}: {heading}"
+        if name != "walkthrough":
+            assert f"python -m e2e.{name}.run" in text, name
+        for readme in ("README.md", "e2e/README.md"):
+            path = ROOT / readme
+            link = f"e2e/{name}/" if readme == "README.md" else f"{name}/"
+            assert link in path.read_text(), f"{readme} does not link {name}"
+
+
+def test_examples_use_only_public_library_names():
+    for path in E2E.rglob("*.py"):
+        for name in public_names_used(path.read_text()):
+            assert name in hn.__all__, f"{path.relative_to(ROOT)} uses hn.{name}"
+
+
+def test_nothing_under_e2e_or_in_the_new_docs_runs_docker():
+    paths = [
+        *E2E.rglob("*.py"),
+        *E2E.rglob("*.md"),
+        E2E / "walkthrough" / "walkthrough.ipynb",
+    ]
+    for path in [*paths, ROOT / "README.md"]:
+        assert not RUNNING_DOCKER.search(path.read_text()), path.relative_to(ROOT)
+
+
+def test_the_default_test_run_never_collects_e2e_and_the_cache_is_ignored():
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert config["tool"]["pytest"]["ini_options"]["testpaths"] == ["tests"]
+    assert "e2e/.cache/" in (ROOT / ".gitignore").read_text().splitlines()
+
+
+def test_gold_provenance_is_committed_with_the_gold_file():
+    if (COMMON / "gold.jsonl").exists():
+        assert (COMMON / "GOLD.md").is_file(), "gold.jsonl needs GOLD.md beside it"
