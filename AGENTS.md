@@ -92,6 +92,7 @@ Ruff, ty and pytest must pass before every commit (pre-commit enforces it). Ther
 
 - Match surrounding code style; comments only where the why is not obvious.
 - One commit per task (`006/NN: ...`; for a Spec Kit feature, `NNN/TNN: ...` naming the feature and its task) on the branch you were assigned; do not open a PR unless asked.
+- **Containers: Podman, never Docker (hard requirement, constitution v1.1.0).** For any local container work (a throwaway Postgres or an S3 emulator for a check, pulling or running an image) use `podman` and `podman run`, never `docker`, and never write `docker` into a doc, script or command. Do not depend on a Docker daemon or socket. CI service containers on GitHub's runners are not local and are unaffected.
 - Don't tag, release or publish. The user pushes tags; PyPI uses trusted publishing (no token in secrets).
 
 ## Ponytail (lazy senior dev mode)

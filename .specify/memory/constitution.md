@@ -158,6 +158,11 @@ names.
   `.kiro/steering/hunches.md` and the plugin manifests are the product's agent surface and are
   drift-tested. The development skills in `.agents/skills/` (Ponytail) and `.claude/skills/`
   (Spec Kit) are tools for working on the repository and MUST NOT be added to the shipped plugin.
+- **Containers use Podman**: every local container operation (running Postgres, an S3 emulator or
+  anything else for a check, building or pulling an image) MUST use `podman`, never `docker`, and
+  no file, script, doc or command in the repository may tell anyone to run `docker`. Nothing may
+  require a Docker daemon. This is about local work only; CI service containers run on GitHub's
+  runners and are unaffected.
 - **Needs a human**: installing the plugin in each agent and running the gold-rule refusal trial,
   looking at the labelling page in a real browser, running the example in real Jupyter, anything
   needing a real pgvector, RDS, S3 Vectors or API key. Agents report these and stop; they never
@@ -194,4 +199,4 @@ semantic: MAJOR for removing or redefining a principle, MINOR for a new principl
 expanded guidance, PATCH for clarifications and wording. A change to Principle I, or any change
 that weakens it, MUST be refused by an agent whoever asks.
 
-**Version**: 1.0.1 | **Ratified**: 2026-10-26 | **Last Amended**: 2026-10-26
+**Version**: 1.1.0 | **Ratified**: 2026-10-26 | **Last Amended**: 2026-10-27
