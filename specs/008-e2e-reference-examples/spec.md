@@ -340,8 +340,8 @@ say so; the candidate steps do not depend on it.
   up to 15 minutes.
 - **SC-002**: For the same filter, the table, Postgres (one table and two tables), pgvector and S3
   examples return the same candidates (same ids; the same order except where the service's order
-  applies), and, after classifying those candidates, report the same evaluation scores, shown by
-  the examples' own checks.
+  applies), and, after classifying those candidates, report the same evaluation scores (equal by
+  construction, because the result cache and the gold file are shared; `run_all` compares them).
 - **SC-003**: The default test run, the pre-commit hooks and CI run no container, no model call
   and no network access for these examples, and still fail when an example uses a removed library
   name, is missing from the README, or sits beside a gold row that no longer matches the corpus.
@@ -350,7 +350,7 @@ say so; the candidate steps do not depend on it.
 - **SC-005**: Each of the paths in FR-001 has exactly one example, and the README links each one.
 - **SC-006**: Zero gold labels in the repository were written by an agent or a model; the gold
   file an example uses is byte-identical to the file committed from the labelling page.
-- **SC-007**: Across all examples, a first run classifies each corpus item at most once and its
+- **SC-007**: Across all examples, a first run classifies each corpus item at most once per prompt (the walkthrough's deliberate second prompt classifies again) and its
   total model spend is stated in the walkthrough's README (the target is well under one US
   dollar); no single run exceeds its stated cost cap.
 - **SC-008**: A second run of any example with nothing changed makes no model calls.
