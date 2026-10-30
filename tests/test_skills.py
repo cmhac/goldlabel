@@ -358,3 +358,13 @@ def test_taxonomy_skill_example_builds_and_writes_a_loadable_taxonomy(
     loaded = goldlabel.Taxonomy.read("taxonomy.yaml")
     assert loaded == scope["taxonomy"] and loaded.mode == "single"
     assert [label.name for label in loaded.labels] == ["scam", "satire"]
+
+
+def test_folding_the_test_split_always_comes_with_the_explicit_yes():
+    files = [p / "SKILL.md" for p in ALL_SKILLS] + [
+        SKILL_DIR / "references" / n for n in REFS
+    ]
+    mentions = [p for p in files if "fold_test" in p.read_text()]
+    assert SKILLS / "goldlabel-tune" / "SKILL.md" in mentions
+    for path in mentions:
+        assert "explicit yes" in path.read_text(), f"{path.name} folds without a yes"
