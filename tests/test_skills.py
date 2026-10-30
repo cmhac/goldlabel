@@ -369,3 +369,52 @@ def test_folding_the_test_split_always_comes_with_the_explicit_yes():
     assert SKILLS / "goldlabel-tune" / "SKILL.md" in mentions
     for path in mentions:
         assert "explicit yes" in path.read_text(), f"{path.name} folds without a yes"
+
+
+# --- corpus filters (010) ------------------------------------------------------------------------
+
+
+def test_connect_skill_teaches_each_corpus_filter():
+    text = (SKILLS / "goldlabel-connect" / "SKILL.md").read_text()
+    section = text.partition("## Filter the corpus")[2].partition("\n## ")[0]
+    assert section, "goldlabel-connect needs a '## Filter the corpus' section"
+    blocks = "\n".join(python_blocks(SKILLS / "goldlabel-connect" / "SKILL.md"))
+    for call in ("gl.Table(", "gl.PgCorpus(", "gl.S3Corpus("):
+        assert re.search(re.escape(call) + r"[^)]*?where=", blocks), call
+    for needle in (
+        "text table",
+        "CSV",
+        "$startsWith",
+        "plain words",
+        "yes",
+        "limit=20",
+    ):
+        assert needle in section, needle
+
+
+def test_candidates_skill_says_the_filter_is_on_the_corpus():
+    text = (SKILLS / "goldlabel-candidates" / "SKILL.md").read_text()
+    assert "where=" in text and "on the corpus" in text
+
+
+def test_connect_skill_table_filter_example_runs(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "posts.csv").write_text(
+        "post_id,body,section,year\n"
+        "1,first,politics,2023\n"
+        "2,second,politics,2024\n"
+        "3,third,sports,2024\n"
+        "4,fourth,opinion,2025\n"
+    )
+    scope: dict[str, Any] = {}
+    exec(block_with("goldlabel-connect", "is_in"), {"gl": goldlabel}, scope)  # noqa: S102
+    got = {
+        name: [r["id"] for r in goldlabel.get_candidates(c, out=False).rows]
+        for name, c in scope.items()
+        if isinstance(c, goldlabel.Table)
+    }
+    assert got == {
+        "one": ["1", "2"],  # section is politics
+        "several": ["1", "2", "4"],  # politics or opinion
+        "since": ["2", "3", "4"],  # year 2024 on, cast from CSV text
+    }

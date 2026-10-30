@@ -33,7 +33,7 @@ candidates = gl.get_candidates(
 candidates = gl.get_candidates(corpus)
 ```
 
-One filter per call, `seeds=` or `keywords=`. A seed search embeds the seeds (a small live cost, one call per seed, cached; changing one seed re-embeds only that one) and writes `.goldlabel/candidates.jsonl`; keyword and whole-corpus lists are written only when `out=` is given. The embedding model needs its provider key in the environment: if it is missing, tell the user which variable to set and stop; never ask for the value.
+One filter per call, `seeds=` or `keywords=`. To work on part of the corpus only (one section, a date range), put the filter on the corpus (`where=`, see `goldlabel-connect`), not on `get_candidates`. A seed search embeds the seeds (a small live cost, one call per seed, cached; changing one seed re-embeds only that one) and writes `.goldlabel/candidates.jsonl`; keyword and whole-corpus lists are written only when `out=` is given. The embedding model needs its provider key in the environment: if it is missing, tell the user which variable to set and stop; never ask for the value.
 
 ## Inspect it with the user
 

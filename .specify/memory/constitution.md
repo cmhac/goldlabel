@@ -151,7 +151,9 @@ names.
 
 ## Additional Constraints
 
-- **Stack**: Python 3.12+, `uv`, `pydantic-ai-slim`, `numpy`, `genai-prices`, `pyyaml`; optional
+- **Stack**: Python 3.12+, `uv`, `pydantic-ai-slim`, `numpy`, `genai-prices`, `pyyaml`, `polars`
+  and `pyarrow` (core since 010: `Table` reads and filters with polars only; pandas stays optional,
+  for `.to_pandas()` and pandas input); optional
   extras `s3`, `pg`, `rds`, `local`. Standard-library `http.server` and vanilla JavaScript for the
   labelling page, Tailwind CSS pre-built into `src/goldlabel/web/app.css`. No Textual, keyring,
   platformdirs, python-dotenv, nbformat or Playwright in the project; a build or example script
@@ -207,4 +209,4 @@ semantic: MAJOR for removing or redefining a principle, MINOR for a new principl
 expanded guidance, PATCH for clarifications and wording. A change to Principle I, or any change
 that weakens it, MUST be refused by an agent whoever asks.
 
-**Version**: 1.2.0 | **Ratified**: 2026-10-26 | **Last Amended**: 2026-10-30
+**Version**: 1.2.1 | **Ratified**: 2026-10-26 | **Last Amended**: 2026-10-30

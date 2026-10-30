@@ -122,6 +122,16 @@ def test_the_docs_describe_the_three_candidate_sources_and_the_table_format():
     )
 
 
+def test_readme_shows_a_filter_for_each_corpus():
+    blocks = "\n".join(python_blocks(README.read_text()))
+    for call in ("gl.Table(", "gl.PgCorpus(", "gl.S3Corpus("):
+        assert re.search(re.escape(call) + r"[^)]*?where=", blocks), call
+    text = README.read_text()
+    assert (
+        "text table" in text and "pyarrow" in text and "pip install polars" not in text
+    )
+
+
 def test_readme_tables_use_polars_and_mention_pandas():
     text = README.read_text()
     assert "to_pandas()" in text

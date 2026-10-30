@@ -1,10 +1,9 @@
-import csv
-import json
+import operator
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, LiteralString, cast
 from urllib.parse import unquote, urlsplit
 
 import numpy as np
@@ -29,17 +28,28 @@ class Table:
     """Items in a table: a `.csv`, `.parquet` or `.jsonl` path, a list of row dicts, or a pandas or
     polars DataFrame. `id_column` None means the row's position. Seed search also needs
     `vector_column` (a list of numbers per row; not in a CSV) and `embedding_model`, the model
-    that made them; keyword search and the whole corpus need neither."""
+    that made them; keyword search and the whole corpus need neither. `where` is a polars
+    expression on the source's columns: only rows where it is true are read (a CSV's values are
+    all text, so cast a number: `pl.col("year").cast(pl.Int64) >= 2024`)."""
 
     source: Any
     text_column: str = "text"
     id_column: str | None = None
     vector_column: str | None = None
     embedding_model: str | None = None
+    where: Any = None
 
     def __post_init__(self):
         if not self.text_column:
             raise ValueError("Table: text_column is required")
+        if self.where is not None:
+            import polars as pl
+
+            if not isinstance(self.where, pl.Expr):
+                raise TypeError(
+                    "Table: where must be a polars expression, such as "
+                    f'pl.col("section") == "politics", not {type(self.where).__name__}'
+                )
         is_path = isinstance(self.source, (str, Path))
         if (
             self.vector_column
@@ -52,51 +62,48 @@ class Table:
             )
 
 
-def _parquet_rows(path: Path) -> list[dict]:
-    try:
-        import polars
-
-        return polars.read_parquet(path).to_dicts()
-    except ImportError:
-        pass
-    try:
-        import pandas
-
-        return pandas.read_parquet(path).to_dict("records")
-    except ImportError as e:
-        raise ImportError(
-            "Reading a .parquet file needs polars or pandas (with pyarrow): "
-            "pip install polars"
-        ) from e
-
-
 def table_rows(table: Table, with_vectors: bool = False) -> list[dict]:
     """The table as `{id, text}` rows in table order (plus `vector` when asked for), checked.
 
-    Raises ValueError naming the column or the first offending row (counting from 0); rows are
-    never dropped, repaired or invented."""
+    Every source is read with polars. Raises ValueError naming the column or the first offending
+    row (counting from 0); rows are never dropped, repaired or invented."""
+    import polars as pl
+
     src = table.source
-    if isinstance(src, (str, Path)):
-        path = Path(src)
-        suffix = path.suffix.lower()
-        if suffix == ".csv":
-            with open(path, newline="", encoding="utf-8-sig") as f:
-                rows = list(csv.DictReader(f))
-        elif suffix == ".jsonl":
-            lines = path.read_text(encoding="utf-8").splitlines()
-            rows = [json.loads(x) for x in lines if x.strip()]
-        elif suffix == ".parquet":
-            rows = _parquet_rows(path)
+    try:
+        if isinstance(src, (str, Path)):
+            path = Path(src)
+            suffix = path.suffix.lower()
+            if suffix == ".csv":
+                df = pl.read_csv(
+                    path, infer_schema=False
+                )  # text, as written: "007" stays
+            elif suffix == ".jsonl":
+                df = pl.read_ndjson(path, infer_schema_length=None)
+            elif suffix == ".parquet":
+                df = pl.read_parquet(path)
+            else:
+                raise ValueError(
+                    f"Table: cannot read {path.name!r}; use a .csv, .parquet or .jsonl file"
+                )
+        elif isinstance(src, pl.DataFrame):
+            df = src
+        elif type(src).__module__.startswith("pandas"):
+            df = pl.from_pandas(src)
         else:
-            raise ValueError(
-                f"Table: cannot read {path.name!r}; use a .csv, .parquet or .jsonl file"
-            )
-    elif hasattr(src, "to_dicts"):  # polars
-        rows = src.to_dicts()
-    elif hasattr(src, "to_dict"):  # pandas
-        rows = src.to_dict("records")
-    else:
-        rows = list(src)
+            # every row, so a key first seen after row 100 is still a column; strict=False lets
+            # int and float share a column (vectors like [1, 0.71]), as JSONL reading does
+            df = pl.DataFrame(list(src), infer_schema_length=None, strict=False)
+    except (pl.exceptions.PolarsError, TypeError) as e:
+        raise ValueError(f"Table: polars could not read the source: {e}") from None
+    if df.height == 0:  # before the filter: an empty source has no columns to filter on
+        return []
+    if table.where is not None:
+        try:
+            df = df.filter(table.where)
+        except pl.exceptions.PolarsError as e:
+            raise ValueError(f"Table where: {e}") from None
+    rows = df.to_dicts()
     columns = [table.text_column]
     columns += [c for c in (table.id_column, with_vectors and table.vector_column) if c]
     out, seen = [], set()
@@ -193,20 +200,151 @@ def search_table(
 
 @dataclass(frozen=True)
 class S3Corpus:
+    """An S3 Vectors index. `where` is the service's metadata filter document, sent with every
+    similarity query and applied here to each listed vector (listing has no filter)."""
+
     bucket: str
     index: str
     region: str | None = None  # None: boto3's default resolution
+    where: dict | None = None
 
     def __post_init__(self):
         if not (self.bucket and self.index):
             raise ValueError("S3Corpus: bucket and index are required")
+        if self.where is not None:
+            _s3_check(self.where)
+
+
+# https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors-metadata-filtering.html
+_S3_OPS = {
+    "$eq",
+    "$ne",
+    "$gt",
+    "$gte",
+    "$lt",
+    "$lte",
+    "$startsWith",
+    "$in",
+    "$nin",
+    "$exists",
+}
+
+
+def _primitive(v) -> bool:
+    return isinstance(v, (str, int, float, bool))
+
+
+def _number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _s3_operand_ok(op: str, operand) -> bool:
+    if op in ("$eq", "$ne"):
+        return _primitive(operand)
+    if op in ("$gt", "$gte", "$lt", "$lte"):
+        return _number(operand)
+    if op == "$startsWith":
+        return isinstance(operand, str)
+    if op in ("$in", "$nin"):
+        return (
+            isinstance(operand, list)
+            and bool(operand)
+            and all(map(_primitive, operand))
+        )
+    return isinstance(operand, bool)  # $exists
+
+
+def _s3_check(where, path: str = "where", listing: bool = False) -> None:
+    """Refuse a filter document S3 Vectors would not accept, naming the path to the problem.
+    `listing`: also refuse `$startsWith`, which only some index modes support."""
+    if not (isinstance(where, dict) and where):
+        raise ValueError(
+            f"S3Corpus: {path} must be a non-empty filter document (a dict)"
+        )
+    for key, value in where.items():
+        here = f"{path}[{key!r}]"
+        if key in ("$and", "$or"):
+            if not (isinstance(value, list) and value):
+                raise ValueError(
+                    f"S3Corpus: {here} must be a non-empty list of filters"
+                )
+            for i, part in enumerate(value):
+                _s3_check(part, f"{here}[{i}]", listing)
+        elif key.startswith("$"):
+            raise ValueError(f"S3Corpus: {here}: unknown operator {key!r}")
+        elif isinstance(value, dict):
+            if not value:
+                raise ValueError(f"S3Corpus: {here} has no operator")
+            for op, operand in value.items():
+                at = f"{here}[{op!r}]"
+                if op not in _S3_OPS:
+                    raise ValueError(f"S3Corpus: {at}: unknown operator {op!r}")
+                if not _s3_operand_ok(op, operand):
+                    raise ValueError(
+                        f"S3Corpus: {at}: {operand!r} is not a valid operand"
+                    )
+                if listing and op == "$startsWith":
+                    raise ValueError(
+                        f"S3Corpus: {at}: $startsWith cannot be applied when listing "
+                        "(the whole corpus or keywords); use it with seeds only"
+                    )
+        elif not _primitive(value):
+            raise ValueError(
+                f"S3Corpus: {here}: {value!r} is not a string, number or boolean"
+            )
+
+
+def _same(a, b) -> bool:
+    return a == b and isinstance(a, bool) == isinstance(b, bool)  # True is not 1
+
+
+# shortcut: where the AWS docs are silent this follows research R5 (several keys AND; a missing key
+# fails all but $exists:false, $ne, $nin; a list value passes $in/range if any element does,
+# $nin/$ne if none does), unverified against the service; fix it when a real index disagrees
+# (specs/010-corpus-filter/quickstart.md section 4).
+def _s3_match(where: dict, metadata: dict) -> bool:
+    """The filter document applied to one vector's metadata, as the service applies it."""
+    for key, value in where.items():
+        if key == "$and":
+            ok = all(_s3_match(part, metadata) for part in value)
+        elif key == "$or":
+            ok = any(_s3_match(part, metadata) for part in value)
+        else:
+            ops = value if isinstance(value, dict) else {"$eq": value}
+            present = key in metadata
+            got = metadata.get(key)
+            values = got if isinstance(got, list) else [got]
+            ok = all(_s3_op(op, x, present, values) for op, x in ops.items())
+        if not ok:
+            return False
+    return True
+
+
+def _s3_op(op: str, operand, present: bool, values: list) -> bool:
+    if op == "$exists":
+        return present == operand
+    if not present:
+        return op in ("$ne", "$nin")
+    if op in ("$eq", "$in", "$ne", "$nin"):
+        wanted = operand if op in ("$in", "$nin") else [operand]
+        hit = any(_same(v, w) for v in values for w in wanted)
+        return hit if op in ("$eq", "$in") else not hit
+    compare = {
+        "$gt": operator.gt,
+        "$gte": operator.ge,
+        "$lt": operator.lt,
+        "$lte": operator.le,
+    }
+    return any(compare[op](v, operand) for v in values if _number(v))
 
 
 @dataclass(frozen=True)
 class PgCorpus:
     """A pgvector table. The database URL is read from the environment variable `url_env`,
     never stored. With `text_table` the text lives in a second table joined on
-    `text_id_column` (default: `id_column`) = `id_column`."""
+    `text_id_column` (default: `id_column`) = `id_column`. `where` is a Postgres condition with
+    its values written in (`"section = 'politics'"`), run on the database in every mode; in the
+    two-table layout its columns must be in the text table."""
 
     table: str
     id_column: str = "id"
@@ -221,10 +359,15 @@ class PgCorpus:
     aws_region: str | None = None
     aws_profile: str | None = None
     max_result_mb: int = 512  # 0: no limit
+    where: str | None = None
 
     def __post_init__(self):
         if not self.table:
             raise ValueError("PgCorpus: table is required")
+        if self.where is not None and not (
+            isinstance(self.where, str) and self.where.strip()
+        ):
+            raise ValueError("PgCorpus: where must be a non-empty SQL condition")
         if not self.url_env:
             raise ValueError("PgCorpus: url_env is required")
         if self.search not in ("exact", "index"):
@@ -304,6 +447,16 @@ def pg_message(e: Exception, corpus: PgCorpus, token: str | None = None) -> str:
         hint = "Fix: the embedder must be the model the table was embedded with."
     elif token and "authentication failed" in text:
         hint = IAM_CHECK
+    elif (
+        corpus.where
+        and corpus.text_table
+        # Postgres's undefined-column wording, not a missing relation or goldlabel's own check
+        and re.search(r'column "[^"]+" does not exist', text)
+    ):
+        hint = (
+            f"Filter columns must be in the text table ({corpus.text_table}): "
+            "PgCorpus(where=...) is run against that table only."
+        )
     return f"{text}\n{hint}" if hint else text
 
 
@@ -380,6 +533,26 @@ def text_source(corpus: PgCorpus) -> tuple[str, str]:
     if corpus.text_table:
         return corpus.text_table, corpus.text_id_column or corpus.id_column
     return corpus.table, corpus.id_column
+
+
+def _pg_where(corpus: PgCorpus):
+    """The filter as a CTE, `goldlabel_where AS (SELECT <id> AS id FROM <text table, or table>
+    WHERE (<where>))`, for a query's WITH. A CTE cannot see the main query's tables, so the
+    condition sees that one table's columns only (a sub-query would fall back to the outer
+    query's). Rows are kept with `<id> IN (SELECT id FROM goldlabel_where)`. `%` is doubled for the
+    driver, so every query carrying this must be sent with parameters (an empty tuple at least)."""
+    from psycopg import sql
+
+    table, key = text_source(corpus)
+    # the user's own SQL by design, run in the read-only transaction; values are written into it
+    cond = cast(LiteralString, (corpus.where or "").replace("%", "%%"))
+    return sql.SQL(
+        "goldlabel_where AS (SELECT {key} AS id FROM {table} WHERE ({cond}))"
+    ).format(
+        key=sql.Identifier(key),
+        table=sql.Identifier(*table.split(".", 1)),
+        cond=sql.SQL(cond),
+    )
 
 
 def _texts_query(corpus: PgCorpus):
@@ -510,12 +683,12 @@ def search_pg_exact(
         vec_col = sql.Identifier(corpus.vector_column)
         typename, type_schema, _ = column_type(conn, table_name, corpus.vector_column)
         step1 = sql.SQL(
-            "WITH seeds AS MATERIALIZED (SELECT u.i - 1 AS i, u.q::{vtype} AS q "
+            "WITH {cte}seeds AS MATERIALIZED (SELECT u.i - 1 AS i, u.q::{vtype} AS q "
             "FROM unnest(%s::text[]) WITH ORDINALITY AS u(q, i)), "
             "pairs AS (SELECT t.{id} AS id, d.i, d.sim FROM {table} t "
             "CROSS JOIN LATERAL (SELECT s.i, 1 - (t.{vec} OPERATOR({schema}.<=>) s.q) AS sim "
             "FROM seeds s OFFSET 0) d "
-            "WHERE t.{vec} IS NOT NULL AND d.sim >= %s AND d.sim <> 'NaN'), "
+            "WHERE t.{vec} IS NOT NULL AND d.sim >= %s AND d.sim <> 'NaN'{where}), "
             "ranked AS (SELECT *, row_number() OVER "
             "(PARTITION BY i ORDER BY sim DESC, id) AS rn FROM pairs) "
             "SELECT id, i, sim FROM ranked WHERE rn <= %s"
@@ -525,6 +698,12 @@ def search_pg_exact(
             table=table,
             vec=vec_col,
             schema=sql.Identifier(type_schema),
+            cte=_pg_where(corpus) + sql.SQL(", ") if corpus.where else sql.SQL(""),
+            where=sql.SQL(" AND t.{} IN (SELECT id FROM goldlabel_where)").format(
+                id_col
+            )
+            if corpus.where
+            else sql.SQL(""),
         )
         if limit:
             _, width = table_estimates(conn, text_source(corpus)[0], corpus.text_column)
@@ -593,7 +772,8 @@ def pg_items(
 
         table = sql.Identifier(*corpus.table.split(".", 1))
         text_table, text_id = text_source(corpus)
-        if guard and limit_mb:
+        # the planner's statistics are for the whole table, so a filtered read skips this check
+        if guard and limit_mb and not corpus.where:
             rows, width = table_estimates(conn, text_table, corpus.text_column)
             if (
                 rows is not None and width is not None
@@ -615,6 +795,12 @@ def pg_items(
             "text_id": sql.Identifier(text_id),
         }
         params = None
+        names["where"] = sql.SQL("")
+        if corpus.where:
+            id_expr = sql.SQL("t.") + names["id"] if corpus.text_table else names["id"]
+            names["where"] = sql.SQL(" AND " if match else " WHERE ") + sql.SQL(
+                "{} IN (SELECT id FROM goldlabel_where)"
+            ).format(id_expr)
         if match:
             terms, is_regex = match
             names["op"] = sql.SQL("~" if is_regex else "ILIKE")
@@ -627,21 +813,25 @@ def pg_items(
         if corpus.text_table and match:
             query = sql.SQL(
                 "SELECT t.{id}, x.{text} FROM {table} t JOIN {text_table} x "
-                "ON x.{text_id} = t.{id} WHERE x.{text} {op} ANY(%s::text[]) ORDER BY t.{id}"
+                "ON x.{text_id} = t.{id} WHERE x.{text} {op} ANY(%s::text[]){where} "
+                "ORDER BY t.{id}"
             )
         elif corpus.text_table:
             query = sql.SQL(
                 "SELECT t.{id}, x.{text} FROM {table} t LEFT JOIN {text_table} x "
-                "ON x.{text_id} = t.{id} ORDER BY t.{id}"
+                "ON x.{text_id} = t.{id}{where} ORDER BY t.{id}"
             )
         elif match:
             query = sql.SQL(
-                "SELECT {id}, {text} FROM {table} WHERE {text} {op} ANY(%s::text[]) "
-                "ORDER BY {id}"
+                "SELECT {id}, {text} FROM {table} WHERE {text} {op} ANY(%s::text[])"
+                "{where} ORDER BY {id}"
             )
         else:
-            query = sql.SQL("SELECT {id}, {text} FROM {table} ORDER BY {id}")
+            query = sql.SQL("SELECT {id}, {text} FROM {table}{where} ORDER BY {id}")
         query = query.format(**names)
+        if corpus.where:
+            query = sql.SQL("WITH ") + _pg_where(corpus) + sql.SQL(" ") + query
+            params = params or ()
         received = rows_in = 0
         with conn.cursor(name="goldlabel_items") as cur:
             cur.itersize = PG_BATCH
@@ -693,8 +883,8 @@ def _search_pg_index(
         )
         two_tables = bool(corpus.text_table)
         query = sql.SQL(
-            "SELECT {id}, {text}, {dist} AS sim FROM {table} "
-            "WHERE {dist} >= %s AND {dist} <> 'NaN' "
+            "{cte}SELECT {id}, {text}, {dist} AS sim FROM {table} "
+            "WHERE {dist} >= %s AND {dist} <> 'NaN'{where} "
             "ORDER BY {vec} OPERATOR({schema}.<=>) %s::{vtype} LIMIT %s"
         ).format(
             id=sql.Identifier(corpus.id_column),
@@ -705,6 +895,14 @@ def _search_pg_index(
             vec=sql.Identifier(vec_name),
             schema=sql.Identifier(type_schema),
             vtype=sql.Identifier(type_schema, typename),
+            cte=sql.SQL("WITH ") + _pg_where(corpus) + sql.SQL(" ")
+            if corpus.where
+            else sql.SQL(""),
+            where=sql.SQL(" AND {} IN (SELECT id FROM goldlabel_where)").format(
+                sql.Identifier(corpus.id_column)
+            )
+            if corpus.where
+            else sql.SQL(""),
         )
         literal = "[" + ",".join(repr(float(x)) for x in query_vector) + "]"
         with conn.cursor() as cur:
@@ -765,6 +963,8 @@ def search_vectors(
         "returnDistance": True,
         "returnMetadata": True,
     }
+    if corpus.where:
+        params["filter"] = corpus.where
     hits: list[tuple[str, str, float]] = []
     below_floor = False
     response = client.query_vectors(**params)
@@ -793,6 +993,8 @@ def s3_items(corpus: S3Corpus):
         raise ImportError(
             "The S3 backend needs boto3: pip install goldlabel[s3]"
         ) from e
+    if corpus.where:
+        _s3_check(corpus.where, listing=True)
     client = boto3.client("s3vectors", region_name=corpus.region)
     params = {
         "vectorBucketName": corpus.bucket,
@@ -811,7 +1013,8 @@ def s3_items(corpus: S3Corpus):
                 "needs the permissions s3vectors:ListVectors and s3vectors:GetVectors"
             ) from None
         for v in response["vectors"]:
-            yield v["key"], v["metadata"]["text"]
+            if corpus.where is None or _s3_match(corpus.where, v["metadata"]):
+                yield v["key"], v["metadata"]["text"]
         if not response.get("nextToken"):
             return
         params["nextToken"] = response["nextToken"]
