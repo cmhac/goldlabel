@@ -18,6 +18,7 @@ Goal: a corpus object that works, shown to the user with its first rows, before 
 2. Which column holds the text, and which the id (unique)? If there is no id column the row's position is the id.
 3. Does it have embeddings, and from which model? Seeds (semantic search) need them; keywords and the whole corpus do not.
 4. For a database or AWS: which environment variable holds the URL or credentials. The user sets it; you never ask for the value and never type it into a file, a notebook or the chat.
+5. Do they want only part of the corpus (one section, one outlet, a date range)? That is a filter on the corpus, below.
 
 ## Connect and look
 
@@ -53,6 +54,75 @@ report["version"], report["rows"], report["sample"]
 ## Confirm, then say it in words
 
 Tell the user: the connection works (or the first error, quoted), how many items were read (do not count a whole large database; say the estimate from `report["rows"]`), that the first rows look like the text they expect, and whether embeddings are present. If seeds are wanted and there are no vectors, say so plainly: seeds cannot work without them; keywords can. Never create embeddings or fill in a missing column yourself without asking.
+
+## Filter the corpus (optional)
+
+A corpus can be narrowed before anything else happens: `where=` on the corpus object. The whole corpus, keywords and seeds then all see only the items that pass. The user decides whether to filter and on what; many users do not know polars, SQL or the S3 filter language, so help them write it:
+
+1. Look up the real column (or metadata) names and a few of their values first, never guess them: for a `gl.Table`, read the source with polars and show its columns and a few rows; for Postgres, the columns the user or a schema query of theirs shows; for S3 Vectors, the metadata of a few listed vectors (`gl.get_candidates(corpus, limit=5)` lists without a filter).
+2. Write the filter for the corpus in use, show it, and explain it in plain words ("only rows whose section is politics, from 2024 on").
+3. Wait for the user's yes before using it. Never choose a filter, a column or a value yourself.
+4. Suggest a quick check: `gl.get_candidates(corpus, limit=20, out=False)`, and look at the rows together.
+
+**A table (file or DataFrame): a polars expression.** It is applied by polars, fast, before the rows are checked. A CSV holds every value as text, so cast numbers and dates: `pl.col("year").cast(pl.Int64)`. A row where the expression is null (a missing value) is dropped.
+
+```python
+import polars as pl
+
+one = gl.Table(
+    "posts.csv",
+    text_column="body",
+    id_column="post_id",
+    where=pl.col("section") == "politics",
+)
+several = gl.Table(
+    "posts.csv",
+    text_column="body",
+    id_column="post_id",
+    where=pl.col("section").is_in(["politics", "opinion"]),
+)
+since = gl.Table(
+    "posts.csv",
+    text_column="body",
+    id_column="post_id",
+    where=pl.col("year").cast(pl.Int64) >= 2024,  # CSV values are text
+)
+```
+
+Combine with `&` (and), `|` (or) and `~` (not), each side in parentheses: `(pl.col("section") == "politics") & (pl.col("year").cast(pl.Int64) >= 2024)`.
+
+**Postgres: one SQL condition, values written in.** It runs on the database, in the read-only transaction, so only matching rows are sent. Quote text values with single quotes and double a quote inside one (`'O''Brien'`); write `%` once (`LIKE 'vote%'`). In the two-table layout (`text_table=`) the filter columns must be in the text table: the condition is run against that table only, and a column that is only in the vector table is an error.
+
+```python
+corpus = gl.PgCorpus(
+    table="posts",
+    text_column="body",
+    where="section = 'politics'",
+)
+corpus = gl.PgCorpus(
+    table="posts",
+    text_column="body",
+    where="section IN ('politics', 'opinion') AND published >= '2024-01-01'",
+)
+```
+
+**S3 Vectors: the service's metadata filter document.** It is sent with every seed query and applied by goldlabel to every listed vector (the whole corpus and keywords). The keys must be filterable metadata (all are, unless the index was created with them as non-filterable). A bare value means equal; a list value matches if any element does. `$startsWith` works with seeds only, not when listing.
+
+```python
+corpus = gl.S3Corpus(bucket="my-vectors", index="posts", where={"section": "politics"})
+corpus = gl.S3Corpus(
+    bucket="my-vectors",
+    index="posts",
+    where={
+        "$and": [
+            {"section": {"$in": ["politics", "opinion"]}},
+            {"year": {"$gte": 2024}},
+        ]
+    },
+)
+```
+
+Operators: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$exists`, `$and`, `$or` (and `$startsWith`, seeds only). A vector without the key fails every operator except `$exists: false`, `$ne` and `$nin`.
 
 ## When the data is not in a readable shape
 

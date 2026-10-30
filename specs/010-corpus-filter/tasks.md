@@ -164,7 +164,7 @@ the hand-picked keys.
 
 ## Phase 5: User Story 5 — agents help write filters (P2)
 
-- [ ] T005 [US5] Teach the filters (spec "Agent skills", FR-010, FR-011, User Story 5; research
+- [X] T005 [US5] Teach the filters (spec "Agent skills", FR-010, FR-011, User Story 5; research
   R6).
   - Red first, in `tests/test_skills.py`:
     - `goldlabel-connect/SKILL.md` has a "Filter the corpus" section with a code block per corpus

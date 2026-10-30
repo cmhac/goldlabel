@@ -20,8 +20,9 @@ pip install "goldlabel[rds]"     # psycopg and boto3, for RDS / Aurora IAM datab
 pip install "goldlabel[local]"   # Sentence Transformers, for local query embeddings (Python < 3.14)
 ```
 
-Python 3.12 or newer. Tables in the examples are polars (`pip install polars`); every table also has
-`.to_pandas()`, and `.rows` is always a plain list of dicts.
+Python 3.12 or newer. polars and pyarrow are installed with goldlabel: tables are read and filtered with
+polars, and tables in the examples are polars; every table also has `.to_pandas()` (with pandas installed),
+and `.rows` is always a plain list of dicts.
 
 ## The whole chain
 
@@ -93,6 +94,33 @@ corpus = gl.Table(
 The text column holds a non-empty string in every row. `id_column` is optional (the row's position is the
 id) and its values must be unique. A CSV cannot hold the `vector_column`; use Parquet, JSONL or a DataFrame
 for that. Nothing is dropped or repaired: the first bad row is named in the error.
+
+**Only part of the corpus.** Every corpus takes `where=`, in its own backend's form, and then the whole
+corpus, keywords and seeds all see only the items that pass. A table takes a polars expression (a CSV holds
+every value as text, so cast numbers); Postgres takes one SQL condition with its values written in, run on
+the database (in the two-table layout, its columns must be in the text table); S3 Vectors takes the
+service's metadata filter document, sent with every seed query and applied to every listed vector.
+
+```python
+import polars as pl
+
+corpus = gl.Table(
+    "posts.csv",
+    text_column="body",
+    id_column="post_id",
+    where=(pl.col("section") == "politics") & (pl.col("year").cast(pl.Int64) >= 2024),
+)
+corpus = gl.PgCorpus(
+    table="posts",
+    text_column="body",
+    where="section = 'politics' AND published >= '2024-01-01'",
+)
+corpus = gl.S3Corpus(
+    bucket="my-vectors",
+    index="posts",
+    where={"$and": [{"section": "politics"}, {"year": {"$gte": 2024}}]},
+)
+```
 
 **2. Labels and a prompt.**
 
