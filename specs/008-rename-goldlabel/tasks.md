@@ -17,7 +17,7 @@ Red tests are written and shown failing inside the task that makes them pass: pr
 
 ## Phase 3: Verify and report
 
-- [ ] T004 Run the quickstart (`specs/008-rename-goldlabel/quickstart.md`) steps 1 to 7 and report their real output summaries: the four checks, the leftover-name test, `uv build` and the wheel listing, a clean-venv install and `import goldlabel` / failing `import hunches`, the three drift tests, the legacy-stamp test, the migration check. Run `/ponytail-review` on the diff and `/ponytail-debt`, fix what they find. Then push and open the pull request (the user asked for one), following the repository's PR template if there is one, and list the human-only items (plugin reinstall and gold-rule refusal trial in each agent, the README install commands marked unverified, the labelling page in a real browser, renaming the GitHub repository before or with the merge, reserving `goldlabel` on PyPI) in the PR body.
+- [x] T004 Run the quickstart (`specs/008-rename-goldlabel/quickstart.md`) steps 1 to 7 and report their real output summaries: the four checks, the leftover-name test, `uv build` and the wheel listing, a clean-venv install and `import goldlabel` / failing `import hunches`, the three drift tests, the legacy-stamp test, the migration check. Run `/ponytail-review` on the diff and `/ponytail-debt`, fix what they find. Then push and open the pull request (the user asked for one), following the repository's PR template if there is one, and list the human-only items (plugin reinstall and gold-rule refusal trial in each agent, the README install commands marked unverified, the labelling page in a real browser, renaming the GitHub repository before or with the merge, reserving `goldlabel` on PyPI) in the PR body.
 
 ## Dependencies
 
