@@ -1,6 +1,6 @@
 {
   "name": "goldlabel",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Content analysis over a corpus: candidates from seed-phrase semantic search, keywords or the whole corpus, and an LLM classifier checked against human-labelled gold data, in a notebook or script.",
   "author": {
     "name": "Chris Hacker"
