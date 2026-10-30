@@ -347,3 +347,14 @@ def test_connect_skill_shaping_example_runs_and_leaves_the_source_alone(
         {"id": "8", "text": "second post"},
     ]
     assert source.read_text() == before
+
+
+def test_taxonomy_skill_example_builds_and_writes_a_loadable_taxonomy(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    scope = {"gl": goldlabel}
+    exec(block_with("goldlabel-taxonomy", "taxonomy.write"), scope)  # noqa: S102
+    loaded = goldlabel.Taxonomy.read("taxonomy.yaml")
+    assert loaded == scope["taxonomy"] and loaded.mode == "single"
+    assert [label.name for label in loaded.labels] == ["scam", "satire"]
