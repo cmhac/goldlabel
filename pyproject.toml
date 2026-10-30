@@ -4,7 +4,7 @@ version = "0.3.1"
 description = "Content analysis over a corpus (semantic search, keywords or the whole corpus, then an LLM classifier checked against human labels), as a Python library."
 readme = "README.md"
 authors = [{ name = "Chris Hacker", email = "c.m.hacker1997@gmail.com" }]
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 # pydantic-ai: the slim package with provider extras (pydantic-ai-slim[anthropic,openai]) avoids
 # pulling every provider. Local Sentence Transformers embeddings come from the pydantic-ai-slim
 # extra "sentence-transformers" (needs Python < 3.14), exposed here as our optional extra "local".
