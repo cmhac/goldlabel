@@ -142,7 +142,7 @@ def test_repr_of_gold_lists_path_counts_sources_and_ends_with_the_rule(tmp_path)
     out = repr(Gold(p))
     assert str(p) in out
     assert "dev 1" in out and "test 1" in out and "pending 1" in out
-    assert "hunches-ui 1, imported 1, unstamped 0" in out
+    assert "goldlabel-ui 1, imported 1, unstamped 0" in out
     assert out.endswith(SHORT)
     assert out.splitlines()[-1] == SHORT
 

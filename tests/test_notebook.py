@@ -76,7 +76,7 @@ def evaluation():
         target=0.9,
         n=2,
         skipped_pending=1,
-        sources={"hunches-ui": 0, "imported": 2, "unstamped": 0},
+        sources={"goldlabel-ui": 0, "imported": 2, "unstamped": 0},
         digest="d" * 64,
         disagreements=[
             {

@@ -271,11 +271,35 @@ def test_goldset_repr_is_plain_text_with_sources(tmp_path):
     )
     # the last line is the Short gold rule (006/15), tested in test_gold_rule.py
     assert repr(Gold(path).dev).splitlines()[0] == (
-        "GoldSet dev: 4 rows (4 labelled, 0 pending); hunches-ui 1, imported 2, unstamped 1"
+        "GoldSet dev: 4 rows (4 labelled, 0 pending); goldlabel-ui 1, imported 2, unstamped 1"
     )
     assert repr(Gold(path).all).splitlines()[0] == (
-        "GoldSet all: 5 rows (4 labelled, 1 pending); hunches-ui 1, imported 2, unstamped 1"
+        "GoldSet all: 5 rows (4 labelled, 1 pending); goldlabel-ui 1, imported 2, unstamped 1"
     )
+
+
+def test_rows_stamped_before_the_rename_count_as_labelled_through_the_page(tmp_path):
+    path = write(
+        tmp_path / "g.jsonl",
+        row("1", ["a"], labelled_by="hunches-ui"),
+        row("2", ["a"], labelled_by="hunches-ui"),
+        row("3", ["b"], labelled_by="hunches-ui"),
+    )
+    before = path.read_bytes()
+    assert repr(Gold(path).dev).splitlines()[0] == (
+        "GoldSet dev: 3 rows (3 labelled, 0 pending); goldlabel-ui 3, imported 0, unstamped 0"
+    )
+    mixed = write(
+        tmp_path / "m.jsonl",
+        row("1", ["a"], labelled_by="goldlabel-ui"),
+        row("2", ["a"], labelled_by="hunches-ui"),
+        row("3", ["b"], labelled_by="imported"),
+        row("4", ["b"]),
+    )
+    assert repr(Gold(mixed).dev).splitlines()[0] == (
+        "GoldSet dev: 4 rows (4 labelled, 0 pending); goldlabel-ui 2, imported 1, unstamped 1"
+    )
+    assert path.read_bytes() == before  # reading never rewrites a gold file
 
 
 def test_views_are_read_only():

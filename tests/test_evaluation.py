@@ -199,8 +199,20 @@ def test_rows_without_a_stamp_and_imported_rows_are_accepted_and_counted():
     )
     ev = evaluate(clf(model), gold.dev)
     assert ev.n == 4 and ev.score("accuracy") == 1
-    assert ev.sources == {"hunches-ui": 1, "imported": 1, "unstamped": 2}
-    assert "hunches-ui 1, imported 1, unstamped 2" in repr(ev)
+    assert ev.sources == {"goldlabel-ui": 1, "imported": 1, "unstamped": 2}
+    assert "goldlabel-ui 1, imported 1, unstamped 2" in repr(ev)
+
+
+def test_both_page_stamps_count_as_labelled_through_the_page():
+    model, _ = answering({"t1": ["a"], "t2": ["a"]})
+    gold = write_gold(
+        [
+            g("1", ["a"], labelled_by="goldlabel-ui"),
+            g("2", ["a"], labelled_by="hunches-ui"),
+        ]
+    )
+    ev = evaluate(clf(model), gold.dev)
+    assert ev.sources == {"goldlabel-ui": 2, "imported": 0, "unstamped": 0}
 
 
 def test_repr_shows_the_per_label_table():

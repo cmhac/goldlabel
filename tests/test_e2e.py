@@ -162,7 +162,7 @@ def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     hn.label(gold, taxonomy)  # blocks until the simulated human presses Done
     humans.pop().join(timeout=10)
     assert len(gold.dev.rows) == 3 and not gold.pending.rows
-    assert {r.labelled_by for r in gold.dev.rows} == {"hunches-ui"}
+    assert {r.labelled_by for r in gold.dev.rows} == {"goldlabel-ui"}
     assert fake.calls == 0  # labelling never calls a model
 
     # 4. first evaluate: one live call per dev item; layoff-3 is wrong, so 2 of 3

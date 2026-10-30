@@ -258,7 +258,7 @@ def test_label_writes_and_stamps_and_leaves_other_rows_identical(start, gold_pat
     assert new[0] == lines[0] and new[2:] == lines[2:]  # other rows byte-identical
     row = json.loads(new[1])
     assert row["labels"] == ["b"]
-    assert row["labelled_by"] == "hunches-ui"
+    assert row["labelled_by"] == "goldlabel-ui"
     datetime.fromisoformat(row["labelled_at"])
     assert (row["id"], row["text"], row["split"]) == ("2", "text 2", "dev")
     assert s["counts"]["b"] == 1

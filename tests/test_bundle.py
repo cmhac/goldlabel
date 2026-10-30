@@ -98,7 +98,7 @@ def test_evaluation_is_written_and_read_back(tmp_path):
     assert data["score"] == pytest.approx(2 / 3)
     assert data["metrics"]["exact_match"] == pytest.approx(2 / 3)
     assert data["digest"] == c.digest
-    assert data["sources"] == {"hunches-ui": 0, "imported": 0, "unstamped": 3}
+    assert data["sources"] == {"goldlabel-ui": 0, "imported": 0, "unstamped": 3}
     assert data["date"].startswith("20")
     with warnings.catch_warnings():
         warnings.simplefilter("error")

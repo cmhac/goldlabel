@@ -1,6 +1,6 @@
 """The labelling server: the one place (besides `Gold.import_rows`) where gold labels are written.
 
-A label is written only because a person's HTTP request says so, stamped `labelled_by: "hunches-ui"`.
+A label is written only because a person's HTTP request says so, stamped `labelled_by: "goldlabel-ui"`.
 Nothing here calls a model or returns a prediction. The server decides which item is next, so the
 page stays thin. The page is `web/index.html` + `app.js` + `app.css` from the package; the three are served only with
 the token and Host checks like everything else, and the HTML carries the token in its asset URLs.
@@ -170,7 +170,7 @@ class Handle:
                 raise KeyError(id_)
             stamp = {
                 "labels": labels,
-                "labelled_by": "hunches-ui",
+                "labelled_by": "goldlabel-ui",
                 "labelled_at": datetime.now(UTC).isoformat(),
             }
             self.gold._write(

@@ -8,6 +8,7 @@ from pathlib import Path
 from hunches import _frame, _html, _sync
 from hunches.candidates import BANDS, band_of
 from hunches.classifier import UNKNOWN_COST, Classifier, _dollars, _model_name
+from hunches.gold import _page_stamp
 from hunches.metrics import (
     Metrics,
     compute_metrics,
@@ -36,7 +37,7 @@ class Evaluation:
     skipped_pending: int
     sources: dict[
         str, int
-    ]  # labelled rows by `labelled_by`: hunches-ui, imported, unstamped
+    ]  # labelled rows by `labelled_by`: goldlabel-ui, imported, unstamped
     digest: str
     disagreements: list[dict]
     labels: list[str] = field(
@@ -175,9 +176,10 @@ async def aevaluate(
     gold = [set(r.labels or []) for r in rows]
     predicted = [set(p["labels"] or []) for p in preds.rows]
     metrics = compute_metrics(gold, predicted, taxonomy.names)
-    sources = {"hunches-ui": 0, "imported": 0, "unstamped": 0}
+    sources = {"goldlabel-ui": 0, "imported": 0, "unstamped": 0}
     for r in rows:
-        sources[r.labelled_by if r.labelled_by in sources else "unstamped"] += 1
+        key = _page_stamp(r.labelled_by)
+        sources[key if key in sources else "unstamped"] += 1
     splits = {r.split for r in rows}
     split = "mixed" if len(splits) > 1 else (splits.pop() if splits else gold_set.name)
     evaluation = Evaluation(
