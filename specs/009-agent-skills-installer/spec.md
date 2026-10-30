@@ -14,7 +14,8 @@
 
 A user has `goldlabel` installed and uses Claude Code, Codex, GitHub Copilot CLI or Kiro. They run one
 command, name their agent (or let it default), and the goldlabel skills are in the place that agent
-reads them from, with the gold rule in front of the agent from the first message. They do not copy
+reads them from, with the short gold rule in every skill's description (which agents load at start-up)
+and, for Kiro, the full rule in its always-included steering. They do not copy
 folders, edit manifests or look up each tool's install syntax.
 
 **Why this priority**: today the user must find the right install recipe per tool, three of which the
@@ -232,7 +233,8 @@ gold rule is verbatim in each.
 - **FR-003**: Every skill's front matter MUST be valid for all four agents at once: a lowercase,
   hyphenated `name` equal to its folder name, a `description` within the shortest limit any of the
   four documents, and no field one of them rejects. Each description MUST say when to use the skill
-  so the agent picks it without being told.
+  so the agent picks it without being told, and MUST end with the canonical short gold rule, because
+  descriptions are what an agent holds before any skill is opened.
 - **FR-004**: Each skill's code examples MUST use only public names of the library, checked by the
   existing drift test, and MUST show the library call before the explanation of why.
 - **FR-005**: The connection skill MUST have the agent confirm the connection and the id and text
