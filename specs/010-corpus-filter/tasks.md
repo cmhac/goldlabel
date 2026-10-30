@@ -92,7 +92,7 @@ filtered by the same expression, gives the same hand-written ids.
 **Independent test**: with the fake `psycopg`, a filtered corpus in every mode sends the condition
 exactly once, and only filtered rows come back.
 
-- [ ] T003 [US1] Add `PgCorpus.where` (spec PgCorpus form, FR-006, FR-008; research R4; data model
+- [X] T003 [US1] Add `PgCorpus.where` (spec PgCorpus form, FR-006, FR-008; research R4; data model
   fragment).
   - Red first, with hand-written SQL expectations:
     - `tests/test_search_pg_keywords.py`:
@@ -116,9 +116,11 @@ exactly once, and only filtered rows come back.
       `ValueError`, and without `where` every existing SQL expectation is unchanged.
   - Implementation in `src/goldlabel/search.py`:
     - field `where: str | None = None` on `PgCorpus`, validated in `__post_init__`;
-    - `_pg_where(corpus, id_expr)` returns the one fragment
-      `{id_expr} IN (SELECT {key} FROM {source} WHERE ({cond}))`. `{source}` and `{key}` come
-      from `text_source(corpus)`, and `{cond}` is `sql.SQL(corpus.where.replace("%", "%%"))`;
+    - `_pg_where(corpus)` returns the CTE
+      `goldlabel_where AS (SELECT {key} AS id FROM {source} WHERE ({cond}))`, and rows are kept
+      with `{id} IN (SELECT id FROM goldlabel_where)`. A CTE rather than a sub-query, so the
+      condition cannot reach the outer query's columns (research R4). `{source}` and `{key}`
+      come from `text_source(corpus)`, and `{cond}` is the condition with `%` doubled;
     - add it to the four `pg_items` queries, to step 1 of `search_pg_exact` and to
       `_search_pg_index`;
     - pass `()` instead of `None` as the parameters when `where` is set;

@@ -557,3 +557,89 @@ def test_statement_timeout_gives_the_hint(slow_table, project):
     assert "canceling statement due to statement timeout" in str(e.value)
     assert "Fix: raise statement_timeout for this role" in str(e.value)
     assert os.environ["GOLDLABEL_PG_URL"] not in str(e.value)
+
+
+# --- the corpus filter (010) ---------------------------------------------------------------------
+
+FILTER_ROWS = [  # id, text, section, name, embedding: written by hand
+    (1, "a vote ballot", "politics", "O'Brien", "[1,0]"),
+    (2, "ballot box", "sports", "x", "[1,0]"),
+    (3, "vote early", "politics", "y", "[0,1]"),
+]
+
+
+@pytest.fixture
+def filter_tables(admin, schema):
+    """`one`: everything in one table. `vec` + `txt`: the two-table layout, section in `txt`."""
+    admin.execute(
+        f"CREATE TABLE {schema}.one (id int PRIMARY KEY, text text, section text, "
+        "name text, embedding vector(2))"
+    )
+    admin.execute(
+        f"CREATE TABLE {schema}.vec (id int PRIMARY KEY, embedding vector(2))"
+    )
+    admin.execute(
+        f"CREATE TABLE {schema}.txt (id int PRIMARY KEY, text text, section text, name text)"
+    )
+    for i, text, section, name, emb in FILTER_ROWS:
+        admin.execute(
+            f"INSERT INTO {schema}.one VALUES (%s, %s, %s, %s, %s::vector)",
+            (i, text, section, name, emb),
+        )
+        admin.execute(f"INSERT INTO {schema}.vec VALUES (%s, %s::vector)", (i, emb))
+        admin.execute(
+            f"INSERT INTO {schema}.txt VALUES (%s, %s, %s, %s)",
+            (i, text, section, name),
+        )
+    return schema
+
+
+def ids(found):
+    return [r["id"] for r in found.rows]
+
+
+@pytest.mark.parametrize("layout", ["one", "two"])
+def test_a_filter_in_every_mode(filter_tables, project, layout):
+    s = filter_tables
+    tables = (
+        {"pg_table": f"{s}.one"}
+        if layout == "one"
+        else {"pg_table": f"{s}.vec", "pg_text_table": f"{s}.txt"}
+    )
+    pg = project(**tables, pg_where="section = 'politics'")
+    assert ids(candidates.get_candidates(pg, out=False)) == ["1", "3"]
+    assert ids(
+        candidates.get_candidates(pg, keywords=["ballot"], server_side=True, out=False)
+    ) == ["1"]
+    assert ids(candidates.get_candidates(pg, keywords=["ballot"], out=False)) == ["1"]
+    # row 2 has similarity 1.0 to [1, 0] but is outside the filter
+    hits, _ = search.search_pg_exact(pg, [[1.0, 0.0]], 0.5)
+    assert [i for i, *_ in hits[0]] == ["1"]
+
+
+@pytest.mark.parametrize("layout", ["one", "two"])
+def test_a_percent_and_a_doubled_quote_reach_the_database_as_written(
+    filter_tables, project, layout
+):
+    s = filter_tables
+    tables = (
+        {"pg_table": f"{s}.one"}
+        if layout == "one"
+        else {"pg_table": f"{s}.vec", "pg_text_table": f"{s}.txt"}
+    )
+    pg = project(**tables, pg_where="text LIKE '%vote%'")
+    assert ids(candidates.get_candidates(pg, out=False)) == ["1", "3"]
+    assert ids(
+        candidates.get_candidates(pg, keywords=["ballot"], server_side=True, out=False)
+    ) == ["1"]
+    pg = project(**tables, pg_where="name = 'O''Brien'")
+    assert ids(candidates.get_candidates(pg, out=False)) == ["1"]
+
+
+def test_a_filter_column_only_in_the_vector_table_says_so(filter_tables, project):
+    s = filter_tables
+    pg = project(
+        pg_table=f"{s}.vec", pg_text_table=f"{s}.txt", pg_where="embedding IS NOT NULL"
+    )
+    with pytest.raises(RuntimeError, match="Filter columns must be in the text table"):
+        candidates.get_candidates(pg, out=False)

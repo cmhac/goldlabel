@@ -32,8 +32,8 @@ corpus = gl.Table(
 - `ValueError`, when the corpus is built, if it is not a string or is blank.
 - It runs in the read-only transaction in every mode: whole corpus, keywords (Python or
   `server_side`), and seeds (`exact` and `index`).
-- It is always wrapped as `id IN (SELECT id FROM <text table or table> WHERE (...))`. With
-  `text_table`, it sees only the text table's columns. A column that is only in the vector
+- It is run in a CTE, `goldlabel_where AS (SELECT id FROM <text table or table> WHERE (...))`,
+  so it sees only that table's columns. With `text_table`, that is the text table. A column that is only in the vector
   table gives the database's error plus "Filter columns must be in the text table".
 
 ```python

@@ -2,7 +2,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, LiteralString, cast
 from urllib.parse import unquote, urlsplit
 
 import numpy as np
@@ -212,7 +212,9 @@ class S3Corpus:
 class PgCorpus:
     """A pgvector table. The database URL is read from the environment variable `url_env`,
     never stored. With `text_table` the text lives in a second table joined on
-    `text_id_column` (default: `id_column`) = `id_column`."""
+    `text_id_column` (default: `id_column`) = `id_column`. `where` is a Postgres condition with
+    its values written in (`"section = 'politics'"`), run on the database in every mode; in the
+    two-table layout its columns must be in the text table."""
 
     table: str
     id_column: str = "id"
@@ -227,10 +229,15 @@ class PgCorpus:
     aws_region: str | None = None
     aws_profile: str | None = None
     max_result_mb: int = 512  # 0: no limit
+    where: str | None = None
 
     def __post_init__(self):
         if not self.table:
             raise ValueError("PgCorpus: table is required")
+        if self.where is not None and not (
+            isinstance(self.where, str) and self.where.strip()
+        ):
+            raise ValueError("PgCorpus: where must be a non-empty SQL condition")
         if not self.url_env:
             raise ValueError("PgCorpus: url_env is required")
         if self.search not in ("exact", "index"):
@@ -310,6 +317,11 @@ def pg_message(e: Exception, corpus: PgCorpus, token: str | None = None) -> str:
         hint = "Fix: the embedder must be the model the table was embedded with."
     elif token and "authentication failed" in text:
         hint = IAM_CHECK
+    elif corpus.where and corpus.text_table and "does not exist" in text:
+        hint = (
+            f"Filter columns must be in the text table ({corpus.text_table}): "
+            "PgCorpus(where=...) is run against that table only."
+        )
     return f"{text}\n{hint}" if hint else text
 
 
@@ -386,6 +398,26 @@ def text_source(corpus: PgCorpus) -> tuple[str, str]:
     if corpus.text_table:
         return corpus.text_table, corpus.text_id_column or corpus.id_column
     return corpus.table, corpus.id_column
+
+
+def _pg_where(corpus: PgCorpus):
+    """The filter as a CTE, `goldlabel_where AS (SELECT <id> AS id FROM <text table, or table>
+    WHERE (<where>))`, for a query's WITH. A CTE cannot see the main query's tables, so the
+    condition sees that one table's columns only (a sub-query would fall back to the outer
+    query's). Rows are kept with `<id> IN (SELECT id FROM goldlabel_where)`. `%` is doubled for the
+    driver, so every query carrying this must be sent with parameters (an empty tuple at least)."""
+    from psycopg import sql
+
+    table, key = text_source(corpus)
+    # the user's own SQL by design, run in the read-only transaction; values are written into it
+    cond = cast(LiteralString, (corpus.where or "").replace("%", "%%"))
+    return sql.SQL(
+        "goldlabel_where AS (SELECT {key} AS id FROM {table} WHERE ({cond}))"
+    ).format(
+        key=sql.Identifier(key),
+        table=sql.Identifier(*table.split(".", 1)),
+        cond=sql.SQL(cond),
+    )
 
 
 def _texts_query(corpus: PgCorpus):
@@ -516,12 +548,12 @@ def search_pg_exact(
         vec_col = sql.Identifier(corpus.vector_column)
         typename, type_schema, _ = column_type(conn, table_name, corpus.vector_column)
         step1 = sql.SQL(
-            "WITH seeds AS MATERIALIZED (SELECT u.i - 1 AS i, u.q::{vtype} AS q "
+            "WITH {cte}seeds AS MATERIALIZED (SELECT u.i - 1 AS i, u.q::{vtype} AS q "
             "FROM unnest(%s::text[]) WITH ORDINALITY AS u(q, i)), "
             "pairs AS (SELECT t.{id} AS id, d.i, d.sim FROM {table} t "
             "CROSS JOIN LATERAL (SELECT s.i, 1 - (t.{vec} OPERATOR({schema}.<=>) s.q) AS sim "
             "FROM seeds s OFFSET 0) d "
-            "WHERE t.{vec} IS NOT NULL AND d.sim >= %s AND d.sim <> 'NaN'), "
+            "WHERE t.{vec} IS NOT NULL AND d.sim >= %s AND d.sim <> 'NaN'{where}), "
             "ranked AS (SELECT *, row_number() OVER "
             "(PARTITION BY i ORDER BY sim DESC, id) AS rn FROM pairs) "
             "SELECT id, i, sim FROM ranked WHERE rn <= %s"
@@ -531,6 +563,12 @@ def search_pg_exact(
             table=table,
             vec=vec_col,
             schema=sql.Identifier(type_schema),
+            cte=_pg_where(corpus) + sql.SQL(", ") if corpus.where else sql.SQL(""),
+            where=sql.SQL(" AND t.{} IN (SELECT id FROM goldlabel_where)").format(
+                id_col
+            )
+            if corpus.where
+            else sql.SQL(""),
         )
         if limit:
             _, width = table_estimates(conn, text_source(corpus)[0], corpus.text_column)
@@ -599,7 +637,8 @@ def pg_items(
 
         table = sql.Identifier(*corpus.table.split(".", 1))
         text_table, text_id = text_source(corpus)
-        if guard and limit_mb:
+        # the planner's statistics are for the whole table, so a filtered read skips this check
+        if guard and limit_mb and not corpus.where:
             rows, width = table_estimates(conn, text_table, corpus.text_column)
             if (
                 rows is not None and width is not None
@@ -621,6 +660,12 @@ def pg_items(
             "text_id": sql.Identifier(text_id),
         }
         params = None
+        names["where"] = sql.SQL("")
+        if corpus.where:
+            id_expr = sql.SQL("t.") + names["id"] if corpus.text_table else names["id"]
+            names["where"] = sql.SQL(" AND " if match else " WHERE ") + sql.SQL(
+                "{} IN (SELECT id FROM goldlabel_where)"
+            ).format(id_expr)
         if match:
             terms, is_regex = match
             names["op"] = sql.SQL("~" if is_regex else "ILIKE")
@@ -633,21 +678,25 @@ def pg_items(
         if corpus.text_table and match:
             query = sql.SQL(
                 "SELECT t.{id}, x.{text} FROM {table} t JOIN {text_table} x "
-                "ON x.{text_id} = t.{id} WHERE x.{text} {op} ANY(%s::text[]) ORDER BY t.{id}"
+                "ON x.{text_id} = t.{id} WHERE x.{text} {op} ANY(%s::text[]){where} "
+                "ORDER BY t.{id}"
             )
         elif corpus.text_table:
             query = sql.SQL(
                 "SELECT t.{id}, x.{text} FROM {table} t LEFT JOIN {text_table} x "
-                "ON x.{text_id} = t.{id} ORDER BY t.{id}"
+                "ON x.{text_id} = t.{id}{where} ORDER BY t.{id}"
             )
         elif match:
             query = sql.SQL(
-                "SELECT {id}, {text} FROM {table} WHERE {text} {op} ANY(%s::text[]) "
-                "ORDER BY {id}"
+                "SELECT {id}, {text} FROM {table} WHERE {text} {op} ANY(%s::text[])"
+                "{where} ORDER BY {id}"
             )
         else:
-            query = sql.SQL("SELECT {id}, {text} FROM {table} ORDER BY {id}")
+            query = sql.SQL("SELECT {id}, {text} FROM {table}{where} ORDER BY {id}")
         query = query.format(**names)
+        if corpus.where:
+            query = sql.SQL("WITH ") + _pg_where(corpus) + sql.SQL(" ") + query
+            params = params or ()
         received = rows_in = 0
         with conn.cursor(name="goldlabel_items") as cur:
             cur.itersize = PG_BATCH
@@ -699,8 +748,8 @@ def _search_pg_index(
         )
         two_tables = bool(corpus.text_table)
         query = sql.SQL(
-            "SELECT {id}, {text}, {dist} AS sim FROM {table} "
-            "WHERE {dist} >= %s AND {dist} <> 'NaN' "
+            "{cte}SELECT {id}, {text}, {dist} AS sim FROM {table} "
+            "WHERE {dist} >= %s AND {dist} <> 'NaN'{where} "
             "ORDER BY {vec} OPERATOR({schema}.<=>) %s::{vtype} LIMIT %s"
         ).format(
             id=sql.Identifier(corpus.id_column),
@@ -711,6 +760,14 @@ def _search_pg_index(
             vec=sql.Identifier(vec_name),
             schema=sql.Identifier(type_schema),
             vtype=sql.Identifier(type_schema, typename),
+            cte=sql.SQL("WITH ") + _pg_where(corpus) + sql.SQL(" ")
+            if corpus.where
+            else sql.SQL(""),
+            where=sql.SQL(" AND {} IN (SELECT id FROM goldlabel_where)").format(
+                sql.Identifier(corpus.id_column)
+            )
+            if corpus.where
+            else sql.SQL(""),
         )
         literal = "[" + ",".join(repr(float(x)) for x in query_vector) + "]"
         with conn.cursor() as cur:

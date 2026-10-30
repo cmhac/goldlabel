@@ -52,8 +52,8 @@ real pgvector in CI only. Baseline: 621 passed, 18 skipped (`uv sync --all-extra
 **Constraints**:
 - `import goldlabel` still imports neither polars nor pyarrow (`test_public_api.py`).
 - Postgres stays read-only, with identifiers through `sql.Identifier`.
-- The user's condition is passed through as `sql.SQL`, never parsed, inside one `id IN (SELECT ...)`
-  form for both layouts (research R4).
+- The user's condition is passed through as `sql.SQL`, never parsed, inside one CTE,
+  `goldlabel_where`, for both layouts (research R4).
 
 **Scale/Scope**:
 - `Table` is still read into memory, as today.
@@ -78,7 +78,7 @@ real pgvector in CI only. Baseline: 621 passed, 18 skipped (`uv sync --all-extra
 | Constraints: Stack | Adds two core dependencies, justified in Complexity Tracking. The constitution's Stack line and `AGENTS.md` are updated in the same change (PATCH via `/speckit-constitution`). | Pass, with justification |
 | Constraints: APIs | Checked against installed polars 2.1.0, psycopg 3.3.6 and the botocore `s3vectors` model, plus current docs (research R1-R5). | Pass |
 
-**Post-design re-check**: unchanged. The design adds 3 fields, 3 private helpers (`_pg_where`,
+**Post-design re-check**: unchanged. The design adds 3 fields, 3 private helpers (`_pg_where`, a CTE,
 `_s3_check`, `_s3_match`) and no public name. Two existing behaviours change as a consequence of
 the user's polars-only decision. Both are recorded below and in the spec.
 

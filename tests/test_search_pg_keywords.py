@@ -386,3 +386,107 @@ def test_server_side_runs_only_select(monkeypatch):
     conn, corpus = served(monkeypatch, NEEDLE_ROWS)
     get_candidates(corpus, keywords=["needle"], server_side=True, out=False)
     assert all(e[0].lstrip().upper().startswith("SELECT") for e in conn.executed)
+
+
+# --- the corpus filter (010) ---------------------------------------------------------------------
+
+POLITICS = "section = 'politics'"
+# hand-written from the design: the filter is a CTE, which cannot see the main query's tables
+CTE_ONE = (
+    'WITH goldlabel_where AS (SELECT "id" AS id FROM "public"."docs" '
+    "WHERE (section = 'politics')) "
+)
+CTE_TWO = (
+    'WITH goldlabel_where AS (SELECT "doc_id" AS id FROM "public"."texts" '
+    "WHERE (section = 'politics')) "
+)
+KEEP = '"id" IN (SELECT id FROM goldlabel_where)'
+
+
+def test_a_filtered_whole_corpus(monkeypatch):
+    conn = Conn(rows(3))
+    get_candidates(setup(monkeypatch, conn, where=POLITICS), out=False)
+    sql, params, _, _ = conn.executed[0]
+    assert sql == (
+        f'{CTE_ONE}SELECT "id", "text" FROM "public"."docs" WHERE {KEEP} ORDER BY "id"'
+    )
+    assert params == ()  # never None: psycopg then turns the doubled % back into one
+
+
+def test_filtered_server_side_keywords(monkeypatch):
+    conn = Conn(rows(30))
+    corpus = setup(monkeypatch, conn, where=POLITICS)
+    get_candidates(corpus, keywords=["needle"], server_side=True, out=False)
+    assert conn.executed[0][0] == (
+        f'{CTE_ONE}SELECT "id", "text" FROM "public"."docs" '
+        f'WHERE "text" ILIKE ANY(%s::text[]) AND {KEEP} ORDER BY "id"'
+    )
+    assert conn.executed[0][1] == (["%needle%"],)
+
+
+def test_a_filtered_two_table_whole_corpus(monkeypatch):
+    conn = Conn([("a", "text a")])
+    corpus = setup(
+        monkeypatch,
+        conn,
+        text_table="public.texts",
+        text_id_column="doc_id",
+        where=POLITICS,
+    )
+    get_candidates(corpus, out=False)
+    assert conn.executed[0][0] == (
+        f'{CTE_TWO}SELECT t."id", x."text" FROM "public"."docs" t '
+        'LEFT JOIN "public"."texts" x ON x."doc_id" = t."id" '
+        f'WHERE t.{KEEP} ORDER BY t."id"'
+    )
+    assert conn.executed[0][1] == ()
+
+
+def test_filtered_two_table_server_side_keywords(monkeypatch):
+    conn = Conn([("a", "a needle")])
+    corpus = setup(
+        monkeypatch,
+        conn,
+        text_table="public.texts",
+        text_id_column="doc_id",
+        where=POLITICS,
+    )
+    get_candidates(corpus, keywords=["needle"], server_side=True, out=False)
+    assert conn.executed[0][0] == (
+        f'{CTE_TWO}SELECT t."id", x."text" FROM "public"."docs" t JOIN "public"."texts" x '
+        'ON x."doc_id" = t."id" WHERE x."text" ILIKE ANY(%s::text[]) '
+        f'AND t.{KEEP} ORDER BY t."id"'
+    )
+
+
+def test_a_percent_in_the_condition_is_doubled_for_the_driver(monkeypatch):
+    conn = Conn(rows(3))
+    corpus = setup(monkeypatch, conn, where="body LIKE 'vote%' AND name = 'O''Brien'")
+    get_candidates(corpus, out=False)
+    assert "WHERE (body LIKE 'vote%%' AND name = 'O''Brien'))" in conn.executed[0][0]
+
+
+def test_a_filtered_whole_corpus_skips_the_estimate_but_keeps_the_stream_check(
+    monkeypatch,
+):
+    big = "x" * 600_000
+    conn = Conn([("a", big), ("b", big), ("c", big)])  # no estimate answers queued
+    corpus = setup(monkeypatch, conn, max_result_mb=1, where=POLITICS)
+    with pytest.raises(RuntimeError, match=r"already received.*1 MB"):
+        get_candidates(corpus, out=False)
+    assert len(conn.executed) == 1
+
+
+def test_a_filter_column_missing_from_the_text_table_says_where_it_must_be(
+    monkeypatch,
+):
+    conn = Conn(Exception('column "section" does not exist'))
+    corpus = setup(monkeypatch, conn, text_table="public.texts", where=POLITICS)
+    with pytest.raises(RuntimeError, match="Filter columns must be in the text table"):
+        get_candidates(corpus, out=False)
+
+
+@pytest.mark.parametrize("bad", ["", "   ", 5])
+def test_a_postgres_filter_must_be_sql_text(bad):
+    with pytest.raises(ValueError, match="where"):
+        PgCorpus(table="docs", where=bad)

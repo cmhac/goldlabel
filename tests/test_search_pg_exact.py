@@ -282,3 +282,30 @@ def test_text_table_is_ignored_without_it(monkeypatch):
     assert conn.executed[3][0] == (
         'SELECT "id", "text" FROM "public"."docs" WHERE "id" = ANY(%s)'
     )
+
+
+def test_step1_carries_the_filter_as_a_cte_of_its_own(monkeypatch):
+    conn = conn_for([], [])
+    corpus = setup(
+        monkeypatch, conn, where="i = 3"
+    )  # a column named like step 1's own `i`
+    search.search_pg_exact(corpus, [[1.0, 2.0, 3.0]], 0.3)
+    sql = conn.executed[2][0]
+    assert sql.startswith(
+        'WITH goldlabel_where AS (SELECT "id" AS id FROM "public"."docs" WHERE (i = 3)), '
+        "seeds AS MATERIALIZED ("
+    )
+    assert (
+        "AND d.sim <> 'NaN' AND t.\"id\" IN (SELECT id FROM goldlabel_where)), ranked AS"
+        in sql
+    )
+
+
+def test_two_tables_step1_filters_through_the_text_table(monkeypatch):
+    conn = conn_for([], [])
+    corpus = setup(monkeypatch, conn, text_table="public.texts", where="section = 'x'")
+    search.search_pg_exact(corpus, [[1.0, 2.0, 3.0]], 0.3)
+    assert conn.executed[2][0].startswith(
+        'WITH goldlabel_where AS (SELECT "id" AS id FROM "public"."texts" '
+        "WHERE (section = 'x')), seeds AS"
+    )

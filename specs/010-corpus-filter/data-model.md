@@ -17,10 +17,11 @@ Rules:
 - `Candidates` is unchanged: a filtered corpus gives an ordinary `source="all"`, `"keywords"` or
   `"seeds"` list.
 
-Postgres fragment (R4), where `id` is `t.{id}` or `{id}` depending on the query:
+Postgres (R4), where `id` is `t.{id}` or `{id}` depending on the query:
 
 ```text
-... AND <id> IN (SELECT <key> FROM <source> WHERE (<where, every % doubled>))
+WITH goldlabel_where AS (SELECT <key> AS id FROM <source> WHERE (<where, every % doubled>))
+SELECT ... WHERE ... AND <id> IN (SELECT id FROM goldlabel_where) ...
 -- <source>, <key> = text_source(corpus): the text table and its id, or the table and id_column
 ```
 

@@ -111,10 +111,11 @@ corpus = gl.PgCorpus(
   library sends every query with parameters, which the server runs as a single statement.
 - The SQL text is code the user wrote in their own notebook against their own database. The
   library passes it through unchanged and does not try to validate it.
-- The library always wraps the condition as `id IN (SELECT id FROM <table> WHERE (<condition>))`,
-  where `<table>` is the text table in the two-table layout and the table otherwise. So an
-  unqualified column name always means a column of that one table, never one of the search's own
-  helper columns.
+- The library puts the condition in a CTE (`WITH goldlabel_where AS (SELECT id FROM <table>
+  WHERE (<condition>))`) and keeps rows whose id is in it. `<table>` is the text table in the
+  two-table layout and the table otherwise. A CTE cannot see the main query's tables, so a column
+  name always means a column of that one table, never one of the search's own helper columns or
+  the vector table's. (A plain sub-query would quietly fall back to the outer query's columns.)
 - Two-table layout: a column that is only in the vector table gives the database's own "column
   does not exist" error, with a line added saying that filter columns must be in the text table.
 

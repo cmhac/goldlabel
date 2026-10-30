@@ -254,3 +254,20 @@ def test_two_tables_no_hits_skips_the_text_query(monkeypatch):
         False,
     )
     assert len(conn.executed) == 5
+
+
+def test_the_index_query_carries_the_filter(monkeypatch):
+    conn = Conn([("0.8.1", "extensions")], [("halfvec", "ext", 3)], [], [], [])
+    corpus = setup(
+        monkeypatch, conn, table="s.docs", vector_column="emb", where="year >= 2024"
+    )
+    search.search_vectors(corpus, [1.0, 2.0, 3.0], 0.3, embedding_model="m")
+    assert conn.executed[4][0] == (
+        'WITH goldlabel_where AS (SELECT "id" AS id FROM "s"."docs" WHERE (year >= 2024)) '
+        'SELECT "id", "text", 1 - ("emb" OPERATOR("ext".<=>) %s::"ext"."halfvec") AS sim '
+        'FROM "s"."docs" '
+        'WHERE 1 - ("emb" OPERATOR("ext".<=>) %s::"ext"."halfvec") >= %s '
+        'AND 1 - ("emb" OPERATOR("ext".<=>) %s::"ext"."halfvec") <> \'NaN\' '
+        'AND "id" IN (SELECT id FROM goldlabel_where) '
+        'ORDER BY "emb" OPERATOR("ext".<=>) %s::"ext"."halfvec" LIMIT %s'
+    )
