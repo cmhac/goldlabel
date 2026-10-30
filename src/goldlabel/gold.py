@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from goldlabel import _frame, _html
 from goldlabel._gold_rule import GOLD_RULE_SHORT, GoldError, GoldTypeError
+from goldlabel.evaluation import eval_log
 from goldlabel.settings import resolve
 from goldlabel.taxonomy import Taxonomy
 
@@ -228,3 +229,35 @@ class Gold:
                 f.write("".join(json.dumps(r.dump()) + "\n" for r in gone))
             self._write([r for r in rows if r.id not in ids])
         return GoldSet(gone, "removed")
+
+    def fold_test(self, log=None) -> GoldSet:
+        """Move the labelled rows of an evaluated test split to dev; only `split` changes.
+
+        For a test split that is spent: the user wants to keep tuning after scoring it. Draw a fresh
+        test split afterwards (`draw(..., split="test")`) for people to label. Refuses while a test
+        row is pending or when the test split was not evaluated since the last fold. Logs a
+        `test_folded` event in the evaluation log (`log`: that file; default `<root>/evals.jsonl`).
+        """
+        rows = self._read()
+        test = [r for r in rows if r.split == "test"]
+        if any(not r.labels for r in test):
+            raise GoldError("a test row is still pending; finish labelling it first")
+        if not test:
+            raise GoldError(f"there are no test rows in {self.path} to fold")
+        path = resolve(log, "evals.jsonl")
+        history = eval_log(path)
+        since = history.folds[-1]["time"] if history.folds else ""
+        if not any(r["split"] == "test" and r["time"] > since for r in history.rows):
+            raise GoldError(
+                "the test split has not been evaluated since the last fold; there is nothing to retire"
+            )
+        moved = {r.id: r.model_copy(update={"split": "dev"}) for r in test}
+        self._write([moved.get(r.id, r) for r in rows])
+        with path.open("a") as f:
+            event = {
+                "event": "test_folded",
+                "time": datetime.now(UTC).isoformat(),
+                "rows": len(moved),
+            }
+            f.write(json.dumps(event) + "\n")
+        return GoldSet(list(moved.values()), "folded")

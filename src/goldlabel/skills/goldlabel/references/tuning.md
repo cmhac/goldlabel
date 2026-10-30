@@ -48,7 +48,7 @@ gl.label(gold, taxonomy)
 final = gl.evaluate(clf, gold.test)
 ```
 
-If the result is disappointing, report it as it is and ask the user what they want; changing the prompt after seeing it makes the test split a second dev split, and `gl.eval_log()` will show that the test split was evaluated more than once. If the user insists on iterating, suggest a fresh test split drawn and labelled by people.
+If the result is disappointing, report it as it is and ask the user what they want. The test rows are now spent: changing the prompt after seeing the score makes them a second dev set. If the user wants to keep tuning, there is one honest way, and it needs their **explicit yes** after you have said what it does: `gold.fold_test()` moves the spent, labelled test rows into dev (only `split` changes, never a label; it refuses while a test row is pending; `gl.eval_log()` records the fold), then draw a fresh test split with `gold.draw(candidates, n=50, split="test")`, have people label it (`gl.label(gold, taxonomy)`), tune on the larger dev set, and evaluate the fresh test split once. Never fold without that yes. The `goldlabel-tune` skill has the steps.
 
 ## Gold looks wrong or incomplete
 

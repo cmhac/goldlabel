@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from goldlabel import gold as gold_module
+from goldlabel._gold_rule import GoldError
 from goldlabel.candidates import Candidates
 from goldlabel.gold import Gold, GoldSet
 from goldlabel.settings import settings
@@ -371,16 +372,20 @@ def test_a_crash_between_temp_write_and_replace_leaves_the_old_file(
 def test_only_import_rows_can_set_a_label():
     public = {n for n in dir(Gold) if not n.startswith("_")}
     # any new public name must be reviewed against the gold rule before it is added here
-    assert public == {
-        "dev",
-        "test",
-        "pending",
-        "all",
-        "draw",
-        "import_rows",
-        "orphaned",
-        "remove",
-    }
+    assert (
+        public
+        == {
+            "dev",
+            "test",
+            "pending",
+            "all",
+            "draw",
+            "import_rows",
+            "orphaned",
+            "remove",
+            "fold_test",  # reviewed against the gold rule in 009/T003: it changes `split` only
+        }
+    )
     module_public = {
         n
         for n in vars(gold_module)
@@ -410,3 +415,79 @@ def test_nothing_but_import_rows_changes_a_labelled_row(tmp_path):
     by_id = {r["id"]: r["labels"] for r in lines(path)}
     assert by_id["1"] == ["a"] and by_id["2"] is None
     assert sum(v is None for v in by_id.values()) == 3  # row 2 plus the two drawn
+
+
+# --- fold_test (009) ----------------------------------------------------------------------------
+
+
+def log_line(path, **line):
+    with path.open("a") as f:
+        f.write(json.dumps(line) + "\n")
+
+
+def spent_split(tmp_path):
+    """Two labelled test rows, one labelled dev row, and a logged test evaluation."""
+    gold = write(
+        tmp_path / "g.jsonl",
+        row("d1", ["a"], labelled_by="goldlabel-ui", labelled_at="2026-01-01T00:00:00+00:00"),
+        row("t1", ["a", "b"], "test", labelled_by="imported", labelled_at="2026-01-02T00:00:00+00:00", extra="kept"),
+        row("t2", ["b"], "test"),
+    )  # fmt: skip
+    log = tmp_path / "evals.jsonl"
+    log_line(log, time="2026-02-01T00:00:00+00:00", split="test", n=2)
+    return Gold(gold), log
+
+
+def test_fold_test_changes_only_split_and_logs_it(tmp_path):
+    g, log = spent_split(tmp_path)
+    before = {r["id"]: r for r in lines(g.path)}
+    moved = g.fold_test(log=log)
+    after = {r["id"]: r for r in lines(g.path)}
+    assert [r.id for r in moved.rows] == ["t1", "t2"]
+    assert list(after) == ["d1", "t1", "t2"]  # same order, nothing added or lost
+    for id_ in ("t1", "t2"):
+        assert after[id_] == {**before[id_], "split": "dev"}  # incl. the extra key
+    assert after["d1"] == before["d1"]
+    assert (len(g.dev), len(g.test)) == (3, 0)
+    [event] = [r for r in lines(log) if r.get("event")]
+    assert (event["event"], event["rows"]) == ("test_folded", 2)
+    assert event["time"] > "2026-02-01"
+
+
+def test_fold_test_refuses_when_a_test_row_is_pending(tmp_path):
+    g, log = spent_split(tmp_path)
+    g.draw(cands(3), n=1, split="test", seed=0)
+    before = g.path.read_text()
+    with pytest.raises(GoldError, match="finish labelling"):
+        g.fold_test(log=log)
+    assert g.path.read_text() == before and len(lines(log)) == 1
+
+
+def test_fold_test_refuses_with_no_test_rows(tmp_path):
+    g = Gold(write(tmp_path / "g.jsonl", row("d1", ["a"])))
+    log = tmp_path / "evals.jsonl"
+    log_line(log, time="2026-02-01T00:00:00+00:00", split="test", n=0)
+    with pytest.raises(GoldError, match="no test rows"):
+        g.fold_test(log=log)
+
+
+def test_fold_test_refuses_when_the_test_split_was_never_evaluated(tmp_path):
+    g, _ = spent_split(tmp_path)
+    log = tmp_path / "other.jsonl"
+    log_line(log, time="2026-02-01T00:00:00+00:00", split="dev", n=1)
+    with pytest.raises(GoldError, match="not been evaluated"):
+        g.fold_test(log=log)
+    with pytest.raises(GoldError, match="not been evaluated"):
+        g.fold_test(log=tmp_path / "missing.jsonl")
+
+
+def test_fold_test_cannot_run_twice_and_a_fresh_split_starts_pending(tmp_path):
+    g, log = spent_split(tmp_path)
+    g.fold_test(log=log)
+    with pytest.raises(GoldError, match="no test rows"):
+        g.fold_test(log=log)
+    g.draw(cands(5), n=1, split="test", seed=0)
+    [fresh] = g.pending.rows
+    assert fresh.id not in {"d1", "t1", "t2"} and fresh.labels is None
+    with pytest.raises(GoldError, match="finish labelling"):
+        g.fold_test(log=log)

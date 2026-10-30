@@ -7,7 +7,7 @@ hand-labelled gold set then produces classified output.
 You build the analysis step by step in a Jupyter notebook (or a plain script), alone or with a coding
 agent, by chaining function calls whose results display themselves. The one thing that needs a screen of
 its own, labelling the gold set, is a small local web page that a function call opens. There is no
-application, no console script and no stored status: the notebook is the record of what you did, and the
+application, no stored status (its one command, `goldlabel install`, only copies agent skills): the notebook is the record of what you did, and the
 state is plain files.
 
 ## Install
@@ -240,56 +240,41 @@ so reuse of the test set is visible to whoever reads your notebook.
 
 ## Using it with a coding agent
 
-The repository is also a plugin (a skill with four reference files) that teaches an agent these idioms and
-the gold rule. The install commands below are what each tool documents. The plugin has not yet been
-installed and exercised in a real session of any of them (that trial is on the release checklist), and where
-a command is not in the tool's own documentation it is marked **unverified**.
-
-**Claude Code**
+The package ships a set of agent skills, one per stage of the analysis (`goldlabel-connect`,
+`goldlabel-search-terms`, `goldlabel-taxonomy`, `goldlabel-candidates`, `goldlabel-tune`, `goldlabel-run`,
+and the `goldlabel` overview), and a command that copies them to where your agent reads them. Each skill
+carries the gold rule: the agent never writes a gold label; people label in the labelling page.
 
 ```
-/plugin marketplace add cmhac/goldlabel
-/plugin install goldlabel@goldlabel
+goldlabel install claude        # or codex, copilot, kiro, all
+uvx goldlabel install claude    # without installing the package first
 ```
 
-Send them as two separate prompts. `claude plugin validate .` passes on this repository.
+| Agent | Project folder | With `--global` |
+|---|---|---|
+| Claude Code | `.claude/skills/` | `~/.claude/skills/` |
+| Codex | `.agents/skills/` | `~/.agents/skills/` |
+| GitHub Copilot CLI | `.agents/skills/` (shared with Codex; written once) | `~/.agents/skills/` |
+| Kiro | `.kiro/skills/`, plus `.kiro/steering/goldlabel.md` (the gold rule, always included) | `~/.kiro/skills/`, `~/.kiro/steering/goldlabel.md` |
 
-**Codex**
+Running it again changes nothing; a skill whose files differ from the shipped ones is not overwritten
+unless you pass `--force`; `--dry-run` prints what would be written. Afterwards: Copilot, run
+`/skills reload`; Codex, type `$` or `/skills` (restart it if they do not appear); Claude Code, restart if
+the folder is new. A Kiro custom agent loads no skills unless its `resources` lists
+`skill://.kiro/skills/*/SKILL.md` (the command prints this and does not edit your agent files).
+Claude Code can also install the repository as a plugin: `/plugin marketplace add cmhac/goldlabel`, then
+`/plugin install goldlabel@goldlabel` as two separate prompts.
 
-```
-codex plugin marketplace add cmhac/goldlabel
-codex plugin add goldlabel@goldlabel
-```
+**Any other agent.** `goldlabel install --dir PATH` writes the skill folders to `PATH` (each folder is one
+skill with a `SKILL.md`); point your agent's skills setting at it, or copy the folders by hand from
+`src/goldlabel/skills/`. An agent that reads only an instruction file can take the block below instead
+(`AGENTS.md` for Codex and Copilot CLI, `.github/copilot-instructions.md` for Copilot, `CLAUDE.md` for
+Claude Code). The same text is in `docs/agent-instructions.md`, and `print(goldlabel.GOLD_RULE_FULL)`
+prints the rule.
 
-The first command is in the Codex documentation. The second form (`codex plugin add NAME@MARKETPLACE`) is
-**unverified** for this repository: Codex documents installing from its Plugins directory, and the form
-shown is what another published plugin documents. Codex reading `.claude-plugin/marketplace.json` is also
-unverified.
-
-**GitHub Copilot CLI**
-
-```
-copilot plugin marketplace add cmhac/goldlabel
-copilot plugin install goldlabel@goldlabel
-```
-
-or, inside a session, `/plugin marketplace add cmhac/goldlabel` and `/plugin install goldlabel@goldlabel`.
-The marketplace command is documented; the exact `NAME@MARKETPLACE` install form is **unverified**, and so
-is whether Copilot accepts this repository's marketplace entry.
-
-**Kiro**
-
-Copy `.kiro/steering/goldlabel.md` from this repository into your project's `.kiro/steering/` (it carries the
-gold rule and is always included), and copy `skills/goldlabel/` into your skills folder. The repository also
-has a root `plugin.json` (Agent Plugins 1.0) that Kiro Powers read. `npx skills add cmhac/goldlabel -a kiro-cli -g`
-is **unverified**: it is not on Kiro's skills page.
-
-**Any other agent**
-
-Paste the block below into the project's instruction file (`AGENTS.md` for Codex and Copilot CLI,
-`.github/copilot-instructions.md` for Copilot, `CLAUDE.md` for Claude Code) or give the agent
-`skills/goldlabel/SKILL.md`. The same text is in `docs/agent-instructions.md`, and
-`print(goldlabel.GOLD_RULE_FULL)` prints the rule.
+If a test split scores too low and you want to keep tuning, the skills use `gold.fold_test()`: it moves
+the spent, labelled test rows to dev (only `split` changes), the agent does it only after your explicit
+yes, and people label a fresh test split.
 
 ### The agent instruction block
 
@@ -300,9 +285,10 @@ Importing a file the user says people already labelled is allowed: import it unc
 
 When working with the `goldlabel` library (content analysis over a corpus: candidates from seed phrases, keywords or the whole corpus, an LLM classifier checked against human-labelled gold data):
 
-- Read `skills/goldlabel/SKILL.md` first, then the reference you need: `skills/goldlabel/references/workflow.md` (brief, seeds, taxonomy, gold, first evaluation), `skills/goldlabel/references/tuning.md` (reading disagreements, tuning on dev, never on test), `skills/goldlabel/references/running.md` (estimate, cost, `max_cost`, resuming, keys), `skills/goldlabel/references/reuse.md` (saved classifiers). If the skill files are not in the project, read them at https://github.com/cmhac/goldlabel/tree/main/skills/goldlabel or print the rule with `import goldlabel; print(goldlabel.GOLD_RULE_FULL)`.
+- Use the goldlabel agent skills: `goldlabel` (start here), then the one for the stage you are at: `goldlabel-connect`, `goldlabel-search-terms`, `goldlabel-taxonomy`, `goldlabel-candidates`, `goldlabel-tune`, `goldlabel-run`. If they are not installed, run `goldlabel install <agent>` (claude, codex, copilot, kiro), read them at https://github.com/cmhac/goldlabel/tree/main/src/goldlabel/skills, or print the rule with `import goldlabel; print(goldlabel.GOLD_RULE_FULL)`.
 - Never run a full classification without showing `clf.estimate(...)` (calls, cost, time) and getting a yes from the user.
 - Never put API keys or database URLs in a notebook, script or file; they come from environment variables.
+- Never evaluate the test split to guide edits, and never fold a spent test split into dev without the user's explicit yes.
 
 ## Development
 

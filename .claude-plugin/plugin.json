@@ -11,5 +11,8 @@
     "classification",
     "embeddings",
     "notebook"
+  ],
+  "skills": [
+    "./src/goldlabel/skills"
   ]
 }

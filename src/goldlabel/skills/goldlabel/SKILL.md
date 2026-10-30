@@ -23,11 +23,20 @@ corpus -> gl.get_candidates(seeds= | keywords= | nothing) -> candidates -> gl.Ta
 
 This is a guide to idioms, not a procedure: do what the user asks for, in the order that fits. Check a signature with `help(gl.X)` before using a call you are unsure of.
 
+## Stage skills (load the one for the stage you are at)
+
+- `goldlabel-connect`: point at the data, confirm the connection and columns, reshape the data.
+- `goldlabel-search-terms`: keywords, regular expressions or seeds, drafted with the user.
+- `goldlabel-taxonomy`: read the corpus with the user and agree the labels.
+- `goldlabel-candidates`: run candidate generation and inspect it.
+- `goldlabel-tune`: classifier, gold set (people label), dev tuning, the test split and what to do when its score is too low.
+- `goldlabel-run`: cutoff, estimate, the full run, saving the classifier.
+
 ## Hard rules
 
 1. The gold rule above. Never write, edit, infer or auto-fill a gold label, never edit a gold file by any means, and never take a label from a model.
 2. Never run the full classification without first showing the estimate (`clf.estimate(...)`: calls, cost, time; `cost ?` means the price is unknown, never read it as zero) and getting an explicit yes. Pass `max_cost=` when you do run it.
-3. Never evaluate the test split to guide edits. Tune on the dev split; the test split is evaluated once, at the end, to report.
+3. Never evaluate the test split to guide edits. Tune on the dev split; the test split is evaluated once, at the end, to report. If its score is too low and the user wants to keep tuning, `gold.fold_test()` retires the spent rows into dev, but only after the user's explicit yes (see `goldlabel-tune`).
 4. Never put an API key or a database URL in a notebook, script or any file. Keys and `GOLDLABEL_PG_URL` come from environment variables (environment variable names go in code, values never); `PgCorpus(url_env=...)` takes the variable's name.
 5. Ask the user at each decision point; do not decide for them: the brief (what counts as a match), the seeds (which phrases would be true of a match), `single` or `multi` labels, the label descriptions, the similarity cutoff, the target score, and whether to spend money on a full run.
 

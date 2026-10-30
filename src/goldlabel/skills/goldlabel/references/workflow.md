@@ -88,7 +88,7 @@ rows = [
 gold.import_rows(rows, split="dev")
 ```
 
-and tell the user what the file says about who labelled it. Never add, correct or fill in a label. `gold.dev.counts(taxonomy)` shows how many rows each label has; if a label has almost none, say so and suggest drawing more or adding seeds that find it, which is the user's call. `gold.orphaned(taxonomy)` lists rows whose labels are no longer in the taxonomy; `gold.remove(ids)` moves rows to a `.removed.jsonl` file and is destructive: ask first.
+and tell the user what the file says about who labelled it. Never add, correct or fill in a label. `gold.dev.counts(taxonomy)` shows how many rows each label has; if a label has almost none, say so and suggest drawing more or adding seeds that find it, which is the user's call. `gold.orphaned(taxonomy)` lists rows whose labels are no longer in the taxonomy; `gold.remove(ids)` moves rows to a `.removed.jsonl` file and is destructive: ask first. The test split, and what to do when its score is too low, is in `references/tuning.md` and the `goldlabel-tune` skill.
 
 ## 5. First evaluation
 
