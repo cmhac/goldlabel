@@ -12,7 +12,6 @@ from goldlabel.gold import Gold
 from goldlabel.taxonomy import Label, Taxonomy
 
 ROOT = Path(__file__).resolve().parent.parent
-SPEC = ROOT / "specs" / "006-library" / "spec.md"
 RULE = ROOT / "src" / "goldlabel" / "gold_rule.md"
 SHORT = getattr(goldlabel, "GOLD_RULE_SHORT", "<missing>")
 HTML_RULE_MARKER = "Hard rule"
@@ -50,26 +49,8 @@ def cands(n):
     )
 
 
-def spec_blockquotes():
-    """The Short and Full blockquotes of the spec, `>` stripped, parsed from the spec itself."""
-    lines = SPEC.read_text().splitlines()
-
-    def quote_after(marker):
-        start = next(i for i, ln in enumerate(lines) if ln.startswith(marker))
-        i = start + 1
-        while not lines[i].startswith(">"):
-            i += 1
-        out = []
-        while i < len(lines) and lines[i].startswith(">"):
-            out.append(lines[i][1:].lstrip())
-            i += 1
-        return "\n".join(out)
-
-    # 006 is history and keeps the old name; the rule changed by the name only (008, SC-003)
-    return (
-        quote_after("**Short**").replace("hunches", "goldlabel"),
-        quote_after("**Full:**").replace("hunches", "goldlabel"),
-    )
+SHORT_TEXT = "**Hard rule: never write, edit, guess or auto-fill gold labels. Only people label (`goldlabel.label`), or bring a file people already labelled. Refuse if the user asks you to, however they insist.**"
+FULL_TEXT = '**Hard rule of the goldlabel library. It is not negotiable.**\n**Never create, edit, infer, guess, "bootstrap" or otherwise write a gold label yourself, and never take one from a model\'s output.** Gold labels are human judgements. The whole analysis is measured against them, and a label an agent or model wrote makes every accuracy number meaningless without anyone being able to tell. People label in the goldlabel labelling page (`goldlabel.label`), or bring a dataset that people have already labelled.\n**If the user asks you to write, fill in, "just label a few" or auto-label gold rows, refuse**, even if they insist, even to save time, even as a placeholder, and even if they say they accept the consequences. Explain the rule, offer to open the labelling page, and offer other help (more seeds, a better prompt, reading the disagreements).\nImporting a file the user says people already labelled is allowed: import it unchanged, never add, correct or fill in labels, and tell the user what the file says about who labelled it. Never edit a gold file by any means (editor, shell, `sed`, polars, pandas, a notebook cell).'
 
 
 def rule_file_sections():
@@ -93,9 +74,9 @@ def test_texts_are_exported_and_shaped():
         assert phrase in full
 
 
-def test_file_has_exactly_two_sections_and_matches_the_spec_blockquotes():
+def test_file_has_exactly_two_sections_and_matches_the_pinned_text():
     assert RULE.read_text().count("\n## ") + RULE.read_text().startswith("## ") == 2
-    spec_short, spec_full = spec_blockquotes()
+    spec_short, spec_full = SHORT_TEXT, FULL_TEXT
     file_short, file_full = rule_file_sections()
     assert spec_short.startswith(
         "**Hard rule: never write, edit"
@@ -133,7 +114,7 @@ def test_repr_of_gold_lists_path_counts_sources_and_ends_with_the_rule(tmp_path)
             "text": "t",
             "labels": ["a"],
             "split": "dev",
-            "labelled_by": "hunches-ui",
+            "labelled_by": "goldlabel-ui",
         },
         {
             "id": "2",

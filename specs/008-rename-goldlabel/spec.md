@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-30
 
-**Status**: Draft (no open questions; the defaults chosen are listed in Assumptions and can be redirected before `/speckit-tasks`)
+**Status**: Implemented. Revised 2026-10-30 at the user's direction: no compatibility code and no migration note, and the old name appears only under `specs/`.
 
 **Input**: User description: "Rename the library from \"hunches\" to \"goldlabel\": Python package, import alias, distribution name, plugin/skill manifests, docs, env vars (HUNCHES_DIR etc.), default directory (.hunches/), repo references. Must keep the gold rule intact."
 
@@ -60,32 +60,26 @@ rule text, with `hunches` replaced by `goldlabel`, is empty.
 
 ---
 
-### User Story 3 - Files and data written under the old name keep working (Priority: P1)
+### User Story 3 - Nothing but the specs remembers the old name (Priority: P1)
 
-A user with gold files, evaluation logs, a cache and a candidates file made by `hunches` points
-`goldlabel` at them. Their labels keep their meaning: rows stamped by the old labelling page still
-count as labelled through the page, not as "unstamped", and nothing is rewritten.
+Nobody has used the library yet, so there is nothing to stay compatible with. Apart from the specs,
+which are the record of how the library was built, no tracked file (code, tests, docs, manifests,
+fixtures, file names) contains the old name or the old docs alias.
 
-**Why this priority**: gold labels are the most expensive thing a user owns, and their provenance
-(who labelled them) is what makes an accuracy number trustworthy. The rename must not silently
-downgrade it.
+**Why this priority**: a rename that leaves the old name in a doc, a test or a compatibility shim is
+not finished, and every leftover is something the next reader has to explain.
 
-**Independent Test**: load the pre-rename gold fixture (rows stamped `hunches-ui`) with the new
-code; its summary counts them as labelled through the page; the file's bytes are unchanged.
+**Independent Test**: a test walks the tracked files and fails on the old name or alias anywhere
+outside `specs/`.
 
 **Acceptance Scenarios**:
 
-1. **Given** a gold file with rows stamped `hunches-ui`, **When** it is loaded and summarised,
-   **Then** those rows are counted as labelled through the labelling page, the file is unchanged,
-   and the labels are not edited, added or dropped.
-2. **Given** a new label made in the renamed labelling page, **When** it is saved, **Then** it is
-   stamped `goldlabel-ui`.
-3. **Given** an existing evaluation log, cache, ledger or candidates file written under the old
-   name, **When** the user points the new library at it, **Then** it loads and appends as before.
-4. **Given** the old default directory `.hunches/` exists, **When** the user runs the new library
-   without setting a directory, **Then** the library uses `.goldlabel/` and does not read
-   `.hunches/`; the README tells the user to move or rename the folder (or set the directory) to
-   keep their cache and logs.
+1. **Given** the repository, **When** every tracked file and file name outside `specs/` is searched
+   (case-insensitive) for the old name and for the old alias, **Then** nothing is found.
+2. **Given** a gold file, **When** it is summarised, **Then** the labelling page's stamp is
+   `goldlabel-ui`, and no other stamp is treated specially.
+3. **Given** the README, **When** it is read, **Then** it has no migration note and no mention of the
+   old name.
 
 ---
 
@@ -117,14 +111,10 @@ and the CI file sets the renamed environment variables.
   "set the environment variable" message, which names the new variable.
 - A user imports `hunches` after upgrading: it fails with the ordinary `ModuleNotFoundError`; no
   stub package is shipped.
-- An existing gold file mixes `hunches-ui`, `goldlabel-ui`, `imported` and unstamped rows: each
-  group is counted in its own right, and the two page stamps are both "labelled through the page".
-- Evaluation log lines written before the rename carry a `hunches` version key and new lines carry
-  a `goldlabel` one: reading the log must not fail on either.
 - Postgres server-side cursor names and the `X-Hunches-Token` header change; neither is visible to
   a user or persisted, so nothing needs migrating.
-- History is history: `specs/001` to `specs/007`, the `tests/fixtures/pre006/` files and the
-  fixture's README describe code and data made under the old name and are not rewritten.
+- History is history: `specs/001` to `specs/008` are the record of how the library was built and keep
+  the old name; nothing else does.
 - The rule text and the constitution are covered by the amendment rule (FR-011): nothing here may
   be hand-edited around it.
 
@@ -144,19 +134,14 @@ and the CI file sets the renamed environment variables.
   directory name.
 - **FR-005**: The labelling page MUST be renamed throughout (title, page text, request header),
   stamp new labels `goldlabel-ui`, and keep working offline.
-- **FR-006**: Gold files that carry the old stamp `hunches-ui` MUST keep counting as labelled
-  through the labelling page in every summary and in the evaluation provenance count, and MUST NOT
-  be rewritten, edited or relabelled. This is the one deliberate remaining use of the old name in
-  the shipped package, apart from reading evaluation-log lines (FR-007).
-- **FR-007**: Reading an evaluation log MUST work for lines written before the rename; new lines
-  record the library version under the new name.
+- **FR-006**: The labelling page MUST stamp new labels `goldlabel-ui`; no other stamp is treated
+  specially and no stamp from an earlier name is recognised (nobody has used the library yet).
 - **FR-008**: The agent surface MUST be renamed together: the skill directory and its name, its
   references, `docs/agent-instructions.md` and the README block that equals it, the Kiro steering
   file, the plugin manifest, the marketplace manifest and the plugin's install commands.
-- **FR-009**: A test MUST fail when the old name (`hunches`, case-insensitive) appears in any
-  tracked file outside an explicit allowlist: `specs/001` to `specs/007`, the pre-006 fixture
-  README, the migration note in the README, the lines that implement FR-006 and FR-007, the
-  constitution's history line, and this feature's own spec files.
+- **FR-009**: A test MUST fail when the old name (case-insensitive), in a file name or a file, or the old
+  docs alias appears in any tracked file outside `specs/`. The test builds the words from pieces so
+  that it does not contain them.
 - **FR-010**: The canonical gold rule text MUST change by the name only: replacing `hunches` with
   `goldlabel` in the old text yields the new text, byte for byte. Its short and full forms, and
   every copy, stay in sync (the drift tests pass).
@@ -169,8 +154,7 @@ and the CI file sets the renamed environment variables.
 - **FR-012**: README, `AGENTS.md`, the examples (notebook and script, kept equal), the walkthrough,
   the labelling-page developer notes and every docstring or message that names the library MUST use
   `goldlabel`; install commands, extras and import lines in them MUST be correct for the new name.
-- **FR-013**: The README MUST carry a short migration note: the new names, the folder to move
-  (`.hunches/` to `.goldlabel/`) and the environment variables to rename.
+- **FR-013**: The README MUST NOT carry a migration note or mention the old name.
 - **FR-014**: All existing checks MUST pass after the rename: `uv run ruff check`,
   `uv run ruff format --check`, `uv run ty check`, `uv run pytest`, and `uv build` with a wheel that
   contains `goldlabel/web/*` and `goldlabel/gold_rule.md`.
@@ -182,18 +166,18 @@ and the CI file sets the renamed environment variables.
   provenance stamp, evaluation-log version key, agent plugin / skill / steering names, docs,
   repository URL.
 - **Gold rule**: the canonical text and every copy of it; the only change allowed is the name.
-- **Provenance stamp**: the `labelled_by` value on a gold row (`goldlabel-ui`, the legacy
-  `hunches-ui`, `imported`, or absent).
+- **Provenance stamp**: the `labelled_by` value on a gold row (`goldlabel-ui`,
+  `imported`, or absent).
 
 ## Deliberately skipped *(Ponytail)*
 
 - A `hunches` compatibility package, import alias, deprecation warning or redirect: not asked, and
   a stub would keep the old name alive in the product.
 - Fallback reads of `HUNCHES_*` variables or of `.hunches/`: they would be exactly the "behind the
-  caller's back" reads Principle V forbids; the README migration note is the whole transition.
-- A command that migrates `.hunches/` or rewrites old files: the user moves a folder; gold files are
-  never rewritten.
-- Rewriting `specs/001` to `specs/007`, the pre-006 fixture files or git history.
+  caller's back" reads Principle V forbids.
+- A migration note, a migration command, or recognising the old page stamp or old log lines: nobody has
+  used the library yet.
+- Rewriting `specs/001` to `specs/007` or git history.
 - Renaming the GitHub repository, reserving the name on PyPI, tagging or publishing: Chris's.
 - A version bump, a changelog, a logo or a licence decision.
 - Renaming internal identifiers that merely contain the old name in a way no user sees (e.g.
@@ -205,12 +189,13 @@ and the CI file sets the renamed environment variables.
 
 - **SC-001**: In a clean environment, installing the built wheel and running the README chain
   succeeds with `goldlabel`, and `import hunches` fails.
-- **SC-002**: A case-insensitive search of every tracked file for `hunches` finds nothing outside
-  the allowlist in FR-009, and the test that does this passes.
+- **SC-002**: A case-insensitive search of every tracked file and file name for the old name, and of
+  every tracked file for the old alias, finds nothing outside `specs/`, and the test that does this
+  passes.
 - **SC-003**: The canonical rule text differs from its old text by the name only (zero other
   changed characters), and the three drift tests pass.
-- **SC-004**: A pre-rename gold file with 100% of its rows stamped `hunches-ui` is summarised as
-  100% labelled through the labelling page, with the file's bytes unchanged.
+- **SC-004**: The labelling page stamps new labels `goldlabel-ui`, and the gold summary and the
+  evaluation provenance count them under that name.
 - **SC-005**: The four repository checks pass and the built wheel contains the web assets and the
   rule text under `goldlabel/`.
 - **SC-006**: The plugin, installed in each supported agent under the new name, still refuses to
@@ -223,9 +208,8 @@ and the CI file sets the renamed environment variables.
 - The name `goldlabel` was not registered on PyPI when checked on 2026-10-30 (the JSON endpoint
   returned 404, while `hunches` is taken there). That says nothing about later; the user reserves it
   by publishing. The distribution and import name are the single word `goldlabel`.
-- The library is pre-1.0 and its users are few, so a clean break (no compatibility shims) is
-  acceptable; the only legacy the code keeps is reading the `hunches-ui` stamp and old log lines,
-  because those protect labels and records people made.
+- The library is pre-1.0 and has no users yet, so a clean break (no compatibility shims) is
+  acceptable, and nothing in the code or docs refers to the old name.
 - The import alias in docs is `gl`; a user's own alias is theirs to choose.
 - Constitution text is amended with the user's approval (FR-011); this spec does not authorise any
   change to the meaning of Principle I.

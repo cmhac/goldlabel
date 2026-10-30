@@ -20,14 +20,6 @@ pip install "goldlabel[rds]"     # psycopg and boto3, for RDS / Aurora IAM datab
 pip install "goldlabel[local]"   # Sentence Transformers, for local query embeddings (Python < 3.14)
 ```
 
-<!-- legacy-name:start -->
-**Moving from `hunches`.** The library was renamed: install `goldlabel`, `import goldlabel as gl`
-(the examples use the alias `gl`), set `GOLDLABEL_DIR` and `GOLDLABEL_PG_URL` instead of `HUNCHES_DIR` and
-`HUNCHES_PG_URL`, and move your `.hunches/` folder to `.goldlabel/` to keep its cache and logs. The old
-names are not read. Gold files made by `hunches` work unchanged: labels stamped `hunches-ui` still count
-as labelled through the labelling page.
-<!-- legacy-name:end -->
-
 Python 3.12 or newer. Tables in the examples are polars (`pip install polars`); every table also has
 `.to_pandas()`, and `.rows` is always a plain list of dicts.
 

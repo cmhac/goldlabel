@@ -102,18 +102,3 @@ def test_import_writes_nothing_and_reads_only_goldlabel_dir(tmp_path):
     reads = ast.literal_eval(out.stdout.strip())
     assert [r for r in reads if r.startswith("GOLDLABEL")] in (["GOLDLABEL_DIR"], [])
     assert list(work.iterdir()) == []
-
-
-def test_the_old_environment_variable_is_not_read():
-    out = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "from goldlabel.settings import settings; print(settings.root)",
-        ],
-        env={"HUNCHES_DIR": "/some/where", "PATH": ""},
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert out.stdout.strip() == ".goldlabel"

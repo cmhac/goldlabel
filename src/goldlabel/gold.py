@@ -35,11 +35,6 @@ class GoldRow(BaseModel):
         return d
 
 
-def _page_stamp(labelled_by: str | None) -> str | None:
-    """Gold files written before the rename carry `hunches-ui`; their labels keep their provenance."""
-    return "goldlabel-ui" if labelled_by == "hunches-ui" else labelled_by
-
-
 @dataclass(frozen=True)
 class GoldSet:
     """A read-only view of gold rows."""
@@ -72,8 +67,8 @@ class GoldSet:
         labelled = [r for r in self.rows if r.labels]
         sources = {"goldlabel-ui": 0, "imported": 0, "unstamped": 0}
         for r in labelled:
-            key = _page_stamp(r.labelled_by)
-            sources[key if key in sources else "unstamped"] += 1
+            key = r.labelled_by if r.labelled_by in sources else "unstamped"
+            sources[key] += 1
         by = ", ".join(f"{k} {v}" for k, v in sources.items())
         return (
             f"GoldSet {self.name}: {len(self.rows)} rows "

@@ -193,7 +193,7 @@ def test_rows_without_a_stamp_and_imported_rows_are_accepted_and_counted():
         [
             g("1", ["a"]),
             g("2", ["a"], labelled_by="imported"),
-            g("3", ["b"], labelled_by="hunches-ui"),
+            g("3", ["b"], labelled_by="goldlabel-ui"),
             g("4", ["b"], labelled_by="hand", extra="kept"),
         ]
     )
@@ -201,18 +201,6 @@ def test_rows_without_a_stamp_and_imported_rows_are_accepted_and_counted():
     assert ev.n == 4 and ev.score("accuracy") == 1
     assert ev.sources == {"goldlabel-ui": 1, "imported": 1, "unstamped": 2}
     assert "goldlabel-ui 1, imported 1, unstamped 2" in repr(ev)
-
-
-def test_both_page_stamps_count_as_labelled_through_the_page():
-    model, _ = answering({"t1": ["a"], "t2": ["a"]})
-    gold = write_gold(
-        [
-            g("1", ["a"], labelled_by="goldlabel-ui"),
-            g("2", ["a"], labelled_by="hunches-ui"),
-        ]
-    )
-    ev = evaluate(clf(model), gold.dev)
-    assert ev.sources == {"goldlabel-ui": 2, "imported": 0, "unstamped": 0}
 
 
 def test_repr_shows_the_per_label_table():
@@ -330,14 +318,6 @@ def test_eval_log_counts_test_evaluations_and_distinct_prompts():
     assert "test split evaluated 3 times (2 distinct prompts)" in text
     first = log.rows[0]
     assert first["digest"][:8] in text and "1.0000" in text and "dev" in text
-
-
-def test_a_log_line_written_before_the_rename_still_loads(tmp_path):
-    path = tmp_path / "evals.jsonl"
-    path.write_text('{"time": "2026-01-01T00:00:00", "n": 3, "hunches": "0.1.0"}\n')
-    assert eval_log(path).rows == [
-        {"time": "2026-01-01T00:00:00", "n": 3, "hunches": "0.1.0"}
-    ]
 
 
 def test_eval_log_with_a_path_and_when_empty(tmp_path):

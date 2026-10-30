@@ -1,5 +1,11 @@
 # Implementation Plan: Rename the library to goldlabel
 
+> **Revision 2026-10-30 (user direction).** Nobody has used the library, so the final change keeps no
+> compatibility code and no migration note, and the old name appears only under `specs/`. Anything
+> below about recognising the legacy page stamp or old log lines, a README migration note, or an
+> allowlist of legacy files describes the first plan and was **not** kept; `spec.md`, `data-model.md`,
+> `contracts/rename-map.md` and `quickstart.md` are current.
+
 **Branch**: `claude/admiring-hypatia-vc2jgs` | **Date**: 2026-10-30 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `/specs/008-rename-goldlabel/spec.md`

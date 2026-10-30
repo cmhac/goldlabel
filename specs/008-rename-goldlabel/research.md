@@ -1,5 +1,11 @@
 # Research: Rename the library to goldlabel
 
+> **Revision 2026-10-30 (user direction).** Nobody has used the library, so the final change keeps no
+> compatibility code and no migration note, and the old name appears only under `specs/`. Anything
+> below about recognising the legacy page stamp or old log lines, a README migration note, or an
+> allowlist of legacy files describes the first plan and was **not** kept; `spec.md`, `data-model.md`,
+> `contracts/rename-map.md` and `quickstart.md` are current.
+
 Facts were checked against the repository on 2026-10-30 (and PyPI where stated).
 
 ## R1. Where the old name lives

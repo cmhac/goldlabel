@@ -15,7 +15,7 @@ The public surface after this feature. Everything not listed is unchanged.
 | Labelling function | `hunches.label` | `goldlabel.label` |
 | Labelling module | `hunches._label` | `goldlabel._label` |
 | Labelling page title / request header | `hunches: label` / `X-Hunches-Token` | `goldlabel: label` / `X-Goldlabel-Token` |
-| New row stamp | `hunches-ui` | `goldlabel-ui` (legacy `hunches-ui` still read) |
+| New row stamp | (earlier name) | `goldlabel-ui` |
 | Evaluation-log version key | `hunches` | `goldlabel` |
 | Skill dir and name | `skills/hunches`, `hunches` | `skills/goldlabel`, `goldlabel` |
 | Kiro steering | `.kiro/steering/hunches.md` | `.kiro/steering/goldlabel.md` |

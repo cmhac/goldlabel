@@ -139,7 +139,7 @@ def classifier(evaluation=None):
 def gold(tmp_path):
     path = tmp_path / "gold.jsonl"
     path.write_text(
-        '{"id": "1", "text": "x", "labels": ["a"], "split": "dev", "labelled_by": "hunches-ui"}\n'
+        '{"id": "1", "text": "x", "labels": ["a"], "split": "dev", "labelled_by": "goldlabel-ui"}\n'
         '{"id": "2", "text": "y", "labels": null, "split": "test"}\n'
     )
     return Gold(path)

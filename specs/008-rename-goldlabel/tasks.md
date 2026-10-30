@@ -1,5 +1,11 @@
 # Tasks: Rename the library to goldlabel
 
+> **Revision 2026-10-30 (user direction).** Nobody has used the library, so the final change keeps no
+> compatibility code and no migration note, and the old name appears only under `specs/`. Anything
+> below about recognising the legacy page stamp or old log lines, a README migration note, or an
+> allowlist of legacy files describes the first plan and was **not** kept; `spec.md`, `data-model.md`,
+> `contracts/rename-map.md` and `quickstart.md` are current.
+
 **Input**: `/specs/008-rename-goldlabel/` (spec.md, plan.md, research.md, data-model.md, contracts/rename-map.md, quickstart.md)
 
 **Tests**: required by the constitution (red first, hand-written expectations). One commit per task, `008/TNN: ...`, on the assigned branch. Four tasks is the fewest that finish the feature: the rename is one mechanical change, so it is not split by story; splitting it would leave the repository broken between commits.
