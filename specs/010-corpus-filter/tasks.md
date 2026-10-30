@@ -63,7 +63,7 @@ T003 and T004, because each backend's seed reader changes in the same place as i
 **Independent test**: one tiny dataset as a CSV, JSONL, Parquet, polars, pandas and list source,
 filtered by the same expression, gives the same hand-written ids.
 
-- [ ] T002 [US2] Add `Table.where` (spec Table form, FR-001, FR-002, FR-004, FR-008, FR-009; data
+- [X] T002 [US2] Add `Table.where` (spec Table form, FR-001, FR-002, FR-004, FR-008, FR-009; data
   model row "Table").
   - Red first, in `tests/test_table.py`:
     - rows `1,2,3` politics and `4,5` sports, with `pl.col("section") == "politics"`: `table_rows`

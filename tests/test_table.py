@@ -276,3 +276,116 @@ def test_a_jsonl_with_a_blank_line_and_a_missing_id(tmp_path):
     (tmp_path / "t.jsonl").write_text('{"text": "a", "key": 1}\n\n{"text": "b"}\n')
     with pytest.raises(ValueError, match="row 1.*key"):
         table_rows(Table(tmp_path / "t.jsonl", id_column="key"))
+
+
+# --- the filter (010) ----------------------------------------------------------------------------
+
+SECTIONS = [
+    {"id": "1", "text": "a ballot", "section": "politics"},
+    {"id": "2", "text": "the ballot", "section": "politics"},
+    {"id": "3", "text": "a vote", "section": "politics"},
+    {"id": "4", "text": "ballot sport", "section": "sports"},
+    {"id": "5", "text": "a match", "section": "sports"},
+]
+
+
+def politics():
+    import polars as pl
+
+    return pl.col("section") == "politics"
+
+
+def test_the_filter_keeps_the_same_rows_from_every_source(tmp_path):
+    import polars as pl
+
+    pd = pytest.importorskip("pandas")
+    with open(tmp_path / "t.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=list(SECTIONS[0]))
+        w.writeheader()
+        w.writerows(SECTIONS)
+    (tmp_path / "t.jsonl").write_text("".join(json.dumps(r) + "\n" for r in SECTIONS))
+    pl.DataFrame(SECTIONS).write_parquet(tmp_path / "t.parquet")
+    sources = [
+        tmp_path / "t.csv",
+        tmp_path / "t.jsonl",
+        tmp_path / "t.parquet",
+        pl.DataFrame(SECTIONS),
+        pd.DataFrame(SECTIONS),
+        SECTIONS,
+    ]
+    for source in sources:
+        rows = table_rows(Table(source, id_column="id", where=politics()))
+        assert [r["id"] for r in rows] == ["1", "2", "3"], source
+
+
+def test_keywords_over_a_filtered_table():
+    corpus = Table(SECTIONS, id_column="id", where=politics())
+    got = get_candidates(corpus, keywords=["ballot"], out=False)
+    # one term, one match each: ties keep corpus order
+    assert [r["id"] for r in got.rows] == ["1", "2"]
+
+
+async def test_seeds_over_a_filtered_table_skip_the_best_row_outside_it():
+    import polars as pl
+
+    # r0 (similarity 1.0 to sa) is outside; inside, r2 is best: [1,1]/sqrt(2) . [1,0] = 0.7071
+    rows = [dict(r, keep=r["id"] != "r0") for r in VEC_ROWS]
+    corpus = Table(
+        rows,
+        id_column="id",
+        vector_column="v",
+        embedding_model="m",
+        where=pl.col("keep"),
+    )
+    got = await aget_candidates(
+        corpus, seeds=["sa"], embedder=StubEmbedder(VECTORS), floor=0.5, out=False
+    )
+    assert [r["id"] for r in got.rows] == ["r2"]
+    assert got.rows[0]["max_similarity"] == pytest.approx(0.70710678)
+
+
+def test_a_row_filtered_out_cannot_fail_the_read():
+    rows = [*SECTIONS, {"id": "6", "text": "", "section": "sports"}]
+    assert len(table_rows(Table(rows, id_column="id", where=politics()))) == 3
+
+
+def test_csv_values_are_text_so_a_number_is_cast(tmp_path):
+    import polars as pl
+
+    (tmp_path / "t.csv").write_text("text,year\na,2023\nb,2024\nc,2025\n")
+    corpus = Table(tmp_path / "t.csv", where=pl.col("year").cast(pl.Int64) >= 2024)
+    assert [r["text"] for r in table_rows(corpus)] == ["b", "c"]
+
+
+def test_a_null_in_the_filter_drops_the_row():
+    rows = [*SECTIONS, {"id": "6", "text": "x", "section": None}]
+    assert [
+        r["id"] for r in table_rows(Table(rows, id_column="id", where=politics()))
+    ] == [
+        "1",
+        "2",
+        "3",
+    ]
+
+
+@pytest.mark.parametrize("bad", ["section = 'politics'", lambda row: True])
+def test_only_a_polars_expression_is_a_table_filter(bad):
+    with pytest.raises(TypeError, match=r"pl\.col"):
+        Table(SECTIONS, where=bad)
+
+
+def test_a_filter_polars_cannot_evaluate_says_it_came_from_the_filter():
+    import polars as pl
+
+    with pytest.raises(ValueError, match="Table where:.*nope"):
+        table_rows(Table(SECTIONS, where=pl.col("nope") == 1))
+    with pytest.raises(ValueError, match="Table where:"):
+        table_rows(Table(SECTIONS, where=pl.col("text")))
+
+
+def test_an_empty_source_with_a_filter_is_empty():
+    assert table_rows(Table([], where=politics())) == []
+
+
+def test_the_repr_shows_the_filter():
+    assert "section" in repr(Table(SECTIONS, where=politics()))

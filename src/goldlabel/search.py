@@ -27,17 +27,28 @@ class Table:
     """Items in a table: a `.csv`, `.parquet` or `.jsonl` path, a list of row dicts, or a pandas or
     polars DataFrame. `id_column` None means the row's position. Seed search also needs
     `vector_column` (a list of numbers per row; not in a CSV) and `embedding_model`, the model
-    that made them; keyword search and the whole corpus need neither."""
+    that made them; keyword search and the whole corpus need neither. `where` is a polars
+    expression on the source's columns: only rows where it is true are read (a CSV's values are
+    all text, so cast a number: `pl.col("year").cast(pl.Int64) >= 2024`)."""
 
     source: Any
     text_column: str = "text"
     id_column: str | None = None
     vector_column: str | None = None
     embedding_model: str | None = None
+    where: Any = None
 
     def __post_init__(self):
         if not self.text_column:
             raise ValueError("Table: text_column is required")
+        if self.where is not None:
+            import polars as pl
+
+            if not isinstance(self.where, pl.Expr):
+                raise TypeError(
+                    "Table: where must be a polars expression, such as "
+                    f'pl.col("section") == "politics", not {type(self.where).__name__}'
+                )
         is_path = isinstance(self.source, (str, Path))
         if (
             self.vector_column
@@ -84,8 +95,13 @@ def table_rows(table: Table, with_vectors: bool = False) -> list[dict]:
             df = pl.DataFrame(list(src), infer_schema_length=None, strict=False)
     except (pl.exceptions.PolarsError, TypeError) as e:
         raise ValueError(f"Table: polars could not read the source: {e}") from None
-    if df.height == 0:
+    if df.height == 0:  # before the filter: an empty source has no columns to filter on
         return []
+    if table.where is not None:
+        try:
+            df = df.filter(table.where)
+        except pl.exceptions.PolarsError as e:
+            raise ValueError(f"Table where: {e}") from None
     rows = df.to_dicts()
     columns = [table.text_column]
     columns += [c for c in (table.id_column, with_vectors and table.vector_column) if c]
