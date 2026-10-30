@@ -368,7 +368,7 @@ async def test_extension_in_a_non_default_schema(scratch_db, project, monkeypatc
         # the table's column type is extensions.vector; neither it nor `<=>` is on search_path
         make_table(db, "hn", "docs", vectors, ext="extensions.")
         assert db.execute("SHOW search_path").fetchone()[0] == '"$user", public'
-        ids = [r[0] for r in db.execute("SELECT id FROM gl.docs ORDER BY id")]
+        ids = [r[0] for r in db.execute("SELECT id FROM hn.docs ORDER BY id")]
     await compare(project, monkeypatch, "hn", "docs", ids, vectors, seeds)
     report = pg_check(project)
     assert report["schema"] == "extensions"
