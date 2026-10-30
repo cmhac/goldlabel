@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-30
 
-**Status**: Draft. The Table design and the two-table Postgres rule are decided (user, 2026-10-30). The Postgres and S3 filter forms below are proposals the user wants to see in detail before the spec moves on.
+**Status**: Draft, all questions resolved 2026-10-30 (ready for `/speckit-clarify` if wanted, else `/speckit-plan`)
 
 **Input**: User description: "currently, goldlabel does not support filtering the corpus before keyword filters are applied. for example, we might want to apply a where clause on a postgres table to filter on some categorical column, THEN do keyword filters. Ideally, this would be applied on the corpus, before we call get_candidates. I would want this to work on all corpus types, not just postgres."
 
@@ -16,10 +16,18 @@
   converted with `polars.from_pandas`. Files are read only by polars. This removes the current
   mix (the standard library for CSV and JSONL, polars or else pandas for Parquet, `to_dicts` or
   `to_dict` for frames), so there is one reading path and one filtering method.
-- A `Table` filter is a function the user passes. It takes one row and returns a boolean, and it
-  is applied with polars `map_elements`.
+- A `Table` filter is a polars expression (`pl.col("section") == "politics"`), applied with
+  `DataFrame.filter`. (A row function applied with `map_elements` was considered and dropped:
+  it runs Python once per row, the slowness the user wanted to avoid.)
 - In the Postgres two-table layout (`text_table`), the filter columns must be in the text table,
   and the docs say so plainly.
+- A `PgCorpus` filter is one SQL condition string with its values written into it
+  (`"section = 'politics'"`). There is no separate parameters argument.
+- An `S3Corpus` filter is the service's own metadata filter document, applied by the library
+  itself when listing.
+- polars and pyarrow become core dependencies of goldlabel.
+- The agent skills must teach agents how each corpus's filter works so they can help a user who
+  does not know polars expressions, Postgres SQL or the S3 filter language write one.
 
 ## Context
 
@@ -34,15 +42,12 @@ Facts this spec relies on (checked 2026-10-30):
 - **polars**: `map_elements` runs the function once per row in Python. The polars docs call it
   strongly discouraged next to native expressions, which run in Rust, in parallel and optimised
   ([Expr.map_elements](https://docs.pola.rs/api/python/dev/reference/expressions/api/polars.Expr.map_elements.html)).
-  A row-wise function is therefore about as slow as a pandas row-wise `apply`; it is the
-  user's chosen form, and the docs will say what it costs.
+  This is why the Table filter is an expression.
   - `polars.from_pandas` requires pyarrow
     ([from_pandas](https://docs.pola.rs/py-polars/html/reference/api/polars.from_pandas.html)).
   - Checked on the installed polars 2.1.0: `read_csv` infers types by default, which turns the
     id `"007"` into the number `7`. `infer_schema=False` keeps every value as text, as the
     current CSV reader does.
-  - `pl.struct(pl.all()).map_elements(f, return_dtype=pl.Boolean)` passes `f` one dict per
-    row.
 - **S3 Vectors**: `QueryVectors` takes a metadata `filter` document. Its operators are `$eq`
   (also the meaning of a bare value; on a list value it matches any element), `$ne`, `$gt`,
   `$gte`, `$lt`, `$lte`, `$startsWith` (ENHANCED query behaviour only), `$in`, `$nin`, `$exists`,
@@ -54,58 +59,66 @@ Facts this spec relies on (checked 2026-10-30):
     [ListVectors](https://docs.aws.amazon.com/AmazonS3/latest/API/API_S3VectorBuckets_ListVectors.md)).
   - The docs do not say how a vector without the key is treated by `$ne` and `$nin`, or how
     `$in` treats a list value.
+- **psycopg** (checked on the installed 3.3.6): when a query is sent with parameters, a literal
+  `%` in its text must be written `%%`, or the driver refuses it ("only '%s', '%b', '%t' are
+  allowed as placeholders"). With an empty parameter tuple, `%%` becomes `%`; with no parameters
+  at all, `%%` is sent as it is. So the library can double every `%` in the user's condition and
+  always send parameters, and the user writes plain SQL (`LIKE 'vote%'`).
 - **pgvector**: a `WHERE` is applied after the HNSW index scan. Iterative scans (0.8.0+, already
   on in index mode) keep scanning up to `hnsw.max_scan_tuples`, so a filtered index search can
   still return fewer hits than an exact one
   ([pgvector 0.8.0 README](https://pgxn.org/dist/vector/0.8.0/README.html)).
 
-## Proposed filter forms *(for the user's review)*
+## Filter forms
 
 ### Table (decided)
 
 ```python
+import polars as pl
+
 corpus = gl.Table(
     "articles.parquet",
     id_column="id",
-    where=lambda row: row["section"] == "politics" and row["year"] >= 2024,
+    where=(pl.col("section") == "politics") & (pl.col("year") >= 2024),
 )
 ```
 
-- `row` is a dict of every column in the source, under the source's own names and with the
-  values polars read.
-- A CSV is read with every value as text, so the example above would write
-  `row["year"] >= "2024"` or `int(row["year"]) >= 2024`.
-- The function must return `True` or `False`. Any other value (including `None`) is an error
-  that names the first offending row.
-- The filter runs before the existing row checks, so a row that is filtered out cannot fail the
-  read (for example, by having an empty text).
+- `where` is one polars expression, over the source's own column names, that evaluates to a
+  boolean per row. It is applied with `DataFrame.filter`, before the existing row checks, so a row
+  that is filtered out cannot fail the read (for example, by having an empty text).
+- A CSV is read with every value as text, so a number has to be cast:
+  `pl.col("year").cast(pl.Int64) >= 2024`. The docs and the skills say so.
+- A row where the expression is null (for example, a missing value compared with `==`) is
+  dropped, which is what `DataFrame.filter` does; the docs say so.
+- Anything that is not a `pl.Expr` is refused when the `Table` is built. An expression polars
+  cannot evaluate on the source (a column it does not have, a type mismatch) fails on reading
+  with polars' own message, prefixed to say it came from the filter.
 
-### PgCorpus (proposal)
+### PgCorpus (decided)
 
 ```python
 corpus = gl.PgCorpus(
     "articles",
-    where="section = %s AND published >= %s",
-    where_params=("politics", "2024-01-01"),
+    where="section = 'politics' AND published >= '2024-01-01'",
 )
 ```
 
-- `where` is the SQL condition as written, in Postgres syntax. Any operator, function or column
-  of the table can be used.
-- Values belong in `where_params`, sent as bound parameters. With parameters, a literal `%` in
-  the SQL is written `%%` (the driver's rule).
-- The condition runs inside the existing read-only transaction, so it cannot change data.
+- `where` is one SQL condition, in Postgres syntax, with its values written into it. Any
+  operator, function or column of the table can be used. A quote inside a value is doubled, as
+  in any SQL (`'O''Brien'`), and a `%` is written once (`LIKE 'vote%'`); the library handles the
+  driver's `%` rule (see Context).
+- The condition runs inside the existing read-only transaction, so it cannot change data, and the
+  library sends every query with parameters, which the server runs as a single statement.
 - The SQL text is code the user wrote in their own notebook against their own database. The
   library passes it through unchanged and does not try to validate it.
 - Two-table layout: the condition is evaluated against the text table only. The library wraps it
   as `id IN (SELECT text_id FROM text_table WHERE <condition>)`, so an unqualified column name
   always means a column of the text table, and a column that is only in the vector table is the
-  database's own "column does not exist" error.
-- Single table: the condition is added to the query's `WHERE` as is.
-- Alternative the user may prefer: equality only, as a mapping (`where={"section": "politics"}`).
-  It is safer (no SQL text), but it cannot express dates, ranges or `IN` lists.
+  database's own "column does not exist" error, with a line added saying that filter columns
+  must be in the text table.
+- Single table: the condition is added to the query's `WHERE`, in parentheses.
 
-### S3Corpus (proposal)
+### S3Corpus (decided)
 
 ```python
 corpus = gl.S3Corpus(
@@ -126,8 +139,24 @@ corpus = gl.S3Corpus(
     which it passes.
   - `$in` on a list value matches if any element is in the list, as `$eq` does.
   - Both rules are marked as unverified against the service (manual check, below).
-- Alternative the user may prefer: a filter document for queries plus a separate Python function
-  for listing. It is simpler to build, but it means two filters that can disagree.
+
+### Agent skills (decided)
+
+The user's request is often in plain words ("only the politics section since 2024"). The skills
+must let an agent turn that into the right filter for the corpus in use, with the user deciding
+what the filter is:
+
+- `goldlabel-connect` (where the corpus is built) gets a short section per corpus type: the form,
+  two or three worked examples (one value, one of several values, a date or number range), and
+  that type's pitfalls (CSV values are text; Postgres quotes and the text-table rule; S3
+  filterable keys, the missing-key and list rules, no `$startsWith` when listing).
+- The agent first looks up the real column or metadata names and their values (the Table's
+  schema and a few rows; for Postgres, the columns the user or a schema query of theirs shows; a few listed S3
+  vectors' metadata) instead of guessing them.
+- The agent shows the filter it wrote, explains it in plain words, and asks the user to confirm it
+  before using it. It then suggests a quick check, `get_candidates(corpus, limit=20)`, so the user
+  can see that the right items come back.
+- The agent never chooses a filter, a column or a value on its own.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -141,8 +170,8 @@ exactly as today. Rows outside the section never leave the server.
 Python afterwards is not an option, because the table may not fit in memory.
 
 **Independent Test**: using the fake `psycopg`, build a filtered corpus and ask for keywords with
-and without `server_side`. Check that the condition is in the SQL sent, that its values arrive
-only as bound parameters, and that only the filtered rows come back.
+and without `server_side`. Check that the condition is in the SQL sent, exactly once, and that
+only the filtered rows come back.
 
 **Acceptance Scenarios**:
 
@@ -158,31 +187,33 @@ only as bound parameters, and that only the filtered rows come back.
    that filter columns must be in the text table.
 5. **Given** a filter that no row passes, **When** the search runs, **Then** the result is empty
    and says so in words (0 candidates), not an error.
+6. **Given** a condition with a `%` in a `LIKE` pattern and a doubled quote in a value,
+   **When** the search runs in each mode (whole corpus, server-side keywords, exact seeds),
+   **Then** the database receives the condition exactly as the user wrote it.
 
 ---
 
 ### User Story 2 - The same need on a Table (Priority: P1)
 
 The same user works from a Parquet, CSV or JSONL file, a polars or pandas DataFrame, or a list of
-rows. They pass a row function and get the same behaviour.
+rows. They pass a polars expression and get the same behaviour.
 
 **Why this priority**: the user asked for every corpus type, and `Table` is the default corpus.
 
-**Independent Test**: build one tiny dataset as every source type and apply the same function.
+**Independent Test**: build one tiny dataset as every source type and apply the same expression.
 Check the exact ids against a hand-written expectation for each source.
 
 **Acceptance Scenarios**:
 
-1. **Given** a `Table` whose rows carry a `section` column and a function keeping `politics`,
-   **When** the user asks for the whole corpus, keywords or seeds, **Then** only those rows are
-   candidates.
-2. **Given** a function that returns something other than a boolean for some row, **When** the
-   corpus is read, **Then** the call fails with a message naming the row.
-3. **Given** a function that raises (for example, a column the source does not have), **When**
-   the corpus is read, **Then** the error says it came from the filter and keeps the original
-   exception.
-4. **Given** a pandas DataFrame and no pyarrow installed, **When** the corpus is read, **Then**
-   the call fails with a message that says to install pyarrow.
+1. **Given** a `Table` whose rows carry a `section` column and the expression
+   `pl.col("section") == "politics"`, **When** the user asks for the whole corpus, keywords or
+   seeds, **Then** only those rows are candidates.
+2. **Given** something that is not a polars expression (a string, a function), **When** the
+   `Table` is built, **Then** it is refused with a message that shows the expression form.
+3. **Given** an expression on a column the source does not have, **When** the corpus is read,
+   **Then** the error says it came from the filter and keeps polars' own message.
+4. **Given** a CSV with a `year` column and `pl.col("year").cast(pl.Int64) >= 2024`, **When** the
+   corpus is read, **Then** the rows from 2024 on are kept.
 
 ---
 
@@ -211,7 +242,25 @@ Check the exact ids against a hand-written expectation for each source.
 
 ---
 
-### User Story 5 - Nothing else changes (Priority: P1)
+### User Story 5 - An agent helps a user write a filter (Priority: P2)
+
+A user who does not know polars, SQL or the S3 filter language asks their agent for "only the
+politics section since 2024". The agent looks up the real column names and values, writes the
+filter for the corpus in use, explains it and asks before using it.
+
+**Independent Test**: the drift tests run every code block in the skills against the real public
+names; a manual trial in an agent (as for 009) checks the behaviour.
+
+**Acceptance Scenarios**:
+
+1. **Given** each corpus type, **When** an agent reads `goldlabel-connect`, **Then** it finds the
+   filter form, worked examples and that type's pitfalls.
+2. **Given** a plain-words request, **When** the agent writes a filter, **Then** it uses names it
+   looked up, shows the filter, explains it in plain words and waits for the user's yes.
+
+---
+
+### User Story 6 - Nothing else changes (Priority: P1)
 
 **Acceptance Scenarios**:
 
@@ -224,7 +273,7 @@ Check the exact ids against a hand-written expectation for each source.
 
 ### Edge Cases
 
-- A CSV value is always text, including in the filter function's `row`. The docs say so.
+- A CSV value is always text, also inside the filter expression. The docs say so.
 - JSONL rows with missing keys: polars fills them with null. The existing "no column" error must
   still fire for the text and id columns, not turn into a null-text error with a different
   message.
@@ -232,8 +281,7 @@ Check the exact ids against a hand-written expectation for each source.
   one column type, the error names the column.
 - Postgres up-front "result too large" refusal: it uses whole-table statistics, which overstate a
   filtered read. With a filter it is skipped, and the streaming size check still applies.
-- `where_params` without `where`, or a `where` given as something other than a string: refused
-  when the corpus is built.
+- A Postgres `where` that is not a string, or is blank: refused when the corpus is built.
 
 ## Requirements *(mandatory)*
 
@@ -250,36 +298,38 @@ Check the exact ids against a hand-written expectation for each source.
   - pandas DataFrames through `polars.from_pandas`.
   - Lists of rows through `polars.DataFrame`.
   - Nothing in `Table` reading may use pandas, the `csv` module or `json` line parsing.
-- **FR-004**: `Table` MUST apply the filter function with `map_elements` over a struct of every
-  column, then run the existing row checks and produce the same `{id, text[, vector]}` rows as
-  today.
-- **FR-005**: polars MUST become a runtime dependency of goldlabel: [NEEDS CLARIFICATION: a core
-  dependency (recommended: `Table` is the default corpus and would not work without it), or an
-  extra such as `goldlabel[table]`?]. Importing `goldlabel` MUST still not import polars.
-  Result exports keep both `.to_polars()` and `.to_pandas()` (constitution VII).
+- **FR-004**: `Table` MUST apply the filter expression with `DataFrame.filter`, then run the
+  existing row checks and produce the same `{id, text[, vector]}` rows as today.
+- **FR-005**: polars and pyarrow MUST become core dependencies of goldlabel. Importing
+  `goldlabel` MUST still not import polars (constitution VII); polars is imported when a `Table`
+  is read or a filter is checked. pandas stays optional, needed only for `.to_pandas()` and for
+  passing a pandas DataFrame. Result exports keep both `.to_polars()` and `.to_pandas()`.
+  The constitution and `AGENTS.md` lines that call polars a dev-only dependency MUST be updated
+  in the same change.
 - **FR-006**: On Postgres, the filter MUST run in the database, inside the existing read-only
-  transaction. Its values MUST be sent only as bound parameters, and in the two-table layout it
-  MUST be evaluated against the text table only.
+  transaction, exactly as the user wrote it (the library doubles `%` and always sends
+  parameters, see Context). In the two-table layout it MUST be evaluated against the text table
+  only.
 - **FR-007**: On S3 Vectors, similarity queries MUST send the filter document unchanged. Listing
   MUST evaluate the same document on the returned metadata, by the rules above.
 - **FR-008**: A malformed filter MUST be refused when the corpus is built, with a message naming
-  the problem. Examples: a Table filter that is not callable, a Postgres `where` that is not a
-  string, an S3 document with an unknown operator.
-- **FR-009**: A corpus's plain `repr` MUST show that it is filtered. It shows the SQL text or
-  the S3 document as given, and for a function its name or `<lambda>`. Nothing new is written
-  to `candidates.jsonl` or its `.meta.json`.
-- **FR-010**: The README and the agent skills `goldlabel-connect` and `goldlabel-candidates` MUST
-  show each backend's filter once, using real names that the drift tests check. They MUST say
-  that Postgres filter columns must be in the text table in the two-table layout, and that a
-  Table filter runs once per row in Python.
+  the problem. Examples: a Table filter that is not a polars expression, a Postgres `where` that
+  is not a string or is blank, an S3 document with an unknown operator.
+- **FR-009**: A corpus's plain `repr` MUST show its filter as given (the expression, the SQL
+  text, the S3 document). Nothing new is written to `candidates.jsonl` or its `.meta.json`.
+- **FR-010**: The README MUST show each backend's filter once. `goldlabel-connect` MUST carry the
+  per-corpus guidance in "Agent skills" above, and `goldlabel-candidates` MUST remind the agent
+  that the filter is on the corpus. Every code block uses real names that the drift tests check.
+  Both MUST say that Postgres filter columns must be in the text table in the two-table layout.
 - **FR-011**: Whether to filter, and on what, is the user's decision. The skills MUST tell agents
-  to ask, never to choose a filter themselves.
+  to look up real column names and values, show and explain the filter they wrote, and wait for
+  the user's yes; never to choose a filter, column or value themselves.
 
 ### Key Entities
 
 - **Corpus filter**: an optional, immutable part of a corpus.
-  - Table: a Python function that takes a row and returns a boolean.
-  - Postgres: SQL condition text plus bound values.
+  - Table: a polars expression that is a boolean per row.
+  - Postgres: one SQL condition string with its values written in.
   - S3 Vectors: a metadata filter document.
 
 ## Success Criteria *(mandatory)*
@@ -289,10 +339,11 @@ Check the exact ids against a hand-written expectation for each source.
 - **SC-001**: For each backend, a filtered corpus gives exactly the hand-written expected ids in
   every mode: whole corpus, keywords and seeds.
 - **SC-002**: On Postgres, no row outside the filter is received by the client in any mode,
-  checked by what the fake driver returns for the SQL it is sent. No `where_params` value ever
-  appears in the query text.
+  checked by what the fake driver returns for the SQL it is sent.
 - **SC-003**: `Table` reads every source type through one polars path. A search of the source
   for `pandas`, `csv.` and line-by-line `json` parsing in Table reading finds none.
+- **SC-005**: For each corpus type, the skill's worked examples run unchanged against a tiny
+  fixture of that type (the drift tests).
 - **SC-004**: Every existing test passes, apart from the edits the plan names under User Story 5.
 
 ## Assumptions
@@ -301,14 +352,15 @@ Check the exact ids against a hand-written expectation for each source.
 - S3 metadata keys used in a similarity-query filter are filterable. If one is not, the
   service's error is shown as it is.
 - Candidate files do not record the filter, because the notebook is the record (Principle V).
-- Manual checks a human must do, which tests cannot: a filtered keyword, whole-corpus and seed
+- Manual checks a human must do, which tests cannot: the agent trial in User Story 5; a filtered keyword, whole-corpus and seed
   search against a real Postgres (single and two-table), and against a real S3 Vectors index,
   including the missing-key and list-value rules.
 
 ## Deliberately skipped *(Ponytail)*
 
-- A polars expression (`pl.col("section") == "politics"`) as the Table filter, which would be the
-  fast path. The user chose a row function; this is easy to add later if speed matters.
+- A Python row function for the Table filter (`map_elements`): slow, and dropped by the user.
+- A separate parameters argument for the Postgres filter: values are written into the SQL.
+- Checking, parsing or rewriting the user's SQL condition.
 - Filtering at `get_candidates` time instead of on the corpus, because the request puts it on the
   corpus.
 - One filter form shared by all backends, because the user chose per-backend forms.

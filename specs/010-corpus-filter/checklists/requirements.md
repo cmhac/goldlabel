@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -31,8 +31,8 @@
 
 ## Notes
 
-- One marker remains (FR-005: polars as a core dependency or an extra). The Postgres and S3
-  filter forms are proposals the user asked to review before the spec moves on.
+- No markers remain; all decisions recorded 2026-10-30 (polars and pyarrow core; per-backend
+  filter forms; agent skills teach each form).
 - Like 007 and 009, this is a library spec: corpus class names, `get_candidates` and the backend
   names are the user-facing vocabulary, not implementation detail. The Context section's
   S3 Vectors and pgvector facts were checked against AWS and pgvector docs on 2026-10-30.
