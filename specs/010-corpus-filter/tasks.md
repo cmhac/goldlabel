@@ -136,7 +136,7 @@ exactly once, and only filtered rows come back.
 **Independent test**: with `FakeS3`, seeds send the document unchanged, and listing keeps exactly
 the hand-picked keys.
 
-- [ ] T004 [US3] Add `S3Corpus.where` (spec S3 form, FR-007, FR-008; research R5).
+- [X] T004 [US3] Add `S3Corpus.where` (spec S3 form, FR-007, FR-008; research R5).
   - Red first, in `tests/test_search.py`:
     - `search_vectors` sends `filter=` equal to the document, and no `filter` key without one;
     - `s3_items` on a listing of six vectors (`section`, `year`, `tags`, one missing `year`) keeps

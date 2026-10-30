@@ -171,7 +171,10 @@ has parameters.
   - several keys at the top level, or in one `$and` member, are combined with AND;
   - a vector without the key fails everything except `$exists: false`, `$ne` and `$nin`;
   - `$in` against a list value is true if any element is in the operand, and `$nin` if none is;
-  - `$ne` against a list value is true if no element equals the operand.
+  - `$ne` against a list value is true if no element equals the operand;
+  - a range (`$gt`, `$gte`, `$lt`, `$lte`) against a list value is true if any number in it
+    passes, and a non-number never passes;
+  - `True` does not equal `1` (Python's `True == 1` is not used).
 - `$startsWith` is accepted for queries and refused in `s3_items` with a message, because whether
   it works depends on the index mode.
 

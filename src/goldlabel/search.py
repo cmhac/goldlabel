@@ -1,3 +1,4 @@
+import operator
 import os
 import re
 from dataclasses import dataclass
@@ -199,13 +200,142 @@ def search_table(
 
 @dataclass(frozen=True)
 class S3Corpus:
+    """An S3 Vectors index. `where` is the service's metadata filter document, sent with every
+    similarity query and applied here to each listed vector (listing has no filter)."""
+
     bucket: str
     index: str
     region: str | None = None  # None: boto3's default resolution
+    where: dict | None = None
 
     def __post_init__(self):
         if not (self.bucket and self.index):
             raise ValueError("S3Corpus: bucket and index are required")
+        if self.where is not None:
+            _s3_check(self.where)
+
+
+# https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors-metadata-filtering.html
+_S3_OPS = {
+    "$eq",
+    "$ne",
+    "$gt",
+    "$gte",
+    "$lt",
+    "$lte",
+    "$startsWith",
+    "$in",
+    "$nin",
+    "$exists",
+}
+
+
+def _primitive(v) -> bool:
+    return isinstance(v, (str, int, float, bool))
+
+
+def _number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _s3_operand_ok(op: str, operand) -> bool:
+    if op in ("$eq", "$ne"):
+        return _primitive(operand)
+    if op in ("$gt", "$gte", "$lt", "$lte"):
+        return _number(operand)
+    if op == "$startsWith":
+        return isinstance(operand, str)
+    if op in ("$in", "$nin"):
+        return (
+            isinstance(operand, list)
+            and bool(operand)
+            and all(map(_primitive, operand))
+        )
+    return isinstance(operand, bool)  # $exists
+
+
+def _s3_check(where, path: str = "where", listing: bool = False) -> None:
+    """Refuse a filter document S3 Vectors would not accept, naming the path to the problem.
+    `listing`: also refuse `$startsWith`, which only some index modes support."""
+    if not (isinstance(where, dict) and where):
+        raise ValueError(
+            f"S3Corpus: {path} must be a non-empty filter document (a dict)"
+        )
+    for key, value in where.items():
+        here = f"{path}[{key!r}]"
+        if key in ("$and", "$or"):
+            if not (isinstance(value, list) and value):
+                raise ValueError(
+                    f"S3Corpus: {here} must be a non-empty list of filters"
+                )
+            for i, part in enumerate(value):
+                _s3_check(part, f"{here}[{i}]", listing)
+        elif key.startswith("$"):
+            raise ValueError(f"S3Corpus: {here}: unknown operator {key!r}")
+        elif isinstance(value, dict):
+            if not value:
+                raise ValueError(f"S3Corpus: {here} has no operator")
+            for op, operand in value.items():
+                at = f"{here}[{op!r}]"
+                if op not in _S3_OPS:
+                    raise ValueError(f"S3Corpus: {at}: unknown operator {op!r}")
+                if not _s3_operand_ok(op, operand):
+                    raise ValueError(
+                        f"S3Corpus: {at}: {operand!r} is not a valid operand"
+                    )
+                if listing and op == "$startsWith":
+                    raise ValueError(
+                        f"S3Corpus: {at}: $startsWith cannot be applied when listing "
+                        "(the whole corpus or keywords); use it with seeds only"
+                    )
+        elif not _primitive(value):
+            raise ValueError(
+                f"S3Corpus: {here}: {value!r} is not a string, number or boolean"
+            )
+
+
+def _same(a, b) -> bool:
+    return a == b and isinstance(a, bool) == isinstance(b, bool)  # True is not 1
+
+
+def _s3_match(where: dict, metadata: dict) -> bool:
+    """The filter document applied to one vector's metadata, as the service applies it.
+    shortcut: where the AWS docs are silent this follows research R5 (several keys AND; a missing
+    key fails all but $exists:false, $ne, $nin; a list value passes $in/range if any element
+    does, $nin/$ne if none does), unverified against the service; fix it when a real index
+    disagrees (specs/010-corpus-filter/quickstart.md section 4)."""
+    for key, value in where.items():
+        if key == "$and":
+            ok = all(_s3_match(part, metadata) for part in value)
+        elif key == "$or":
+            ok = any(_s3_match(part, metadata) for part in value)
+        else:
+            ops = value if isinstance(value, dict) else {"$eq": value}
+            present = key in metadata
+            got = metadata.get(key)
+            values = got if isinstance(got, list) else [got]
+            ok = all(_s3_op(op, x, present, values) for op, x in ops.items())
+        if not ok:
+            return False
+    return True
+
+
+def _s3_op(op: str, operand, present: bool, values: list) -> bool:
+    if op == "$exists":
+        return present == operand
+    if not present:
+        return op in ("$ne", "$nin")
+    if op in ("$eq", "$in", "$ne", "$nin"):
+        wanted = operand if op in ("$in", "$nin") else [operand]
+        hit = any(_same(v, w) for v in values for w in wanted)
+        return hit if op in ("$eq", "$in") else not hit
+    compare = {
+        "$gt": operator.gt,
+        "$gte": operator.ge,
+        "$lt": operator.lt,
+        "$lte": operator.le,
+    }
+    return any(compare[op](v, operand) for v in values if _number(v))
 
 
 @dataclass(frozen=True)
@@ -828,6 +958,8 @@ def search_vectors(
         "returnDistance": True,
         "returnMetadata": True,
     }
+    if corpus.where:
+        params["filter"] = corpus.where
     hits: list[tuple[str, str, float]] = []
     below_floor = False
     response = client.query_vectors(**params)
@@ -856,6 +988,8 @@ def s3_items(corpus: S3Corpus):
         raise ImportError(
             "The S3 backend needs boto3: pip install goldlabel[s3]"
         ) from e
+    if corpus.where:
+        _s3_check(corpus.where, listing=True)
     client = boto3.client("s3vectors", region_name=corpus.region)
     params = {
         "vectorBucketName": corpus.bucket,
@@ -874,7 +1008,8 @@ def s3_items(corpus: S3Corpus):
                 "needs the permissions s3vectors:ListVectors and s3vectors:GetVectors"
             ) from None
         for v in response["vectors"]:
-            yield v["key"], v["metadata"]["text"]
+            if corpus.where is None or _s3_match(corpus.where, v["metadata"]):
+                yield v["key"], v["metadata"]["text"]
         if not response.get("nextToken"):
             return
         params["nextToken"] = response["nextToken"]
