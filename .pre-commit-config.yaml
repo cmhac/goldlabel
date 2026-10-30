@@ -1,6 +1,14 @@
 repos:
   - repo: local
     hooks:
+      # Copies the pyproject.toml version into the plugin manifests; a changed file fails the
+      # commit, so stage it and commit again.
+      - id: sync-versions
+        name: sync plugin manifest versions
+        entry: uv run python scripts/sync_versions.py
+        language: system
+        files: ^(pyproject\.toml|plugin\.json|\.claude-plugin/(plugin|marketplace)\.json)$
+        pass_filenames: false
       - id: ruff-check
         name: ruff check
         entry: uv run ruff check
