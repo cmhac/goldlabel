@@ -9,10 +9,8 @@ def _columns(rows: list[dict]) -> dict[str, list]:
 
 
 def to_polars(rows: list[dict]):
-    try:
-        import polars
-    except ImportError:
-        raise ImportError("polars is not installed: pip install polars") from None
+    import polars
+
     # strict=False lets int and float share a column; the schema is from every row, not the first 100
     return polars.DataFrame(_columns(rows), strict=False)
 

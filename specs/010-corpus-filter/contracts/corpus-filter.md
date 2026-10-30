@@ -16,8 +16,13 @@ unchanged, and `get_candidates` / `aget_candidates` take no new argument.
 
 ```python
 import polars as pl
-corpus = gl.Table("posts.csv", text_column="body", id_column="post_id",
-                  where=pl.col("section").is_in(["politics", "opinion"]))
+
+corpus = gl.Table(
+    "posts.csv",
+    text_column="body",
+    id_column="post_id",
+    where=pl.col("section").is_in(["politics", "opinion"]),
+)
 ```
 
 ## `gl.PgCorpus(table, ..., where=None)`
@@ -32,8 +37,11 @@ corpus = gl.Table("posts.csv", text_column="body", id_column="post_id",
   table gives the database's error plus "Filter columns must be in the text table".
 
 ```python
-corpus = gl.PgCorpus(table="posts", text_column="body",
-                     where="section = 'politics' AND published >= '2024-01-01'")
+corpus = gl.PgCorpus(
+    table="posts",
+    text_column="body",
+    where="section = 'politics' AND published >= '2024-01-01'",
+)
 ```
 
 ## `gl.S3Corpus(bucket, index, region=None, where=None)`
@@ -47,6 +55,9 @@ corpus = gl.PgCorpus(table="posts", text_column="body",
   metadata. `$startsWith` is refused there with a message.
 
 ```python
-corpus = gl.S3Corpus(bucket="my-vectors", index="posts",
-                     where={"$and": [{"section": "politics"}, {"year": {"$gte": 2024}}]})
+corpus = gl.S3Corpus(
+    bucket="my-vectors",
+    index="posts",
+    where={"$and": [{"section": "politics"}, {"year": {"$gte": 2024}}]},
+)
 ```

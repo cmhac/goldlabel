@@ -422,7 +422,7 @@ def test_evaluation_disagreements_values():
     assert a["reasoning"].to_list() == [HOSTILE, None]
 
 
-@pytest.mark.parametrize("lib", ["polars", "pandas"])
+@pytest.mark.parametrize("lib", ["pandas"])  # polars is a dependency since 010
 def test_missing_library_message(lib, tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, lib, None)
     for obj, p, q in tables(tmp_path).values():

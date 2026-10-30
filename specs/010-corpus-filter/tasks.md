@@ -19,7 +19,7 @@ T003 and T004, because each backend's seed reader changes in the same place as i
 
 ## Phase 1: Foundational (blocks the Table filter)
 
-- [ ] T001 [US6] Make polars and pyarrow core dependencies and read every `Table` source with
+- [X] T001 [US6] Make polars and pyarrow core dependencies and read every `Table` source with
   polars only (spec FR-003, FR-005; research R1, R3; plan "Behaviour changes" and "Existing tests
   that change").
   - Red first, in `tests/test_table.py`: a pandas object column `["a", 5]` raises `ValueError`

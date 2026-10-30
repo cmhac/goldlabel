@@ -14,6 +14,8 @@ dependencies = [
     "numpy",
     "genai-prices",
     "pyyaml",
+    "polars",
+    "pyarrow",
 ]
 
 [project.scripts]
@@ -38,7 +40,6 @@ dev = [
     "ty",
     "pre-commit",
     "types-pyyaml",
-    "polars",
     "pandas",
 ]
 

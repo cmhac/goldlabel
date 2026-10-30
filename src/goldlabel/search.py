@@ -1,5 +1,3 @@
-import csv
-import json
 import os
 import re
 from dataclasses import dataclass
@@ -52,51 +50,43 @@ class Table:
             )
 
 
-def _parquet_rows(path: Path) -> list[dict]:
-    try:
-        import polars
-
-        return polars.read_parquet(path).to_dicts()
-    except ImportError:
-        pass
-    try:
-        import pandas
-
-        return pandas.read_parquet(path).to_dict("records")
-    except ImportError as e:
-        raise ImportError(
-            "Reading a .parquet file needs polars or pandas (with pyarrow): "
-            "pip install polars"
-        ) from e
-
-
 def table_rows(table: Table, with_vectors: bool = False) -> list[dict]:
     """The table as `{id, text}` rows in table order (plus `vector` when asked for), checked.
 
-    Raises ValueError naming the column or the first offending row (counting from 0); rows are
-    never dropped, repaired or invented."""
+    Every source is read with polars. Raises ValueError naming the column or the first offending
+    row (counting from 0); rows are never dropped, repaired or invented."""
+    import polars as pl
+
     src = table.source
-    if isinstance(src, (str, Path)):
-        path = Path(src)
-        suffix = path.suffix.lower()
-        if suffix == ".csv":
-            with open(path, newline="", encoding="utf-8-sig") as f:
-                rows = list(csv.DictReader(f))
-        elif suffix == ".jsonl":
-            lines = path.read_text(encoding="utf-8").splitlines()
-            rows = [json.loads(x) for x in lines if x.strip()]
-        elif suffix == ".parquet":
-            rows = _parquet_rows(path)
+    try:
+        if isinstance(src, (str, Path)):
+            path = Path(src)
+            suffix = path.suffix.lower()
+            if suffix == ".csv":
+                df = pl.read_csv(
+                    path, infer_schema=False
+                )  # text, as written: "007" stays
+            elif suffix == ".jsonl":
+                df = pl.read_ndjson(path, infer_schema_length=None)
+            elif suffix == ".parquet":
+                df = pl.read_parquet(path)
+            else:
+                raise ValueError(
+                    f"Table: cannot read {path.name!r}; use a .csv, .parquet or .jsonl file"
+                )
+        elif isinstance(src, pl.DataFrame):
+            df = src
+        elif type(src).__module__.startswith("pandas"):
+            df = pl.from_pandas(src)
         else:
-            raise ValueError(
-                f"Table: cannot read {path.name!r}; use a .csv, .parquet or .jsonl file"
-            )
-    elif hasattr(src, "to_dicts"):  # polars
-        rows = src.to_dicts()
-    elif hasattr(src, "to_dict"):  # pandas
-        rows = src.to_dict("records")
-    else:
-        rows = list(src)
+            # every row, so a key first seen after row 100 is still a column; strict=False lets
+            # int and float share a column (vectors like [1, 0.71]), as JSONL reading does
+            df = pl.DataFrame(list(src), infer_schema_length=None, strict=False)
+    except (pl.exceptions.PolarsError, TypeError) as e:
+        raise ValueError(f"Table: polars could not read the source: {e}") from None
+    if df.height == 0:
+        return []
+    rows = df.to_dicts()
     columns = [table.text_column]
     columns += [c for c in (table.id_column, with_vectors and table.vector_column) if c]
     out, seen = [], set()

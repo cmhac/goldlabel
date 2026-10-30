@@ -1,7 +1,6 @@
 import csv
 import importlib
 import json
-import sys
 
 import pytest
 from pydantic_ai import Embedder
@@ -54,7 +53,8 @@ def test_the_same_five_rows_from_every_plain_source(tmp_path):
 
 
 def test_the_same_five_rows_from_polars_pandas_and_parquet(tmp_path):
-    pl = pytest.importorskip("polars")
+    import polars as pl
+
     pd = pytest.importorskip("pandas")
     pl.DataFrame(FIVE).write_parquet(tmp_path / "t.parquet")
     for source in (
@@ -66,7 +66,8 @@ def test_the_same_five_rows_from_polars_pandas_and_parquet(tmp_path):
 
 
 def test_every_form_gives_the_same_get_candidates_result(tmp_path):
-    pl = pytest.importorskip("polars")
+    import polars as pl
+
     pd = pytest.importorskip("pandas")
     write_csv(tmp_path / "t.csv")
     write_jsonl(tmp_path / "t.jsonl")
@@ -83,23 +84,6 @@ def test_every_form_gives_the_same_get_candidates_result(tmp_path):
         got = get_candidates(Table(source, **COLS), out=False)
         assert got.rows == WANT, source
     assert not (tmp_path / "root").exists()
-
-
-def test_parquet_through_pandas_when_polars_is_missing(tmp_path, monkeypatch):
-    pl = pytest.importorskip("polars")
-    pytest.importorskip("pandas")
-    pytest.importorskip("pyarrow")
-    pl.DataFrame(FIVE).write_parquet(tmp_path / "t.parquet")
-    monkeypatch.setitem(sys.modules, "polars", None)
-    assert table_rows(Table(tmp_path / "t.parquet", **COLS)) == WANT
-
-
-def test_parquet_with_neither_library_names_both(tmp_path, monkeypatch):
-    (tmp_path / "t.parquet").write_bytes(b"x")
-    monkeypatch.setitem(sys.modules, "polars", None)
-    monkeypatch.setitem(sys.modules, "pandas", None)
-    with pytest.raises(ImportError, match="polars.*pandas"):
-        table_rows(Table(tmp_path / "t.parquet"))
 
 
 def test_an_unknown_suffix_lists_the_accepted_ones(tmp_path):
@@ -133,7 +117,6 @@ def test_an_empty_table_is_valid():
     "rows, id_column, message",
     [
         ([{"x": "a"}], None, "text"),  # missing text column
-        ([{"text": "a"}, {"text": 5}], None, "row 1.*non-empty"),
         ([{"text": "a"}, {"text": None}], None, "row 1.*non-empty"),
         ([{"text": "a"}, {"text": "  "}], None, "row 1.*non-empty"),
         ([{"text": ""}], None, "row 0.*non-empty"),
@@ -147,6 +130,14 @@ def test_validation_names_the_column_or_the_first_offending_row(
 ):
     with pytest.raises(ValueError, match=message):
         table_rows(Table(rows, id_column=id_column))
+
+
+def test_a_number_among_strings_becomes_text():
+    # polars turns a mixed column into strings, even in strict mode (spec 010, research R1)
+    assert table_rows(Table([{"text": "a"}, {"text": 5}])) == [
+        {"id": "0", "text": "a"},
+        {"id": "1", "text": "5"},
+    ]
 
 
 def test_a_pandas_nan_is_not_a_string():
@@ -219,9 +210,17 @@ def test_seed_search_refusals():
 
 
 def test_a_bad_vector_fails_naming_its_row():
-    for bad in ("abc", None, [1.0], [[1.0, 0.0]]):
+    for bad in (None, [1.0]):
         rows = [*VEC_ROWS[:2], {"id": "r9", "text": "t9", "v": bad}]
         with pytest.raises(ValueError, match="row 2.*v"):
+            search_table(vec_table(rows), [[1.0, 0.0]], 0.6, "m")
+
+
+def test_a_vector_polars_cannot_hold_fails_before_any_row_check():
+    # a string or a nested list among lists: polars refuses the column, naming no row
+    for bad in ("abc", [[1.0, 0.0]]):
+        rows = [*VEC_ROWS[:2], {"id": "r9", "text": "t9", "v": bad}]
+        with pytest.raises(ValueError, match="polars could not read"):
             search_table(vec_table(rows), [[1.0, 0.0]], 0.6, "m")
 
 
@@ -250,3 +249,30 @@ async def test_aget_candidates_reads_a_table_and_ranks_like_before():
         ("r1", "sb"),
         ("r2", "sa"),
     ]
+
+
+def test_a_pandas_column_polars_cannot_read_is_reported():
+    pd = pytest.importorskip("pandas")
+    frame = pd.DataFrame({"text": ["a", 5]})
+    with pytest.raises(ValueError, match="polars could not read"):
+        table_rows(Table(frame))
+
+
+def test_a_key_first_seen_after_row_100_is_still_a_column():
+    # polars infers a schema from the first 100 rows unless told otherwise
+    rows = [{"text": f"t{i}"} for i in range(150)] + [{"text": "late", "k": "x"}]
+    with pytest.raises(ValueError, match="row 0.*'k'"):
+        table_rows(Table(rows, id_column="k"))
+
+
+def test_a_csv_id_keeps_its_leading_zeros(tmp_path):
+    (tmp_path / "t.csv").write_text("id,text\n007,hello\n")
+    assert table_rows(Table(tmp_path / "t.csv", id_column="id")) == [
+        {"id": "007", "text": "hello"}
+    ]
+
+
+def test_a_jsonl_with_a_blank_line_and_a_missing_id(tmp_path):
+    (tmp_path / "t.jsonl").write_text('{"text": "a", "key": 1}\n\n{"text": "b"}\n')
+    with pytest.raises(ValueError, match="row 1.*key"):
+        table_rows(Table(tmp_path / "t.jsonl", id_column="key"))

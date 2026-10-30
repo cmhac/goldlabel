@@ -101,6 +101,7 @@ the user's polars-only decision. Both are recorded below and in the spec.
 | `test_table.py::test_a_bad_vector_fails_naming_its_row` | the `"abc"` and `[[1.0, 0.0]]` cases expect "polars could not read" | behaviour change 2 |
 | `test_table.py::test_parquet_through_pandas_when_polars_is_missing`, `::test_parquet_with_neither_library_names_both` | deleted | behaviour change 3 |
 | `importorskip("polars")` / `("pyarrow")` lines in `test_table.py` | removed | both are always installed |
+| `test_notebook.py::test_missing_library_message` | the `polars` case is dropped (pandas stays) | `_frame.to_polars` loses its dead "not installed" branch (T001) |
 
 Every other test passes unedited (spec SC-004).
 

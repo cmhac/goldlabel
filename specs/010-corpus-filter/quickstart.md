@@ -23,10 +23,12 @@ Expected: everything passes. The only edited existing tests are the ones `plan.m
 import polars as pl
 import goldlabel as gl
 
-rows = [{"id": "1", "text": "ballot one", "section": "politics"},
-        {"id": "2", "text": "ballot two", "section": "sports"}]
+rows = [
+    {"id": "1", "text": "ballot one", "section": "politics"},
+    {"id": "2", "text": "ballot two", "section": "sports"},
+]
 corpus = gl.Table(rows, id_column="id", where=pl.col("section") == "politics")
-gl.get_candidates(corpus, keywords=["ballot"], out=False)   # 1 candidate: id 1
+gl.get_candidates(corpus, keywords=["ballot"], out=False)  # 1 candidate: id 1
 ```
 
 ## 3. Postgres (a human, real database; Podman, never Docker)
