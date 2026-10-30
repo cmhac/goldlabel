@@ -7,7 +7,7 @@
 ## Summary
 
 Rename `hunches` to `goldlabel` everywhere the product shows or loads its name: package, install
-name, docs alias (`hn` to `gl`), environment variables, default directory, labelling page and its
+name, docs alias `gl`, environment variables, default directory, labelling page and its
 stamp, agent plugin and skill, CI, docs. Approach: gate on the user's approval of a name-only
 constitution/rule amendment; write the failing tests (leftover-name, legacy stamp, old log line);
 `git mv` three paths; one scripted replacement over tracked files with `specs/` history excluded;
@@ -110,7 +110,7 @@ exactly one place in the package. One new test file; all other test changes are 
    pinned-rule-text case; run them and show them failing for the right reason.
 3. **Rename**: `git mv` the three paths; run the scripted replacement (order and exclusions in
    research R6); apply the amendment's `gold_rule.md` text; add the stamp helper; add the README
-   migration note; `uv lock`; `ruff check --fix` and `ruff format`; review the diff for `hn`
+   migration note; `uv lock`; `ruff check --fix` and `ruff format`; review the diff for alias
    false positives and for any line that still says "pip install hunches".
 4. **Verify and report**: the quickstart steps, `/ponytail-review` on the diff, `/ponytail-debt`,
    and the human-only list (plugin reinstall and gold-rule refusal trial per agent, README install

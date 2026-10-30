@@ -6,7 +6,7 @@
 
 ## Phase 1: Gate
 
-- [x] T001 Amend the name in the constitution through `/speckit-constitution` as a PATCH (1.1.0 to 1.1.1): `hunches` to `goldlabel`, `hunches.label`/`hunches._label` to the new names, `HUNCHES_DIR` to `GOLDLABEL_DIR`, `.hunches/` to `.goldlabel/`, `hn.settings.root` to `gl.settings.root`, `src/hunches/...` and `skills/hunches/` paths to the new ones, and nothing else; no principle is weakened. The user's instruction "run speckit-tasks, then implement and open a PR" after reading the plan, which names this amendment as the precondition, is the approval; record that in the commit message and in the constitution's sync report. Stop and ask if the amendment would change any word other than the name. Files: `.specify/memory/constitution.md` (only via the skill).
+- [x] T001 Amend the name in the constitution through `/speckit-constitution` as a PATCH (1.1.0 to 1.1.1): `hunches` to `goldlabel`, `hunches.label`/`hunches._label` to the new names, `HUNCHES_DIR` to `GOLDLABEL_DIR`, `.hunches/` to `.goldlabel/`, the settings-root alias to `gl.settings.root`, `src/hunches/...` and `skills/hunches/` paths to the new ones, and nothing else; no principle is weakened. The user's instruction "run speckit-tasks, then implement and open a PR" after reading the plan, which names this amendment as the precondition, is the approval; record that in the commit message and in the constitution's sync report. Stop and ask if the amendment would change any word other than the name. Files: `.specify/memory/constitution.md` (only via the skill).
 
 ## Phase 2: Legacy stamp, then the rename
 

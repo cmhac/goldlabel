@@ -19,6 +19,23 @@ MIGRATION = re.compile(
 )
 
 
+def test_the_old_alias_never_appears():
+    files = subprocess.run(
+        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
+    ).stdout.splitlines()
+    left = []
+    for f in files:
+        if re.match(r"specs/00[1-7]", f) or f == "tests/test_no_old_name.py":
+            continue
+        try:
+            text = (ROOT / f).read_text()
+        except (UnicodeDecodeError, FileNotFoundError, IsADirectoryError):
+            continue
+        if re.search(r"\bhn\b", text):
+            left.append(f)
+    assert left == []
+
+
 def test_the_old_name_appears_only_where_it_is_allowed():
     files = subprocess.run(
         ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True

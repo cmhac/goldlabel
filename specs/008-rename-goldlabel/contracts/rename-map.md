@@ -5,7 +5,7 @@ The public surface after this feature. Everything not listed is unchanged.
 | Surface | Old | New |
 |---|---|---|
 | Import package | `hunches` | `goldlabel` |
-| Docs import alias | `hn` | `gl` |
+| Docs import alias | (none) | `gl` |
 | Distribution and extras | `hunches[s3\|pg\|rds\|local]` | `goldlabel[s3\|pg\|rds\|local]` |
 | `__version__` source | `version("hunches")` | `version("goldlabel")` |
 | Root directory env var | `HUNCHES_DIR` | `GOLDLABEL_DIR` |

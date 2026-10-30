@@ -133,7 +133,7 @@ and the CI file sets the renamed environment variables.
 ### Functional Requirements
 
 - **FR-001**: The Python package MUST be importable as `goldlabel` and no longer as `hunches`; the
-  documented import alias becomes `gl` (was `hn`).
+  documented import alias is `gl`.
 - **FR-002**: The distribution MUST be named `goldlabel`, with the same optional extras (`s3`,
   `pg`, `rds`, `local`); the version stays `0.1.0` and nothing is tagged or published by this work.
 - **FR-003**: The environment variables MUST be renamed: `HUNCHES_DIR` to `GOLDLABEL_DIR`,
@@ -226,7 +226,7 @@ and the CI file sets the renamed environment variables.
 - The library is pre-1.0 and its users are few, so a clean break (no compatibility shims) is
   acceptable; the only legacy the code keeps is reading the `hunches-ui` stamp and old log lines,
   because those protect labels and records people made.
-- The import alias in docs changes from `hn` to `gl`; a user's own alias is theirs to choose.
+- The import alias in docs is `gl`; a user's own alias is theirs to choose.
 - Constitution text is amended with the user's approval (FR-011); this spec does not authorise any
   change to the meaning of Principle I.
 - Human-only follow-ups after the code is done: reinstall the plugin under the new name in Claude
