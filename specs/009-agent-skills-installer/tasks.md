@@ -58,7 +58,7 @@ waived `/ponytail-review` of spec, plan and tasks for this feature.
 
 ## Phase 5: User Story 6 and the documents (Priority: P3)
 
-- [ ] T013 [US6] README: the install section leads with `goldlabel install <agent>` (and `uvx goldlabel install`), then a short manual section (copy a skills folder, or paste the instruction block); delete the install recipes for the four agents and every "unverified" marker; point to the fold in the walkthrough text where it says the test split is evaluated once. Update `docs/agent-instructions.md` and `.kiro/steering/goldlabel.md` only where they mention paths or the test split (the gold rule text stays verbatim; run the drift tests and paste what they print). Update `tests/test_docs.py` (README blocks use public names, no "unverified", mentions of `goldlabel install`). Files: `README.md`, `docs/agent-instructions.md`, `.kiro/steering/goldlabel.md`, `tests/test_docs.py`.
+- [x] T013 [US6] README: the install section leads with `goldlabel install <agent>` (and `uvx goldlabel install`), then a short manual section (copy a skills folder, or paste the instruction block); delete the install recipes for the four agents and every "unverified" marker; point to the fold in the walkthrough text where it says the test split is evaluated once. Update `docs/agent-instructions.md` and `.kiro/steering/goldlabel.md` only where they mention paths or the test split (the gold rule text stays verbatim; run the drift tests and paste what they print). Update `tests/test_docs.py` (README blocks use public names, no "unverified", mentions of `goldlabel install`). Files: `README.md`, `docs/agent-instructions.md`, `.kiro/steering/goldlabel.md`, `tests/test_docs.py`.
 
 ## Phase 6: Polish
 

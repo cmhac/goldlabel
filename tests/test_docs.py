@@ -149,18 +149,23 @@ def test_readme_says_what_it_must_say():
         "goldlabel[pg]",
         "goldlabel[rds]",
         "goldlabel[local]",
-        "/plugin marketplace add cmhac/goldlabel",
-        "/plugin install goldlabel@goldlabel",
-        "copilot plugin marketplace add cmhac/goldlabel",
-        "codex plugin marketplace add cmhac/goldlabel",
+        "goldlabel install claude",
+        "uvx goldlabel install",
+        "--global",
+        "--dir",
+        ".agents/skills",
         ".kiro/steering/goldlabel.md",
+        "fold_test",
         "keyring",
         ".env",
         "evals.jsonl",
-        "unverified",
         "never write",
     ):
         assert needle in text, needle
+    assert "unverified" not in text.lower()  # no install recipe we have not run
+    assert (
+        "/plugin marketplace add cmhac/goldlabel" in text
+    )  # the Claude Code plugin route
 
 
 # --- the example ------------------------------------------------------------------------------

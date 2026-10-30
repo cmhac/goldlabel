@@ -121,8 +121,9 @@ def test_instruction_block_names_every_harness_file():
         ".kiro/steering",
     ):
         assert name in text
-    for ref in REFS:
-        assert f"src/goldlabel/skills/goldlabel/references/{ref}" in text
+    for skill in ALL_SKILLS:
+        assert f"`{skill.name}`" in text, f"the block does not name {skill.name}"
+    assert "goldlabel install" in text
 
 
 def test_skill_lists_every_reference_and_they_exist():

@@ -9,7 +9,7 @@ Agents that do not load skills (Copilot in the editor, and others), and any agen
 | Codex | `AGENTS.md` at the project root |
 | GitHub Copilot CLI | `AGENTS.md`, or `.github/copilot-instructions.md` |
 | Claude Code | `CLAUDE.md` at the project root (or `@AGENTS.md` inside it to import it) |
-| Kiro | `.kiro/steering/goldlabel.md` with `inclusion: always` front matter; this repository ships that file, copy it from `.kiro/steering/goldlabel.md` |
+| Kiro | `.kiro/steering/goldlabel.md` with `inclusion: always` front matter; `goldlabel install kiro` writes it |
 
 ## The block
 
@@ -20,6 +20,7 @@ Importing a file the user says people already labelled is allowed: import it unc
 
 When working with the `goldlabel` library (content analysis over a corpus: candidates from seed phrases, keywords or the whole corpus, an LLM classifier checked against human-labelled gold data):
 
-- Read `src/goldlabel/skills/goldlabel/SKILL.md` first, then the reference you need: `src/goldlabel/skills/goldlabel/references/workflow.md` (brief, seeds, taxonomy, gold, first evaluation), `src/goldlabel/skills/goldlabel/references/tuning.md` (reading disagreements, tuning on dev, never on test), `src/goldlabel/skills/goldlabel/references/running.md` (estimate, cost, `max_cost`, resuming, keys), `src/goldlabel/skills/goldlabel/references/reuse.md` (saved classifiers). If the skill files are not in the project, read them at https://github.com/cmhac/goldlabel/tree/main/src/goldlabel/skills/goldlabel or print the rule with `import goldlabel; print(goldlabel.GOLD_RULE_FULL)`.
+- Use the goldlabel agent skills: `goldlabel` (start here), then the one for the stage you are at: `goldlabel-connect`, `goldlabel-search-terms`, `goldlabel-taxonomy`, `goldlabel-candidates`, `goldlabel-tune`, `goldlabel-run`. If they are not installed, run `goldlabel install <agent>` (claude, codex, copilot, kiro), read them at https://github.com/cmhac/goldlabel/tree/main/src/goldlabel/skills, or print the rule with `import goldlabel; print(goldlabel.GOLD_RULE_FULL)`.
 - Never run a full classification without showing `clf.estimate(...)` (calls, cost, time) and getting a yes from the user.
 - Never put API keys or database URLs in a notebook, script or file; they come from environment variables.
+- Never evaluate the test split to guide edits, and never fold a spent test split into dev without the user's explicit yes.
