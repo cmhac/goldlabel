@@ -52,7 +52,8 @@ real pgvector in CI only. Baseline: 621 passed, 18 skipped (`uv sync --all-extra
 **Constraints**:
 - `import goldlabel` still imports neither polars nor pyarrow (`test_public_api.py`).
 - Postgres stays read-only, with identifiers through `sql.Identifier`.
-- The user's condition is passed through as `sql.SQL`, never parsed.
+- The user's condition is passed through as `sql.SQL`, never parsed, inside one `id IN (SELECT ...)`
+  form for both layouts (research R4).
 
 **Scale/Scope**:
 - `Table` is still read into memory, as today.
@@ -63,7 +64,7 @@ real pgvector in CI only. Baseline: 621 passed, 18 skipped (`uv sync --all-extra
 
 *Gate: passed before research; re-checked after design (below).* The Ponytail skill was invoked
 (`ponytail`) before the spec revisions and before drafting this plan, and its ladder was applied.
-`/ponytail-review` will be run on spec, plan and tasks before `/speckit-implement`.
+`/ponytail-review` was run on spec, plan and tasks before `/speckit-implement` (2026-10-30); findings 1-4 fixed (one Postgres fragment form, hand-written SQL expectations, honest red/regression wording in T001, empty S3 document refused).
 
 | Principle | Check | Result |
 |---|---|---|

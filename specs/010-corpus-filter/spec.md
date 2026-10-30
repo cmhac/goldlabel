@@ -111,12 +111,12 @@ corpus = gl.PgCorpus(
   library sends every query with parameters, which the server runs as a single statement.
 - The SQL text is code the user wrote in their own notebook against their own database. The
   library passes it through unchanged and does not try to validate it.
-- Two-table layout: the condition is evaluated against the text table only. The library wraps it
-  as `id IN (SELECT text_id FROM text_table WHERE <condition>)`, so an unqualified column name
-  always means a column of the text table, and a column that is only in the vector table is the
-  database's own "column does not exist" error, with a line added saying that filter columns
-  must be in the text table.
-- Single table: the condition is added to the query's `WHERE`, in parentheses.
+- The library always wraps the condition as `id IN (SELECT id FROM <table> WHERE (<condition>))`,
+  where `<table>` is the text table in the two-table layout and the table otherwise. So an
+  unqualified column name always means a column of that one table, never one of the search's own
+  helper columns.
+- Two-table layout: a column that is only in the vector table gives the database's own "column
+  does not exist" error, with a line added saying that filter columns must be in the text table.
 
 ### S3Corpus (decided)
 

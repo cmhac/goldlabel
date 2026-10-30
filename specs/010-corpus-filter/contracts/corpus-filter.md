@@ -27,7 +27,8 @@ corpus = gl.Table("posts.csv", text_column="body", id_column="post_id",
 - `ValueError`, when the corpus is built, if it is not a string or is blank.
 - It runs in the read-only transaction in every mode: whole corpus, keywords (Python or
   `server_side`), and seeds (`exact` and `index`).
-- With `text_table`, it sees only the text table's columns. A column that is only in the vector
+- It is always wrapped as `id IN (SELECT id FROM <text table or table> WHERE (...))`. With
+  `text_table`, it sees only the text table's columns. A column that is only in the vector
   table gives the database's error plus "Filter columns must be in the text table".
 
 ```python
@@ -38,7 +39,8 @@ corpus = gl.PgCorpus(table="posts", text_column="body",
 ## `gl.S3Corpus(bucket, index, region=None, where=None)`
 
 - `where`: `dict | None`, the S3 Vectors metadata filter document.
-- `ValueError`, when the corpus is built, for an unknown `$` operator or a wrong operand type,
+- `ValueError`, when the corpus is built, for an empty document, an unknown `$` operator or a
+  wrong operand type,
   naming the path (for example `where["$and"][1]["year"]["$gte"]`).
 - Seeds: sent as `filter` on every `query_vectors` call.
 - Whole corpus and keywords: the same document, applied by goldlabel to each listed vector's

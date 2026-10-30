@@ -20,8 +20,8 @@ Rules:
 Postgres fragment (R4), where `id` is `t.{id}` or `{id}` depending on the query:
 
 ```text
-one table:   ... AND (<where, every % doubled>)
-two tables:  ... AND <id> IN (SELECT <text_id> FROM <text_table> WHERE (<where, every % doubled>))
+... AND <id> IN (SELECT <key> FROM <source> WHERE (<where, every % doubled>))
+-- <source>, <key> = text_source(corpus): the text table and its id, or the table and id_column
 ```
 
 S3 listing semantics (R5): the documented operators, plus the four undocumented rules marked as

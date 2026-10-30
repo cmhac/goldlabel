@@ -89,10 +89,13 @@ branch.
 
 ## R4. Postgres: the condition is SQL text with values written in
 
-**Decision**: `PgCorpus(where="...")`. A helper `_pg_where(corpus, id_expr)` returns the fragment
-to add to each query:
-- one table: `({cond})`;
-- two tables: `{id_expr} IN (SELECT {text_id} FROM {text_table} WHERE ({cond}))`.
+**Decision**: `PgCorpus(where="...")`. A helper `_pg_where(corpus, id_expr)` returns the one
+fragment added to each query: `{id_expr} IN (SELECT {key} FROM {source} WHERE ({cond}))`.
+- `{source}` and `{key}` are `text_source(corpus)`: the text table and its id column, or the
+  table and `id_column`.
+- One form for both layouts, so the condition never shares a scope with the query's own columns.
+  `search_pg_exact` step 1 has helper columns `i` and `sim`, and a bare `AND (cond)` on a user
+  column called `i` would be "ambiguous" (pre-implement review, finding 1).
 
 `cond` is `sql.SQL(corpus.where.replace("%", "%%"))`. Every query that carries the fragment is sent
 with parameters, an empty tuple if it has none.

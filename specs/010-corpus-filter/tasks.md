@@ -22,12 +22,12 @@ T003 and T004, because each backend's seed reader changes in the same place as i
 - [ ] T001 [US6] Make polars and pyarrow core dependencies and read every `Table` source with
   polars only (spec FR-003, FR-005; research R1, R3; plan "Behaviour changes" and "Existing tests
   that change").
-  - Red first, in `tests/test_table.py`:
-    - a list of 150 rows where key `k` first appears in row 150 keeps `k` (fails on a polars read
-      with the default schema length; write it against the new reader);
+  - Red first, in `tests/test_table.py`: a pandas object column `["a", 5]` raises `ValueError`
+    matching "polars could not read" (fails today, with "non-empty").
+  - Regression tests, which pass before and after and guard the polars traps in research R1:
+    - a list of 150 rows where key `k` first appears in row 150 keeps `k`;
     - a CSV id `007` stays `"007"`;
-    - a JSONL with a blank line and a row without the id column gives "row 1 ... key";
-    - a pandas object column `["a", 5]` raises `ValueError` matching "polars could not read".
+    - a JSONL with a blank line and a row without the id column gives "row 1 ... key".
   - Then edit the tests the plan lists:
     - the `{"text": 5}` case now expects `[{"id": "0", "text": "a"}, {"id": "1", "text": "5"}]`;
     - the `"abc"` and `[[1.0, 0.0]]` bad-vector cases expect "polars could not read";
@@ -98,25 +98,27 @@ exactly once, and only filtered rows come back.
     - `tests/test_search_pg_keywords.py`:
       - `pg_items` with `where="section = 'politics'"` covers the four shapes: single and two
         tables, with and without `match`.
-      - Single table: the SQL contains `AND ("section = 'politics'")`, or `WHERE (...)` when
-        there is no match. Write the exact text after seeing `as_string()` for a shape without
-        `where`, and keep the existing tests unchanged.
-      - Two tables: it contains `t."id" IN (SELECT "id" FROM "texts" WHERE (section =
-        'politics'))`.
+      - Hand-write the expected fragment from the design; never copy it from the code's output
+        (constitution IV). Single table (`posts`, id `id`): the SQL contains
+        `"id" IN (SELECT "id" FROM "posts" WHERE (section = 'politics'))`. Two tables (`texts`):
+        `t."id" IN (SELECT "id" FROM "texts" WHERE (section = 'politics'))`. Existing tests stay
+        unchanged.
       - `params` is never `None` when `where` is set.
       - `where="body LIKE 'vote%'"` reaches the SQL as `LIKE 'vote%%'`.
       - Whole-corpus reads with `where` skip the planner-statistics refusal (no `table_estimates`
         query is sent) but keep the streaming check.
       - A two-table error whose message says a column does not exist gets "Filter columns must
         be in the text table".
-    - `tests/test_search_pg_exact.py`: step 1 carries the fragment with `t."id"`.
+    - `tests/test_search_pg_exact.py`: step 1 carries the fragment with `t."id"`. A condition on a
+      column named `i` is inside the sub-query, never next to step 1's own `i`.
     - `tests/test_search_pg_index.py`: the index query carries the fragment.
     - In any of those files: `PgCorpus("t", where="")`, `where="  "` and `where=5` raise
       `ValueError`, and without `where` every existing SQL expectation is unchanged.
   - Implementation in `src/goldlabel/search.py`:
     - field `where: str | None = None` on `PgCorpus`, validated in `__post_init__`;
-    - `_pg_where(corpus, id_expr)` returns `sql.SQL(...)` for one table or the `IN (SELECT ...)`
-      form for two tables, with `corpus.where.replace("%", "%%")` inside `sql.SQL`;
+    - `_pg_where(corpus, id_expr)` returns the one fragment
+      `{id_expr} IN (SELECT {key} FROM {source} WHERE ({cond}))`. `{source}` and `{key}` come
+      from `text_source(corpus)`, and `{cond}` is `sql.SQL(corpus.where.replace("%", "%%"))`;
     - add it to the four `pg_items` queries, to step 1 of `search_pg_exact` and to
       `_search_pg_index`;
     - pass `()` instead of `None` as the parameters when `where` is set;
@@ -145,8 +147,9 @@ the hand-picked keys.
       - `$and`, `$or`, and two keys at the top level;
       - each of the four undocumented rules in research R5;
     - `$startsWith` in a listing raises `ValueError` naming it;
-    - `S3Corpus("b", "i", where=...)` refuses a non-dict, an unknown `$op`, an empty `$and`, an
-      empty `$in`, `$gt` with a string and `$exists` with a string, each naming the path;
+    - `S3Corpus("b", "i", where=...)` refuses a non-dict, an empty dict, an unknown `$op`, an
+      empty `$and`, an empty `$in`, `$gt` with a string and `$exists` with a string, each naming
+      the path;
     - `get_candidates(corpus, keywords=[...])` over a filtered listing ranks only kept items.
   - Implementation in `src/goldlabel/search.py`:
     - field `where: dict | None = None` on `S3Corpus`;
