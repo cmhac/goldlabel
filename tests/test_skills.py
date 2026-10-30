@@ -353,7 +353,7 @@ def test_taxonomy_skill_example_builds_and_writes_a_loadable_taxonomy(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
-    scope = {"gl": goldlabel}
+    scope: dict = {"gl": goldlabel}
     exec(block_with("goldlabel-taxonomy", "taxonomy.write"), scope)  # noqa: S102
     loaded = goldlabel.Taxonomy.read("taxonomy.yaml")
     assert loaded == scope["taxonomy"] and loaded.mode == "single"
