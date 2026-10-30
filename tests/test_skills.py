@@ -318,3 +318,32 @@ def test_the_skill_and_its_references_never_mention_the_removed_corpus():
     for path in DOCS:
         for word in ("LocalCorpus", "vectors.npy", "items.jsonl"):
             assert word not in path.read_text(), f"{path.name} still says {word}"
+
+
+# --- the stage skills' examples that can run offline ---------------------------------------------
+
+
+def block_with(skill, needle):
+    (block,) = [b for b in python_blocks(SKILLS / skill / "SKILL.md") if needle in b]
+    return block
+
+
+def test_connect_skill_shaping_example_runs_and_leaves_the_source_alone(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "export.json"
+    source.write_text(
+        '[{"post_id": 7, "body": "first post"}, {"post_id": 8, "body": "second post"}]'
+    )
+    before = source.read_text()
+    scope = {
+        "gl": goldlabel
+    }  # the block continues the earlier `import goldlabel as gl`
+    exec(block_with("goldlabel-connect", "write_ndjson"), scope)  # noqa: S102
+    rows = goldlabel.get_candidates(scope["corpus"]).rows
+    assert rows == [
+        {"id": "7", "text": "first post"},
+        {"id": "8", "text": "second post"},
+    ]
+    assert source.read_text() == before
