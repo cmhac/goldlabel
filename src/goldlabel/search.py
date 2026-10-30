@@ -298,12 +298,12 @@ def _same(a, b) -> bool:
     return a == b and isinstance(a, bool) == isinstance(b, bool)  # True is not 1
 
 
+# shortcut: where the AWS docs are silent this follows research R5 (several keys AND; a missing key
+# fails all but $exists:false, $ne, $nin; a list value passes $in/range if any element does,
+# $nin/$ne if none does), unverified against the service; fix it when a real index disagrees
+# (specs/010-corpus-filter/quickstart.md section 4).
 def _s3_match(where: dict, metadata: dict) -> bool:
-    """The filter document applied to one vector's metadata, as the service applies it.
-    shortcut: where the AWS docs are silent this follows research R5 (several keys AND; a missing
-    key fails all but $exists:false, $ne, $nin; a list value passes $in/range if any element
-    does, $nin/$ne if none does), unverified against the service; fix it when a real index
-    disagrees (specs/010-corpus-filter/quickstart.md section 4)."""
+    """The filter document applied to one vector's metadata, as the service applies it."""
     for key, value in where.items():
         if key == "$and":
             ok = all(_s3_match(part, metadata) for part in value)
@@ -447,7 +447,12 @@ def pg_message(e: Exception, corpus: PgCorpus, token: str | None = None) -> str:
         hint = "Fix: the embedder must be the model the table was embedded with."
     elif token and "authentication failed" in text:
         hint = IAM_CHECK
-    elif corpus.where and corpus.text_table and "does not exist" in text:
+    elif (
+        corpus.where
+        and corpus.text_table
+        # Postgres's undefined-column wording, not a missing relation or goldlabel's own check
+        and re.search(r'column "[^"]+" does not exist', text)
+    ):
         hint = (
             f"Filter columns must be in the text table ({corpus.text_table}): "
             "PgCorpus(where=...) is run against that table only."

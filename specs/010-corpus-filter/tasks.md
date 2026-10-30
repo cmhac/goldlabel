@@ -193,7 +193,7 @@ the hand-picked keys.
 
 ## Phase 6: Polish
 
-- [ ] T006 Records and the final check.
+- [X] T006 Records and the final check.
   - `AGENTS.md`: the Stack line (core: polars, pyarrow; dev group: pandas only for the export
     tests) and "Current state" (010 implemented, plus what a human still has to do: quickstart
     sections 3-5).

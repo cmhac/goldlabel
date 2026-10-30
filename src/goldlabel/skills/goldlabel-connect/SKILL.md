@@ -59,7 +59,7 @@ Tell the user: the connection works (or the first error, quoted), how many items
 
 A corpus can be narrowed before anything else happens: `where=` on the corpus object. The whole corpus, keywords and seeds then all see only the items that pass. The user decides whether to filter and on what; many users do not know polars, SQL or the S3 filter language, so help them write it:
 
-1. Look up the real column (or metadata) names and a few of their values first, never guess them: for a `gl.Table`, read the source with polars and show its columns and a few rows; for Postgres, the columns the user or a schema query of theirs shows; for S3 Vectors, the metadata of a few listed vectors (`gl.get_candidates(corpus, limit=5)` lists without a filter).
+1. Look up the real column (or metadata) names and a few of their values first, never guess them: for a `gl.Table`, read the source with polars and show its columns and a few rows; for Postgres, the columns the user or a schema query of theirs shows; for S3 Vectors, the metadata of a few vectors, which candidate rows do not carry: ask the user, or suggest they run `boto3.client("s3vectors").list_vectors(vectorBucketName=..., indexName=..., returnMetadata=True, maxResults=5)` with their own credentials.
 2. Write the filter for the corpus in use, show it, and explain it in plain words ("only rows whose section is politics, from 2024 on").
 3. Wait for the user's yes before using it. Never choose a filter, a column or a value yourself.
 4. Suggest a quick check: `gl.get_candidates(corpus, limit=20, out=False)`, and look at the rows together.
@@ -122,7 +122,7 @@ corpus = gl.S3Corpus(
 )
 ```
 
-Operators: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$exists`, `$and`, `$or` (and `$startsWith`, seeds only). A vector without the key fails every operator except `$exists: false`, `$ne` and `$nin`.
+Operators: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$exists`, `$and`, `$or` (and `$startsWith`, seeds only). When listing, goldlabel treats a vector without the key as failing every operator except `$exists: false`, `$ne` and `$nin`; the AWS docs do not say what the service does, so seed results can differ there.
 
 ## When the data is not in a readable shape
 

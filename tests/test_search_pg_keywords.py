@@ -490,3 +490,18 @@ def test_a_filter_column_missing_from_the_text_table_says_where_it_must_be(
 def test_a_postgres_filter_must_be_sql_text(bad):
     with pytest.raises(ValueError, match="where"):
         PgCorpus(table="docs", where=bad)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        'relation "public.txts" does not exist',
+        'column "emb" of relation "docs" does not exist',
+    ],
+)
+def test_other_missing_things_do_not_get_the_text_table_hint(monkeypatch, error):
+    conn = Conn(Exception(error))
+    corpus = setup(monkeypatch, conn, text_table="public.texts", where=POLITICS)
+    with pytest.raises(RuntimeError) as e:
+        get_candidates(corpus, out=False)
+    assert "Filter columns" not in str(e.value)
