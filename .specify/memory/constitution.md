@@ -130,9 +130,14 @@ registry or plugin system unless the user explicitly asks.
 An unknown price MUST be shown as `?` with a warning, never as `$0`, and `max_cost` MUST refuse
 when the price is unknown. A full classification MUST NOT run before the estimate is shown and the
 user says yes. Every evaluation is logged (`evals.jsonl`, append-only). The test split is
-evaluated once, at the end, and MUST NOT guide edits; tuning uses the dev split. Decisions the
-user owns (the brief, the seeds, `single` or `multi` labels, label descriptions, the similarity
-cutoff, the target score, whether to spend money) MUST be asked, not decided by an agent.
+evaluated once, at the end, and MUST NOT guide edits; tuning uses the dev split. A test split that
+has been evaluated is spent. If the user wants to keep tuning after a disappointing test score,
+they MAY say yes to `Gold.fold_test()`, which moves the spent, labelled test rows to dev (only
+`split` changes, never a label) and is logged in the evaluation log; people then label a fresh test
+split, which MUST NOT be evaluated until every row is labelled. An agent MUST NOT fold without the
+user's explicit yes in the conversation. Decisions the user owns (the brief, the seeds, `single` or
+`multi` labels, label descriptions, the similarity cutoff, the target score, whether to spend
+money, whether to fold the test split) MUST be asked, not decided by an agent.
 
 ### VII. A Library for Notebooks
 
@@ -151,12 +156,15 @@ names.
   labelling page, Tailwind CSS pre-built into `src/goldlabel/web/app.css`. No Textual, keyring,
   platformdirs, python-dotenv, nbformat or Playwright in the project; a build or example script
   that needs one runs it with `uv run --with`. Adding a dependency requires the plan to justify it.
+  The package has one console command, `goldlabel` (the skills installer, standard library only);
+  there is no other command and no application.
 - **External APIs**: every Pydantic AI, `Embedder`, psycopg, boto3 and standard-library API MUST
   be checked against the installed version and the current docs before use, never coded from memory.
 - **pgvector is read-only**; SQL identifiers go through `psycopg.sql.Identifier`.
-- **Agent packaging**: `skills/goldlabel/` (the skill and its references), `docs/agent-instructions.md`,
-  `.kiro/steering/goldlabel.md` and the plugin manifests are the product's agent surface and are
-  drift-tested. The development skills in `.agents/skills/` (Ponytail) and `.claude/skills/`
+- **Agent packaging**: `src/goldlabel/skills/` (the workflow skills and the overview skill's
+  references, shipped in the wheel and installed by `goldlabel install`; the Claude plugin manifest
+  points at that folder), `docs/agent-instructions.md`, `.kiro/steering/goldlabel.md` and the plugin
+  manifests are the product's agent surface and are drift-tested. The development skills in `.agents/skills/` (Ponytail) and `.claude/skills/`
   (Spec Kit) are tools for working on the repository and MUST NOT be added to the shipped plugin.
 - **Containers use Podman**: every local container operation (running Postgres, an S3 emulator or
   anything else for a check, building or pulling an image) MUST use `podman`, never `docker`, and
@@ -199,4 +207,4 @@ semantic: MAJOR for removing or redefining a principle, MINOR for a new principl
 expanded guidance, PATCH for clarifications and wording. A change to Principle I, or any change
 that weakens it, MUST be refused by an agent whoever asks.
 
-**Version**: 1.1.1 | **Ratified**: 2026-10-26 | **Last Amended**: 2026-10-30
+**Version**: 1.2.0 | **Ratified**: 2026-10-26 | **Last Amended**: 2026-10-30
