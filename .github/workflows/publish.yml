@@ -1,12 +1,72 @@
 name: Publish
 
+# On a push to main whose pyproject.toml version is above every v* tag: run the checks,
+# tag and release v<version>, then publish to PyPI. Pushes that do not raise the version stop
+# after the first step. One workflow, because a tag pushed with GITHUB_TOKEN starts no other
+# workflow, and PyPI trusted publishing does not work from a reusable workflow.
+
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the tag and the release
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      new: ${{ steps.version.outputs.new }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # every tag, to compare against
+      - uses: astral-sh/setup-uv@v7
+      - id: version
+        run: |
+          uv run --no-project --with packaging python - <<'EOF' >> "$GITHUB_OUTPUT"
+          import subprocess, tomllib
+          from packaging.version import InvalidVersion, Version
+
+          version = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          tags = []
+          for tag in subprocess.run(["git", "tag", "--list", "v*"], capture_output=True, text=True, check=True).stdout.split():
+              try:
+                  tags.append(Version(tag[1:]))
+              except InvalidVersion:
+                  pass
+          print(f"version={version}")
+          print(f"new={str(all(Version(version) > t for t in tags)).lower()}")
+          EOF
+          cat "$GITHUB_OUTPUT"
+      - if: steps.version.outputs.new == 'true'
+        run: uv sync --all-extras
+      - if: steps.version.outputs.new == 'true'
+        run: uv run ruff check
+      - if: steps.version.outputs.new == 'true'
+        run: uv run ruff format --check
+      - if: steps.version.outputs.new == 'true'
+        run: uv run ty check
+      # Includes tests/test_versions.py: a plugin manifest whose version differs from
+      # pyproject.toml stops the release here, before the tag exists.
+      - if: steps.version.outputs.new == 'true'
+        run: uv run pytest
+      - if: steps.version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.version.outputs.version }}
+        run: gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+
   publish:
+    needs: release
+    if: needs.release.outputs.new == 'true'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -15,10 +75,5 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
-      - run: uv sync --all-extras
-      - run: uv run ruff check
-      - run: uv run ruff format --check
-      - run: uv run ty check
-      - run: uv run pytest
       - run: uv build
       - uses: pypa/gh-action-pypi-publish@release/v1

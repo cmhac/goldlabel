@@ -33,7 +33,7 @@ Nothing in this repository may add a way to set a gold label. Only the labelling
 - 007, which only fake services tested: keyword and server-side results against a real Postgres (single and two-table layouts, a term with `%`, `_` and a backslash, a regex string like `(?i)vote[sd]?`), listing a real S3 Vectors index (the permissions, the order), and Parquet through polars and through pandas with pyarrow (`specs/007-non-search-candidates/quickstart.md` section 5).
 - Everything 005 listed: a real pgvector, RDS/Aurora IAM, S3 Vectors, tables larger than memory (`specs/005-pgvector/manual-checklist.md`), API keys.
 - 010: a filtered `search="index"` run and `test_halfvec` against pgvector 0.8+ (the 010 integration tests passed on a local Postgres 16 with pgvector 0.6.0, which has neither); the S3 rules the AWS docs leave open, on a real index (`specs/010-corpus-filter/quickstart.md` section 4); the agent trial (section 5).
-- Decide on a `LICENSE` file and a plugin icon (the manifests carry no `license`; `claude plugin validate .` advises both). Tags, releases and PyPI trusted publishing are Chris's.
+- Decide on a `LICENSE` file and a plugin icon (the manifests carry no `license`; `claude plugin validate .` advises both). Releases are Chris's: he bumps the version in `pyproject.toml` and the publish workflow does the rest.
 
 ## Source of truth (read in this order; the first wins)
 
@@ -71,7 +71,7 @@ uv run pytest tests/test_x.py -n0   # one file, in-process (easier to debug)
 uv build                       # wheel must contain goldlabel/web/* and goldlabel/gold_rule.md
 ```
 
-Ruff, ty and pytest must pass before every commit (pre-commit enforces it). The only `goldlabel` command is `goldlabel install` (`cli.py`). CI (`.github/workflows/ci.yml`) runs the four checks; its optional `pgvector` job runs `tests/test_pg_integration.py` against a real pgvector and is skipped locally unless `GOLDLABEL_TEST_PG_URL` is set.
+Ruff, ty and pytest must pass before every commit (pre-commit enforces it). The only `goldlabel` command is `goldlabel install` (`cli.py`). CI (`.github/workflows/ci.yml`) runs the four checks; its optional `pgvector` job runs `tests/test_pg_integration.py` against a real pgvector and is skipped locally unless `GOLDLABEL_TEST_PG_URL` is set. `.github/workflows/publish.yml` runs on every push to `main`: when the `pyproject.toml` version is above every `v*` tag it runs the checks, creates the tag and GitHub release `v<version>`, and publishes to PyPI (trusted publishing, environment `pypi`). `pyproject.toml` is the only place a version is set: the `sync-versions` pre-commit hook (`scripts/sync_versions.py`) copies it into `plugin.json` and `.claude-plugin/{plugin,marketplace}.json`, and `tests/test_versions.py` fails when they differ, which stops a release before its tag.
 
 ## Layout
 
@@ -95,7 +95,7 @@ Ruff, ty and pytest must pass before every commit (pre-commit enforces it). The 
 - Match surrounding code style; comments only where the why is not obvious.
 - One commit per task (`006/NN: ...`; for a Spec Kit feature, `NNN/TNN: ...` naming the feature and its task) on the branch you were assigned; do not open a PR unless asked.
 - **Containers: Podman, never Docker (hard requirement, constitution v1.1.0).** For any local container work (a throwaway Postgres or an S3 emulator for a check, pulling or running an image) use `podman` and `podman run`, never `docker`, and never write `docker` into a doc, script or command. Do not depend on a Docker daemon or socket. CI service containers on GitHub's runners are not local and are unaffected.
-- Don't tag, release or publish. The user pushes tags; PyPI uses trusted publishing (no token in secrets).
+- Don't tag, release, publish or bump the version. The publish workflow tags and releases when the user raises the version in `pyproject.toml`; PyPI uses trusted publishing (no token in secrets).
 
 ## Ponytail (lazy senior dev mode)
 
