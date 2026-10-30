@@ -320,6 +320,31 @@ def test_eval_log_counts_test_evaluations_and_distinct_prompts():
     assert first["digest"][:8] in text and "1.0000" in text and "dev" in text
 
 
+def test_fold_events_are_kept_apart_and_reset_the_test_count(tmp_path):
+    path = tmp_path / "evals.jsonl"
+    ev = {"split": "test", "n": 2, "score": 0.5, "digest": "abcdef012", "model": "m"}
+    lines = [
+        {**ev, "time": "2026-02-01T00:00:00+00:00"},
+        {"event": "test_folded", "time": "2026-02-02T00:00:00+00:00", "rows": 40},
+        {**ev, "time": "2026-02-03T00:00:00+00:00"},
+    ]
+    path.write_text("".join(json.dumps(x) + "\n" for x in lines))
+    log = eval_log(path)
+    assert [r["time"][:10] for r in log.rows] == ["2026-02-01", "2026-02-03"]
+    assert [f["rows"] for f in log.folds] == [40]
+    text = repr(log)
+    assert "test split evaluated 1 times (1 distinct prompts)" in text
+    assert "40 test rows folded into dev" in text
+    assert set(log.to_polars().columns) == {
+        "time",
+        "split",
+        "n",
+        "score",
+        "digest",
+        "model",
+    }  # no event columns
+
+
 def test_eval_log_with_a_path_and_when_empty(tmp_path):
     assert eval_log().rows == []
     assert "test split evaluated 0 times (0 distinct prompts)" in repr(

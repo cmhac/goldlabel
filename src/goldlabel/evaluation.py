@@ -230,7 +230,10 @@ async def aevaluate(
 
 @dataclass
 class EvalLog:
+    """`rows` are the evaluations; `folds` are the `test_folded` events (`Gold.fold_test`)."""
+
     rows: list[dict]
+    folds: list[dict] = field(default_factory=list)
 
     def to_polars(self):
         return _frame.to_polars(self.rows)
@@ -239,11 +242,17 @@ class EvalLog:
         return _frame.to_pandas(self.rows)
 
     def _test_line(self) -> str:
-        test = [r for r in self.rows if r["split"] == "test"]
-        return (
+        since = (
+            self.folds[-1]["time"] if self.folds else ""
+        )  # a fresh split starts at 0
+        test = [r for r in self.rows if r["split"] == "test" and r["time"] > since]
+        line = (
             f"test split evaluated {len(test)} times "
             f"({len({r['digest'] for r in test})} distinct prompts)"
         )
+        if self.folds:
+            line += f"; {sum(f['rows'] for f in self.folds)} test rows folded into dev"
+        return line
 
     def _repr_html_(self) -> str:
         if not self.rows:
@@ -279,7 +288,11 @@ def eval_log(path=None) -> EvalLog:
     path = resolve(path, "evals.jsonl")
     if not path.exists():
         return EvalLog([])
-    return EvalLog([json.loads(x) for x in path.read_text().splitlines() if x.strip()])
+    lines = [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
+    return EvalLog(
+        [r for r in lines if "event" not in r],
+        [r for r in lines if r.get("event") == "test_folded"],
+    )
 
 
 @dataclass
