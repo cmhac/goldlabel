@@ -245,3 +245,60 @@ def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     assert log[0]["prompt"] == "Label the post."
     assert log[2]["prompt"] == "Label the post. Rumours count as layoffs."
     assert "test split evaluated 1 times (1 distinct prompts)" in repr(gl.eval_log())
+
+
+def test_a_spent_test_split_is_folded_and_a_fresh_one_is_labelled_by_people(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    corpus_file = tmp_path / "corpus.jsonl"
+    shutil.copy(SAMPLE, corpus_file)
+    humans = []
+    monkeypatch.setattr(
+        _label.webbrowser, "open", lambda url: humans.append(simulated_human(url))
+    )
+    fake = FakeModel()
+    candidates = gl.get_candidates(
+        gl.Table(
+            corpus_file,
+            id_column="id",
+            vector_column="embedding",
+            embedding_model="hand-built-2d",
+        ),
+        seeds=["I lost my job"],
+        embedder=HandEmbedder(),
+    )
+    taxonomy = gl.Taxonomy(
+        mode="single", labels={"layoff": "Lost a job.", "burnout": "Worn out."}
+    )
+    clf = gl.Classifier(fake.model, taxonomy, prompt="Label the post.")
+    gold = gl.Gold()
+    gold.draw(candidates, n=2, split="dev", seed=1)
+    gold.draw(candidates, n=2, split="test", seed=2)
+    gl.label(gold, taxonomy)
+    humans.pop().join(timeout=10)
+    spent = {r.id for r in gold.test.rows}
+    assert len(spent) == 2 and len(gold.dev.rows) == 2
+
+    with pytest.raises(gl.GoldError, match="not been evaluated"):
+        gold.fold_test()  # nothing is spent until the test split was scored
+    gl.evaluate(clf, gold.test)
+    moved = gold.fold_test()
+
+    assert {r.id for r in moved.rows} == spent
+    assert not gold.test.rows and len(gold.dev.rows) == 4
+    for r in gold.dev.rows:  # the humans' labels survive the move, by hand
+        assert r.labels == HUMAN[r.id] and r.labelled_by == "goldlabel-ui"
+    log = gl.eval_log()
+    assert [f["rows"] for f in log.folds] == [2]
+    assert "test split evaluated 0 times" in repr(log)
+
+    gold.draw(candidates, n=1, split="test", seed=3)  # the fifth item, never folded
+    (fresh,) = gold.pending.rows
+    assert fresh.id not in spent and fresh.labels is None
+    with pytest.raises(gl.GoldError, match="finish labelling"):
+        gold.fold_test()
+    gl.label(gold, taxonomy)
+    humans.pop().join(timeout=10)
+    gl.evaluate(clf, gold.test)
+    assert "test split evaluated 1 times" in repr(gl.eval_log())

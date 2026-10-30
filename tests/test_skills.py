@@ -8,7 +8,9 @@ import json
 import re
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -17,8 +19,10 @@ import goldlabel
 from goldlabel import GOLD_RULE_FULL, GOLD_RULE_SHORT
 
 ROOT = Path(__file__).resolve().parent.parent
-SKILL_DIR = ROOT / "skills" / "goldlabel"
+SKILLS = ROOT / "src" / "goldlabel" / "skills"
+SKILL_DIR = SKILLS / "goldlabel"
 SKILL = SKILL_DIR / "SKILL.md"
+ALL_SKILLS = sorted(p for p in SKILLS.glob("*") if p.is_dir())
 REFS = ["workflow.md", "tuning.md", "running.md", "reuse.md"]
 INSTRUCTIONS = ROOT / "docs" / "agent-instructions.md"
 STEERING = ROOT / ".kiro" / "steering" / "goldlabel.md"
@@ -57,33 +61,36 @@ def python_blocks(path):
 # --- the skill ------------------------------------------------------------------------------
 
 
-def test_skill_frontmatter():
-    meta, body = split_frontmatter(SKILL.read_text())
-    assert meta["name"] == "goldlabel" == SKILL_DIR.name
+@pytest.mark.parametrize("skill", ALL_SKILLS, ids=lambda p: p.name)
+def test_skill_frontmatter(skill):
+    meta, body = split_frontmatter((skill / "SKILL.md").read_text())
+    assert set(meta) == {"name", "description"}  # the fields all four agents accept
+    assert meta["name"] == skill.name
     assert (
         re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", meta["name"])
         and len(meta["name"]) <= 64
     )
     assert isinstance(meta["description"], str)
     assert 0 < len(meta["description"]) <= 1024
-    for key in ("content analysis", "seed", "gold"):
-        assert key in meta["description"].lower()
+    assert "gold" in meta["description"].lower()
     assert body.strip()
 
 
-def test_description_ends_with_the_short_rule():
-    meta, _ = split_frontmatter(SKILL.read_text())
+@pytest.mark.parametrize("skill", ALL_SKILLS, ids=lambda p: p.name)
+def test_description_ends_with_the_short_rule(skill):
+    meta, _ = split_frontmatter((skill / "SKILL.md").read_text())
     assert meta["description"].endswith(GOLD_RULE_SHORT), paste_help(
-        "the `description` in skills/goldlabel/SKILL.md (as its last sentence)",
+        f"the `description` in {skill.name}/SKILL.md (as its last sentence)",
         "Short",
         GOLD_RULE_SHORT,
     )
 
 
-def test_body_opens_with_the_full_rule():
-    _, body = split_frontmatter(SKILL.read_text())
+@pytest.mark.parametrize("skill", ALL_SKILLS, ids=lambda p: p.name)
+def test_body_opens_with_the_full_rule(skill):
+    _, body = split_frontmatter((skill / "SKILL.md").read_text())
     assert body.lstrip().startswith(GOLD_RULE_FULL), paste_help(
-        "the body of skills/goldlabel/SKILL.md (as its first lines)",
+        f"the body of {skill.name}/SKILL.md (as its first lines)",
         "Full",
         GOLD_RULE_FULL,
     )
@@ -114,8 +121,9 @@ def test_instruction_block_names_every_harness_file():
         ".kiro/steering",
     ):
         assert name in text
-    for ref in REFS:
-        assert f"skills/goldlabel/references/{ref}" in text
+    for skill in ALL_SKILLS:
+        assert f"`{skill.name}`" in text, f"the block does not name {skill.name}"
+    assert "goldlabel install" in text
 
 
 def test_skill_lists_every_reference_and_they_exist():
@@ -141,7 +149,10 @@ def test_skill_hard_rules_are_stated():
 
 # --- code samples ---------------------------------------------------------------------------
 
-DOCS = [SKILL, *(SKILL_DIR / "references" / n for n in REFS)]
+DOCS = [
+    *(p / "SKILL.md" for p in ALL_SKILLS),
+    *(SKILL_DIR / "references" / n for n in REFS),
+]
 
 # variable name used in the samples -> the class it holds
 VARS = {
@@ -163,10 +174,10 @@ def has_attr(cls, name):
     }
 
 
-@pytest.mark.parametrize("path", DOCS, ids=lambda p: p.name)
+@pytest.mark.parametrize("path", DOCS, ids=lambda p: f"{p.parent.name}/{p.name}")
 def test_code_blocks_parse_and_use_real_names(path):
     blocks = python_blocks(path)
-    if path.name != "SKILL.md":
+    if path.parent.name == "references":
         assert blocks, f"{path.name} needs concrete code"
     for code in blocks:
         tree = ast.parse(code)
@@ -264,10 +275,29 @@ def test_root_plugin_json_is_agent_plugins_1_0():
     assert set(m) <= AGENT_PLUGINS_FIELDS, (
         "the 1.0 manifest is closed; no component paths"
     )
-    assert (
-        ROOT / "skills" / "goldlabel" / "SKILL.md"
-    ).is_file()  # fixed location `skills/`
+    assert not (ROOT / "skills").exists()  # the one copy is src/goldlabel/skills
     assert not (ROOT / "hooks").exists()
+
+
+def test_claude_plugin_points_at_the_packaged_skills():
+    assert load(CLAUDE_PLUGIN)["skills"] == ["./src/goldlabel/skills"]
+
+
+def test_wheel_ships_every_skill(tmp_path):
+    if shutil.which("uv") is None:
+        pytest.skip("uv not installed")
+    subprocess.run(
+        ["uv", "build", "--wheel", "-o", str(tmp_path), str(ROOT)],
+        check=True,
+        capture_output=True,
+        timeout=300,
+    )
+    (wheel,) = tmp_path.glob("goldlabel-*.whl")
+    with zipfile.ZipFile(wheel) as z:
+        names = set(z.namelist())
+    for skill in ALL_SKILLS:
+        assert f"goldlabel/skills/{skill.name}/SKILL.md" in names
+    assert "goldlabel/skills/goldlabel/references/workflow.md" in names
 
 
 def test_versions_agree():
@@ -287,6 +317,55 @@ def test_claude_plugin_validate():
 
 
 def test_the_skill_and_its_references_never_mention_the_removed_corpus():
-    for path in [SKILL, *(SKILL_DIR / "references" / r for r in REFS)]:
+    for path in DOCS:
         for word in ("LocalCorpus", "vectors.npy", "items.jsonl"):
             assert word not in path.read_text(), f"{path.name} still says {word}"
+
+
+# --- the stage skills' examples that can run offline ---------------------------------------------
+
+
+def block_with(skill, needle):
+    (block,) = [b for b in python_blocks(SKILLS / skill / "SKILL.md") if needle in b]
+    return block
+
+
+def test_connect_skill_shaping_example_runs_and_leaves_the_source_alone(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "export.json"
+    source.write_text(
+        '[{"post_id": 7, "body": "first post"}, {"post_id": 8, "body": "second post"}]'
+    )
+    before = source.read_text()
+    scope: dict[str, Any] = {}
+    # the block continues the earlier `import goldlabel as gl`
+    exec(block_with("goldlabel-connect", "write_ndjson"), {"gl": goldlabel}, scope)  # noqa: S102
+    rows = goldlabel.get_candidates(scope["corpus"]).rows
+    assert rows == [
+        {"id": "7", "text": "first post"},
+        {"id": "8", "text": "second post"},
+    ]
+    assert source.read_text() == before
+
+
+def test_taxonomy_skill_example_builds_and_writes_a_loadable_taxonomy(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    scope: dict[str, Any] = {"gl": goldlabel}
+    exec(block_with("goldlabel-taxonomy", "taxonomy.write"), scope)  # noqa: S102
+    loaded = goldlabel.Taxonomy.read("taxonomy.yaml")
+    assert loaded == scope["taxonomy"] and loaded.mode == "single"
+    assert [label.name for label in loaded.labels] == ["scam", "satire"]
+
+
+def test_folding_the_test_split_always_comes_with_the_explicit_yes():
+    files = [p / "SKILL.md" for p in ALL_SKILLS] + [
+        SKILL_DIR / "references" / n for n in REFS
+    ]
+    mentions = [p for p in files if "fold_test" in p.read_text()]
+    assert SKILLS / "goldlabel-tune" / "SKILL.md" in mentions
+    for path in mentions:
+        assert "explicit yes" in path.read_text(), f"{path.name} folds without a yes"
