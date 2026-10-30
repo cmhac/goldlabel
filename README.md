@@ -280,7 +280,7 @@ is whether Copilot accepts this repository's marketplace entry.
 **Kiro**
 
 Copy `.kiro/steering/goldlabel.md` from this repository into your project's `.kiro/steering/` (it carries the
-gold rule and is always included), and copy `skills/goldlabel/` into your skills folder. The repository also
+gold rule and is always included), and copy `src/goldlabel/skills/goldlabel/` into your skills folder. The repository also
 has a root `plugin.json` (Agent Plugins 1.0) that Kiro Powers read. `npx skills add cmhac/goldlabel -a kiro-cli -g`
 is **unverified**: it is not on Kiro's skills page.
 
@@ -288,7 +288,7 @@ is **unverified**: it is not on Kiro's skills page.
 
 Paste the block below into the project's instruction file (`AGENTS.md` for Codex and Copilot CLI,
 `.github/copilot-instructions.md` for Copilot, `CLAUDE.md` for Claude Code) or give the agent
-`skills/goldlabel/SKILL.md`. The same text is in `docs/agent-instructions.md`, and
+`src/goldlabel/skills/goldlabel/SKILL.md`. The same text is in `docs/agent-instructions.md`, and
 `print(goldlabel.GOLD_RULE_FULL)` prints the rule.
 
 ### The agent instruction block
@@ -300,7 +300,7 @@ Importing a file the user says people already labelled is allowed: import it unc
 
 When working with the `goldlabel` library (content analysis over a corpus: candidates from seed phrases, keywords or the whole corpus, an LLM classifier checked against human-labelled gold data):
 
-- Read `skills/goldlabel/SKILL.md` first, then the reference you need: `skills/goldlabel/references/workflow.md` (brief, seeds, taxonomy, gold, first evaluation), `skills/goldlabel/references/tuning.md` (reading disagreements, tuning on dev, never on test), `skills/goldlabel/references/running.md` (estimate, cost, `max_cost`, resuming, keys), `skills/goldlabel/references/reuse.md` (saved classifiers). If the skill files are not in the project, read them at https://github.com/cmhac/goldlabel/tree/main/skills/goldlabel or print the rule with `import goldlabel; print(goldlabel.GOLD_RULE_FULL)`.
+- Read `src/goldlabel/skills/goldlabel/SKILL.md` first, then the reference you need: `src/goldlabel/skills/goldlabel/references/workflow.md` (brief, seeds, taxonomy, gold, first evaluation), `src/goldlabel/skills/goldlabel/references/tuning.md` (reading disagreements, tuning on dev, never on test), `src/goldlabel/skills/goldlabel/references/running.md` (estimate, cost, `max_cost`, resuming, keys), `src/goldlabel/skills/goldlabel/references/reuse.md` (saved classifiers). If the skill files are not in the project, read them at https://github.com/cmhac/goldlabel/tree/main/src/goldlabel/skills/goldlabel or print the rule with `import goldlabel; print(goldlabel.GOLD_RULE_FULL)`.
 - Never run a full classification without showing `clf.estimate(...)` (calls, cost, time) and getting a yes from the user.
 - Never put API keys or database URLs in a notebook, script or file; they come from environment variables.
 

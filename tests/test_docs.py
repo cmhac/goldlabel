@@ -66,7 +66,7 @@ def test_no_doc_mentions_the_removed_corpus_or_its_folder_layout():
         ROOT / "AGENTS.md",
         ROOT / ".kiro/steering/goldlabel.md",
     ]
-    files += (ROOT / "skills" / "goldlabel").rglob("*.md")
+    files += (ROOT / "src" / "goldlabel" / "skills").rglob("*.md")
     files += [SAMPLE / "README.md", PY, IPYNB]
     for path in files:
         for word in REMOVED:
@@ -86,7 +86,7 @@ def test_nothing_calls_the_library_embedded_corpus_only():
         ROOT / ".kiro/steering/goldlabel.md",
     ]
     files += [ROOT / "plugin.json", *(ROOT / ".claude-plugin").glob("*.json")]
-    files += (ROOT / "skills" / "goldlabel").rglob("*.md")
+    files += (ROOT / "src" / "goldlabel" / "skills").rglob("*.md")
     for path in files:
         assert not ALREADY_EMBEDDED.search(path.read_text()), path.name
     description = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
@@ -95,7 +95,10 @@ def test_nothing_calls_the_library_embedded_corpus_only():
 
 
 def test_the_docs_describe_the_three_candidate_sources_and_the_table_format():
-    for path in (README, ROOT / "skills/goldlabel/references/workflow.md"):
+    for path in (
+        README,
+        ROOT / "src/goldlabel/skills/goldlabel/references/workflow.md",
+    ):
         text = path.read_text()
         for needle in (
             "get_candidates",
@@ -113,7 +116,10 @@ def test_the_docs_describe_the_three_candidate_sources_and_the_table_format():
             "order is the service's",
         ):
             assert needle in text, f"{path.name} does not mention {needle}"
-    assert "gl.get_candidates(" in (ROOT / "skills/goldlabel/SKILL.md").read_text()
+    assert (
+        "gl.get_candidates("
+        in (ROOT / "src/goldlabel/skills/goldlabel/SKILL.md").read_text()
+    )
 
 
 def test_readme_tables_use_polars_and_mention_pandas():
