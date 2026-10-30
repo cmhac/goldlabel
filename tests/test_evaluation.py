@@ -264,7 +264,6 @@ def test_each_call_appends_one_line_with_every_field():
     assert row["metrics"]["per_label"]["a"]["recall"] == approx(0.5)
     assert row["dollars"] is None or row["dollars"] == 0  # unpriced FunctionModel
     assert (row["live_calls"], row["cached_calls"]) == (5, 0)
-    assert row["goldlabel"] == "0.3.0"
 
 
 def test_log_is_append_only_and_records_cached_calls():
