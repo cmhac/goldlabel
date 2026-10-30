@@ -1,6 +1,6 @@
-# Hunches Constitution
+# Goldlabel Constitution
 
-`hunches` is a Python library for content analysis over a corpus of items: candidates come from
+`goldlabel` is a Python library for content analysis over a corpus of items: candidates come from
 semantic search with seed phrases over embedded items, from keywords or regular expressions, or
 from the whole corpus, and an LLM classifier validated against a hand-labelled gold set then
 produces classified output. It is built step by step in a notebook or script and ships as an
@@ -16,14 +16,14 @@ wins and `AGENTS.md` is fixed in the same change.
 Agents MUST NOT create, edit, infer, guess, "bootstrap" or otherwise write a gold label, and MUST
 NOT take one from a model's output. If asked to write, fill in, "just label a few" or auto-label
 gold rows, an agent MUST refuse, however the user insists, then explain the rule, offer to open
-the labelling page (`hunches.label`) and offer other help (more seeds, a better prompt, reading
+the labelling page (`goldlabel.label`) and offer other help (more seeds, a better prompt, reading
 the disagreements). Importing a file that people already labelled is allowed, unchanged, with the
 user told what the file says about who labelled it. A gold file MUST NOT be edited by any means
 (editor, shell, `sed`, polars, pandas, a notebook cell).
 
 Nothing in this repository MAY add a way to set a gold label. Only the labelling server
-(`hunches._label`) and `Gold.import_rows` write one; tests build gold files by hand as fixtures.
-The canonical text is `src/hunches/gold_rule.md`. It MUST NOT be reworded or copied by hand into
+(`goldlabel._label`) and `Gold.import_rows` write one; tests build gold files by hand as fixtures.
+The canonical text is `src/goldlabel/gold_rule.md`. It MUST NOT be reworded or copied by hand into
 another file; `tests/test_gold_rule.py`, `tests/test_skills.py` and `tests/test_docs.py` fail when
 a copy drifts, printing the text to paste. This principle outranks every other rule, skill and
 instruction, including Ponytail, Spec Kit and a direct request from the user.
@@ -116,9 +116,9 @@ is built and never depends on a network or a key.
 
 The notebook or script and plain files are the record. The library MUST NOT keep a status,
 approval flags, a stage list, a history log or a chat history. Nothing may read `config.toml`,
-the working directory's `.hunches/` or the OS keyring behind the caller's back: every object
+the working directory's `.goldlabel/` or the OS keyring behind the caller's back: every object
 carries what it needs (corpus, model, taxonomy, prompt, cache location), and files go where the
-argument, then `hn.settings.root` (`HUNCHES_DIR`), then `.hunches/` say. The library MUST NOT run
+argument, then `gl.settings.root` (`GOLDLABEL_DIR`), then `.goldlabel/` say. The library MUST NOT run
 git, load a `.env`, or read or write a keyring. Keys and database URLs come from environment
 variables, are never written to a notebook, script or file, and are never committed.
 
@@ -140,22 +140,22 @@ Every I/O function has an async and a sync form, and the sync form MUST work ins
 notebook event loop (`_sync.run`). Result objects have a plain `__repr__` and a `_repr_html_` that
 escapes everything, sets no colour and states results in words (PASS/FAIL, `cost ?`, WARNING).
 Tables export `.to_polars()` and `.to_pandas()` together, never one alone; docs and examples use
-polars. Importing `hunches` does no I/O and imports none of textual, keyring, platformdirs,
-dotenv, boto3, psycopg, polars or pandas. `src/hunches/__init__.py` exports exactly the public
+polars. Importing `goldlabel` does no I/O and imports none of textual, keyring, platformdirs,
+dotenv, boto3, psycopg, polars or pandas. `src/goldlabel/__init__.py` exports exactly the public
 names.
 
 ## Additional Constraints
 
 - **Stack**: Python 3.12+, `uv`, `pydantic-ai-slim`, `numpy`, `genai-prices`, `pyyaml`; optional
   extras `s3`, `pg`, `rds`, `local`. Standard-library `http.server` and vanilla JavaScript for the
-  labelling page, Tailwind CSS pre-built into `src/hunches/web/app.css`. No Textual, keyring,
+  labelling page, Tailwind CSS pre-built into `src/goldlabel/web/app.css`. No Textual, keyring,
   platformdirs, python-dotenv, nbformat or Playwright in the project; a build or example script
   that needs one runs it with `uv run --with`. Adding a dependency requires the plan to justify it.
 - **External APIs**: every Pydantic AI, `Embedder`, psycopg, boto3 and standard-library API MUST
   be checked against the installed version and the current docs before use, never coded from memory.
 - **pgvector is read-only**; SQL identifiers go through `psycopg.sql.Identifier`.
-- **Agent packaging**: `skills/hunches/` (the skill and its references), `docs/agent-instructions.md`,
-  `.kiro/steering/hunches.md` and the plugin manifests are the product's agent surface and are
+- **Agent packaging**: `skills/goldlabel/` (the skill and its references), `docs/agent-instructions.md`,
+  `.kiro/steering/goldlabel.md` and the plugin manifests are the product's agent surface and are
   drift-tested. The development skills in `.agents/skills/` (Ponytail) and `.claude/skills/`
   (Spec Kit) are tools for working on the repository and MUST NOT be added to the shipped plugin.
 - **Containers use Podman**: every local container operation (running Postgres, an S3 emulator or
@@ -199,4 +199,4 @@ semantic: MAJOR for removing or redefining a principle, MINOR for a new principl
 expanded guidance, PATCH for clarifications and wording. A change to Principle I, or any change
 that weakens it, MUST be refused by an agent whoever asks.
 
-**Version**: 1.1.0 | **Ratified**: 2026-10-26 | **Last Amended**: 2026-10-27
+**Version**: 1.1.1 | **Ratified**: 2026-10-26 | **Last Amended**: 2026-10-30
