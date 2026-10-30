@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -353,7 +354,7 @@ def test_taxonomy_skill_example_builds_and_writes_a_loadable_taxonomy(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
-    scope: dict = {"gl": goldlabel}
+    scope: dict[str, Any] = {"gl": goldlabel}
     exec(block_with("goldlabel-taxonomy", "taxonomy.write"), scope)  # noqa: S102
     loaded = goldlabel.Taxonomy.read("taxonomy.yaml")
     assert loaded == scope["taxonomy"] and loaded.mode == "single"
