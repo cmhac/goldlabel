@@ -1,5 +1,5 @@
 # %% [markdown]
-# # hunches walkthrough
+# # goldlabel walkthrough
 #
 # Eight short posts with hand-built 2-D vectors live in `corpus.jsonl`. Every cell below is one step of
 # the analysis; run them in order, in Jupyter, marimo, or as a plain script (`# %%` marks the cells).
@@ -13,14 +13,14 @@ from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
 from pydantic_ai.usage import RequestUsage
 
-import hunches as hn
+import goldlabel as gl
 
 
 class HandEmbedder(Embedder):
     """Stand-in for a real embedding model: the sample vectors are hand-built, not embeddings.
 
     With your own corpus, drop this and pass `embedder="openai:text-embedding-3-small"` (or the
-    model your corpus was embedded with) to `hn.get_candidates`.
+    model your corpus was embedded with) to `gl.get_candidates`.
     """
 
     def __init__(self):
@@ -41,17 +41,17 @@ class HandEmbedder(Embedder):
 # ## 1. Search
 #
 # Seed phrases are things a matching post could say. `get_candidates` embeds them, finds the closest items
-# and keeps each item's best similarity. The result is saved to `.hunches/candidates.jsonl`.
+# and keeps each item's best similarity. The result is saved to `.goldlabel/candidates.jsonl`.
 
 # %%
-corpus = hn.Table(
+corpus = gl.Table(
     "corpus.jsonl",
     id_column="id",
     vector_column="embedding",
     embedding_model="hand-built-2d",
 )
 seeds = ["I just lost my job"]
-candidates = hn.get_candidates(corpus, seeds=seeds, embedder=HandEmbedder())
+candidates = gl.get_candidates(corpus, seeds=seeds, embedder=HandEmbedder())
 candidates
 
 # %%
@@ -64,14 +64,14 @@ candidates.to_polars()  # .to_pandas() works the same way
 # prompt is a new classifier (`with_prompt`), so you can keep both and compare them.
 
 # %%
-taxonomy = hn.Taxonomy(
+taxonomy = gl.Taxonomy(
     mode="single",
     labels={
         "layoff": "The author lost their job, or expects to.",
         "burnout": "The author is worn out by their work.",
     },
 )
-clf = hn.Classifier(
+clf = gl.Classifier(
     "anthropic:claude-haiku-4-5",
     taxonomy,
     prompt="Read the post and choose the one label that fits it best.",
@@ -81,25 +81,25 @@ clf
 # %% [markdown]
 # ## 3. Gold: people label
 #
-# `draw` picks pending rows, with no labels. `hn.label` opens the labelling page in your browser and
+# `draw` picks pending rows, with no labels. `gl.label` opens the labelling page in your browser and
 # returns when you press **Done**. You decide every label; the page never shows the classifier's
 # guess. (An agent working with you must not fill these in, see the README.)
 
 # %%
-gold = hn.Gold()
+gold = gl.Gold()
 gold.draw(candidates, n=3, split="dev")
 
 # %%
-hn.label(gold, taxonomy)
+gl.label(gold, taxonomy)
 
 # %% [markdown]
 # ## 4. Evaluate on the dev split
 #
 # One model call per labelled row; running the same cell again makes none (they are cached).
-# Every evaluation is also appended to `.hunches/evals.jsonl`.
+# Every evaluation is also appended to `.goldlabel/evals.jsonl`.
 
 # %%
-ev = hn.evaluate(clf, gold.dev, target=0.9)
+ev = gl.evaluate(clf, gold.dev, target=0.9)
 ev
 
 # %%
@@ -115,7 +115,7 @@ clf2 = clf.with_prompt(
     "Read the post and choose the one label that fits it best. "
     "A post about rumoured redundancies counts as layoff."
 )
-ev2 = hn.evaluate(clf2, gold.dev, target=0.9)
+ev2 = gl.evaluate(clf2, gold.dev, target=0.9)
 ev2
 
 # %% [markdown]
@@ -127,14 +127,14 @@ ev2
 gold.draw(candidates, n=2, split="test")
 
 # %%
-hn.label(gold, taxonomy)
+gl.label(gold, taxonomy)
 
 # %%
-final = hn.evaluate(clf2, gold.test, target=0.9)
+final = gl.evaluate(clf2, gold.test, target=0.9)
 final
 
 # %%
-hn.eval_log()  # every evaluation so far, with how often the test split was used
+gl.eval_log()  # every evaluation so far, with how often the test split was used
 
 # %% [markdown]
 # ## 7. Pick a cutoff, price the run, run it
@@ -143,7 +143,7 @@ hn.eval_log()  # every evaluation so far, with how often the test split was used
 # You choose the cutoff. `estimate` calls no model; `unknown` cost shows as `?`, never as `$0`.
 
 # %%
-report = hn.band_sample(clf2, candidates, per_band=5)
+report = gl.band_sample(clf2, candidates, per_band=5)
 report
 
 # %%
@@ -159,7 +159,7 @@ results.to_polars()
 # ## 8. Keep the classifier
 #
 # A saved bundle (model, taxonomy, prompt, the final evaluation) is plain files to commit. A
-# pipeline loads it with `hn.Classifier.load("classifiers/layoffs")`, no gold and no UI needed.
+# pipeline loads it with `gl.Classifier.load("classifiers/layoffs")`, no gold and no UI needed.
 
 # %%
 clf2.save("classifiers/layoffs", evaluation=final)

@@ -1,8 +1,8 @@
 """Real-database tests for the pgvector backend (spec 005).
 
-Skipped unless HUNCHES_TEST_PG_URL points at a PostgreSQL with the `vector` extension available
+Skipped unless GOLDLABEL_TEST_PG_URL points at a PostgreSQL with the `vector` extension available
 (the role needs CREATE on the database; a few tests also need CREATE DATABASE and skip without it).
-Every test makes its own schema (or scratch database) and drops it afterwards; hunches itself
+Every test makes its own schema (or scratch database) and drops it afterwards; goldlabel itself
 never writes. The `index` tests also need pgvector 0.8.0 or newer. Expected values come from numpy
 or are written by hand, never from the code under test.
 """
@@ -20,15 +20,17 @@ from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
 from pydantic_ai.usage import RequestUsage
 
-from hunches import candidates
-from hunches.search import PgCorpus, Table
+from goldlabel import candidates
+from goldlabel.search import PgCorpus, Table
 
-search = importlib.import_module("hunches.search")  # `hunches.search` is the function
+search = importlib.import_module(
+    "goldlabel.search"
+)  # `goldlabel.search` is the function
 
 psycopg = pytest.importorskip("psycopg")
 
-URL = os.environ.get("HUNCHES_TEST_PG_URL")
-pytestmark = pytest.mark.skipif(not URL, reason="HUNCHES_TEST_PG_URL is not set")
+URL = os.environ.get("GOLDLABEL_TEST_PG_URL")
+pytestmark = pytest.mark.skipif(not URL, reason="GOLDLABEL_TEST_PG_URL is not set")
 
 D = 16
 SEED_TEXTS = [
@@ -93,7 +95,7 @@ def scratch_db(admin):
 @pytest.fixture
 def project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("HUNCHES_PG_URL", URL or "")
+    monkeypatch.setenv("GOLDLABEL_PG_URL", URL or "")
 
     last: list = []
 
@@ -357,7 +359,7 @@ async def test_view(admin, schema, project, monkeypatch):
 
 async def test_extension_in_a_non_default_schema(scratch_db, project, monkeypatch):
     _, conninfo = scratch_db
-    monkeypatch.setenv("HUNCHES_PG_URL", conninfo)
+    monkeypatch.setenv("GOLDLABEL_PG_URL", conninfo)
     vectors, seeds = corpus()
     with psycopg.connect(conninfo, autocommit=True) as db:
         db.execute("CREATE SCHEMA extensions")
@@ -366,7 +368,7 @@ async def test_extension_in_a_non_default_schema(scratch_db, project, monkeypatc
         # the table's column type is extensions.vector; neither it nor `<=>` is on search_path
         make_table(db, "hn", "docs", vectors, ext="extensions.")
         assert db.execute("SHOW search_path").fetchone()[0] == '"$user", public'
-        ids = [r[0] for r in db.execute("SELECT id FROM hn.docs ORDER BY id")]
+        ids = [r[0] for r in db.execute("SELECT id FROM gl.docs ORDER BY id")]
     await compare(project, monkeypatch, "hn", "docs", ids, vectors, seeds)
     report = pg_check(project)
     assert report["schema"] == "extensions"
@@ -452,7 +454,7 @@ def test_index_mode_against_exact(admin, scratch_db, project, monkeypatch):
     if version_of(admin) < (0, 8, 0):
         pytest.skip("index mode needs pgvector 0.8.0 or newer")
     name, conninfo = scratch_db
-    monkeypatch.setenv("HUNCHES_PG_URL", conninfo)
+    monkeypatch.setenv("GOLDLABEL_PG_URL", conninfo)
     floor = 0.3
     with psycopg.connect(conninfo, autocommit=True) as db:
         db.execute("CREATE EXTENSION vector")
@@ -477,7 +479,7 @@ def test_index_mode_against_exact(admin, scratch_db, project, monkeypatch):
             ).fetchall()
         print(
             f"\nindex mode vs exact [{planner} planner], 100,000 x 32 rows, one seed, floor "
-            f"{floor}: true hits {true_count}; exact {len(exact[0])}; hunches index mode "
+            f"{floor}: true hits {true_count}; exact {len(exact[0])}; goldlabel index mode "
             f"{len(index)}; plain query with pgvector's defaults {len(raw)}"
         )
         assert len(exact[0]) == true_count
@@ -554,4 +556,4 @@ def test_statement_timeout_gives_the_hint(slow_table, project):
         search.search_pg_exact(pg, np.ones((2, D)), 0.0)
     assert "canceling statement due to statement timeout" in str(e.value)
     assert "Fix: raise statement_timeout for this role" in str(e.value)
-    assert os.environ["HUNCHES_PG_URL"] not in str(e.value)
+    assert os.environ["GOLDLABEL_PG_URL"] not in str(e.value)

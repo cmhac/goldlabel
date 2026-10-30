@@ -8,9 +8,9 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.usage import RequestUsage
 from pytest import approx
 
-from hunches import classifier
-from hunches.candidates import Candidates
-from hunches.evaluation import (
+from goldlabel import classifier
+from goldlabel.candidates import Candidates
+from goldlabel.evaluation import (
     BandReport,
     EvalLog,
     Evaluation,
@@ -19,9 +19,9 @@ from hunches.evaluation import (
     eval_log,
     evaluate,
 )
-from hunches.gold import Gold
-from hunches.settings import settings
-from hunches.taxonomy import Label, Taxonomy
+from goldlabel.gold import Gold
+from goldlabel.settings import settings
+from goldlabel.taxonomy import Label, Taxonomy
 
 
 @pytest.fixture(autouse=True)
@@ -257,7 +257,7 @@ def test_each_call_appends_one_line_with_every_field():
     [row] = log_rows()
     assert set(row) == {
         "time", "split", "n", "gold", "model", "digest", "prompt", "taxonomy", "metric",
-        "target", "score", "metrics", "dollars", "live_calls", "cached_calls", "hunches",
+        "target", "score", "metrics", "dollars", "live_calls", "cached_calls", "goldlabel",
     }  # fmt: skip
     assert before <= datetime.fromisoformat(row["time"])
     assert (row["split"], row["n"], row["model"]) == ("dev", 5, "m")
@@ -276,7 +276,7 @@ def test_each_call_appends_one_line_with_every_field():
     assert row["metrics"]["per_label"]["a"]["recall"] == approx(0.5)
     assert row["dollars"] is None or row["dollars"] == 0  # unpriced FunctionModel
     assert (row["live_calls"], row["cached_calls"]) == (5, 0)
-    assert row["hunches"] == "0.1.0"
+    assert row["goldlabel"] == "0.1.0"
 
 
 def test_log_is_append_only_and_records_cached_calls():
@@ -330,6 +330,14 @@ def test_eval_log_counts_test_evaluations_and_distinct_prompts():
     assert "test split evaluated 3 times (2 distinct prompts)" in text
     first = log.rows[0]
     assert first["digest"][:8] in text and "1.0000" in text and "dev" in text
+
+
+def test_a_log_line_written_before_the_rename_still_loads(tmp_path):
+    path = tmp_path / "evals.jsonl"
+    path.write_text('{"time": "2026-01-01T00:00:00", "n": 3, "hunches": "0.1.0"}\n')
+    assert eval_log(path).rows == [
+        {"time": "2026-01-01T00:00:00", "n": 3, "hunches": "0.1.0"}
+    ]
 
 
 def test_eval_log_with_a_path_and_when_empty(tmp_path):

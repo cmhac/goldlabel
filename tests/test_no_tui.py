@@ -18,7 +18,7 @@ REMOVED = [
 def test_kept_modules_import_no_textual():
     code = (
         "import sys\n"
-        + "".join(f"import hunches.{m}\n" for m in KEPT)
+        + "".join(f"import goldlabel.{m}\n" for m in KEPT)
         + "assert not [m for m in sys.modules if m.split('.')[0] == 'textual'], 'textual imported'\n"
     )
     result = subprocess.run(
@@ -29,4 +29,4 @@ def test_kept_modules_import_no_textual():
 
 def test_tui_modules_are_gone():
     for name in REMOVED:
-        assert importlib.util.find_spec(f"hunches.{name}") is None, name
+        assert importlib.util.find_spec(f"goldlabel.{name}") is None, name

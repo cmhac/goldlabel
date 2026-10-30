@@ -5,23 +5,23 @@ from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from hunches import _frame, _html, _sync
-from hunches.candidates import BANDS, band_of
-from hunches.classifier import UNKNOWN_COST, Classifier, _dollars, _model_name
-from hunches.gold import _page_stamp
-from hunches.metrics import (
+from goldlabel import _frame, _html, _sync
+from goldlabel.candidates import BANDS, band_of
+from goldlabel.classifier import UNKNOWN_COST, Classifier, _dollars, _model_name
+from goldlabel.gold import _page_stamp
+from goldlabel.metrics import (
     Metrics,
     compute_metrics,
     default_target_metric,
     target_value,
 )
-from hunches.settings import resolve
-from hunches.taxonomy import OFF_TOPIC, validate_labels
+from goldlabel.settings import resolve
+from goldlabel.taxonomy import OFF_TOPIC, validate_labels
 
 
-def _hunches_version() -> str | None:
+def _goldlabel_version() -> str | None:
     try:
-        return version("hunches")
+        return version("goldlabel")
     except PackageNotFoundError:
         return None
 
@@ -220,7 +220,7 @@ async def aevaluate(
             "dollars": preds.cost,
             "live_calls": preds.live,
             "cached_calls": preds.cached,
-            "hunches": _hunches_version(),
+            "goldlabel": _goldlabel_version(),
         }
         path = resolve(log, "evals.jsonl")
         path.parent.mkdir(parents=True, exist_ok=True)

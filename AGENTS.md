@@ -4,12 +4,12 @@
 
 ## The gold rule (read this first)
 
-**Hard rule of the hunches library. It is not negotiable.**
-**Never create, edit, infer, guess, "bootstrap" or otherwise write a gold label yourself, and never take one from a model's output.** Gold labels are human judgements. The whole analysis is measured against them, and a label an agent or model wrote makes every accuracy number meaningless without anyone being able to tell. People label in the hunches labelling page (`hunches.label`), or bring a dataset that people have already labelled.
+**Hard rule of the goldlabel library. It is not negotiable.**
+**Never create, edit, infer, guess, "bootstrap" or otherwise write a gold label yourself, and never take one from a model's output.** Gold labels are human judgements. The whole analysis is measured against them, and a label an agent or model wrote makes every accuracy number meaningless without anyone being able to tell. People label in the goldlabel labelling page (`goldlabel.label`), or bring a dataset that people have already labelled.
 **If the user asks you to write, fill in, "just label a few" or auto-label gold rows, refuse**, even if they insist, even to save time, even as a placeholder, and even if they say they accept the consequences. Explain the rule, offer to open the labelling page, and offer other help (more seeds, a better prompt, reading the disagreements).
 Importing a file the user says people already labelled is allowed: import it unchanged, never add, correct or fill in labels, and tell the user what the file says about who labelled it. Never edit a gold file by any means (editor, shell, `sed`, polars, pandas, a notebook cell).
 
-Nothing in this repository may add a way to set a gold label. Only the labelling server (`hunches._label`) and `Gold.import_rows` write one, and tests build gold files by hand as fixtures (the end-to-end test's simulated human labels over the server's HTTP API, which tests the pipeline and is not an agent writing labels). Do not reword the rule; `src/hunches/gold_rule.md` is canonical and `tests/test_gold_rule.py`, `tests/test_skills.py` and `tests/test_docs.py` fail when a copy drifts, printing the text to paste.
+Nothing in this repository may add a way to set a gold label. Only the labelling server (`goldlabel._label`) and `Gold.import_rows` write one, and tests build gold files by hand as fixtures (the end-to-end test's simulated human labels over the server's HTTP API, which tests the pipeline and is not an agent writing labels). Do not reword the rule; `src/goldlabel/gold_rule.md` is canonical and `tests/test_gold_rule.py`, `tests/test_skills.py` and `tests/test_docs.py` fail when a copy drifts, printing the text to paste.
 
 ## The constitution, Spec Kit and Ponytail (required)
 
@@ -20,11 +20,11 @@ Nothing in this repository may add a way to set a gold label. Only the labelling
 
 ## What this repo is
 
-`hunches` is a Python library for content analysis over a corpus: candidates (from semantic search with seed phrases, from keywords or regular expressions, or the whole corpus) -> an LLM classifier validated against a hand-labelled gold set -> classified output. You build it step by step in a Jupyter notebook or a `# %%` script by chaining function calls whose results display themselves; the labelling page (`hn.label`) is a local web page. There is no application, no console script and no stored status. The repository is also an agent plugin (`skills/hunches/`, manifests) that teaches agents the idioms and the gold rule. Python package `hunches`, `import hunches as hn`.
+`goldlabel` is a Python library for content analysis over a corpus: candidates (from semantic search with seed phrases, from keywords or regular expressions, or the whole corpus) -> an LLM classifier validated against a hand-labelled gold set -> classified output. You build it step by step in a Jupyter notebook or a `# %%` script by chaining function calls whose results display themselves; the labelling page (`gl.label`) is a local web page. There is no application, no console script and no stored status. The repository is also an agent plugin (`skills/goldlabel/`, manifests) that teaches agents the idioms and the gold rule. Python package `goldlabel`, `import goldlabel as gl`.
 
 ## Current state
 
-001-005 (the original Textual TUI, projects, history, pgvector backend) are history; **006 is implemented** (tasks 01-17, `specs/006-library/`): the TUI, projects, system settings, stage tracking, history and the `hunches` console script are gone, and the search, classifier, metrics, cost and pgvector logic they used is the library. **007 is implemented** (`specs/007-non-search-candidates/`): `get_candidates` replaces `search` (seeds, keywords or the whole corpus, `limit`, Postgres `server_side`), `Table` is the file and DataFrame corpus, and Postgres and S3 Vectors are readable without their vectors. The branch is ready for Chris's review. What a human still has to do (agents report these and stop, never fake them):
+001-005 (the original Textual TUI, projects, history, pgvector backend) are history; **006 is implemented** (tasks 01-17, `specs/006-library/`): the TUI, projects, system settings, stage tracking, history and the `goldlabel` console script are gone, and the search, classifier, metrics, cost and pgvector logic they used is the library. **007 is implemented** (`specs/007-non-search-candidates/`): `get_candidates` replaces `search` (seeds, keywords or the whole corpus, `limit`, Postgres `server_side`), `Table` is the file and DataFrame corpus, and Postgres and S3 Vectors are readable without their vectors. The branch is ready for Chris's review. <!-- legacy-name:start -->**008 is implemented** (`specs/008-rename-goldlabel/`): the library was renamed from `hunches` to `goldlabel` (package, install name, import alias `gl`, `GOLDLABEL_DIR`/`GOLDLABEL_PG_URL`, `.goldlabel/`, the plugin and skill, the page stamp `goldlabel-ui`); the legacy stamp `hunches-ui` is still read, `specs/001`-`007` keep the old name as history, and the gold rule changed by the name only.<!-- legacy-name:end --> What a human still has to do (agents report these and stop, never fake them):
 
 - Install the plugin in Claude Code, Codex, Copilot CLI and Kiro and run the gold-rule refusal trial in each (SC-6). Some install commands in the README are marked unverified (the Codex `plugin add` form, Copilot's `NAME@MARKETPLACE` form, `npx skills add ... -a kiro-cli`); the trial finds the real ones and records them in the spec's task 16 note.
 - Look at the labelling page in a real browser: light, dark and phone width. (The page was screenshotted once with an ad-hoc Chromium/Playwright that is **not** a repo dependency and must not become one; the tests check the served page and CSS over HTTP only.)
@@ -44,7 +44,7 @@ Nothing in this repository may add a way to set a gold label. Only the labelling
 ## Principles (non-negotiable)
 
 - Absolute minimal implementation. No abstraction, base class, registry or plugin system unless the user explicitly asks. Where two behaviours must coexist (local vs S3 vs pgvector), use a plain `if` in one function.
-- **The code is the pipeline.** No status, approval flags, stage list, history log or chat history; the notebook and plain files are the record. Nothing reads `config.toml`, the working directory's `.hunches/` or the OS keyring behind the caller's back: every object carries what it needs, and files go where the argument, then `hn.settings.root` (`HUNCHES_DIR`), then `.hunches/` say.
+- **The code is the pipeline.** No status, approval flags, stage list, history log or chat history; the notebook and plain files are the record. Nothing reads `config.toml`, the working directory's `.goldlabel/` or the OS keyring behind the caller's back: every object carries what it needs, and files go where the argument, then `gl.settings.root` (`GOLDLABEL_DIR`), then `.goldlabel/` say.
 - The library never runs git, never loads a `.env`, never reads or writes a keyring. Keys and database URLs come from environment variables; never commit one.
 - Every I/O function has an async and a sync form; the sync form works inside a notebook's running event loop (`_sync.run`).
 - Result objects have a plain `__repr__` and a `_repr_html_` that escapes everything, sets no colour and says state in words (PASS/FAIL, `cost ?`, WARNING). Tables export `.to_polars()` and `.to_pandas()` together, never one alone; docs and examples use polars.
@@ -55,7 +55,7 @@ Nothing in this repository may add a way to set a gold label. Only the labelling
 
 ## Stack
 
-Python 3.12+, `uv`, `pydantic-ai-slim` (Agent, Embedder; anthropic and openai extras), `numpy`, `genai-prices`, `pyyaml`; optional extras `s3` (`boto3`), `pg` (`psycopg[binary]`), `rds` (`psycopg[binary]` + `boto3`), `local` (Sentence Transformers). Standard-library `http.server` for the labelling page, vanilla JavaScript, Tailwind CSS pre-built into `src/hunches/web/app.css` (see `web/README.md`). Dev group: `pytest`, `pytest-asyncio` (`asyncio_mode = "auto"`), `pytest-xdist`, `ruff`, `ty`, `pre-commit`, `polars`, `pandas` (the last two only for the export tests). **No** Textual, keyring, platformdirs, python-dotenv, nbformat or Playwright; a build or example script that needs one runs it with `uv run --with` and does not add it to the project.
+Python 3.12+, `uv`, `pydantic-ai-slim` (Agent, Embedder; anthropic and openai extras), `numpy`, `genai-prices`, `pyyaml`; optional extras `s3` (`boto3`), `pg` (`psycopg[binary]`), `rds` (`psycopg[binary]` + `boto3`), `local` (Sentence Transformers). Standard-library `http.server` for the labelling page, vanilla JavaScript, Tailwind CSS pre-built into `src/goldlabel/web/app.css` (see `web/README.md`). Dev group: `pytest`, `pytest-asyncio` (`asyncio_mode = "auto"`), `pytest-xdist`, `ruff`, `ty`, `pre-commit`, `polars`, `pandas` (the last two only for the export tests). **No** Textual, keyring, platformdirs, python-dotenv, nbformat or Playwright; a build or example script that needs one runs it with `uv run --with` and does not add it to the project.
 
 ## Commands
 
@@ -66,26 +66,26 @@ uv run ruff format --check
 uv run ty check
 uv run pytest                  # everything, parallel via pytest-xdist
 uv run pytest tests/test_x.py -n0   # one file, in-process (easier to debug)
-uv build                       # wheel must contain hunches/web/* and hunches/gold_rule.md
+uv build                       # wheel must contain goldlabel/web/* and goldlabel/gold_rule.md
 ```
 
-Ruff, ty and pytest must pass before every commit (pre-commit enforces it). There is no `hunches` command. CI (`.github/workflows/ci.yml`) runs the four checks; its optional `pgvector` job runs `tests/test_pg_integration.py` against a real pgvector and is skipped locally unless `HUNCHES_TEST_PG_URL` is set.
+Ruff, ty and pytest must pass before every commit (pre-commit enforces it). There is no `goldlabel` command. CI (`.github/workflows/ci.yml`) runs the four checks; its optional `pgvector` job runs `tests/test_pg_integration.py` against a real pgvector and is skipped locally unless `GOLDLABEL_TEST_PG_URL` is set.
 
 ## Layout
 
-- `src/hunches/__init__.py` exports exactly the public names. **Package quirk:** `hunches.cost` and `hunches.settings` on the package are the *function* and the *object*, not the submodules. Inside the package and in tests import by name (`from hunches.search import PgCorpus`, `from hunches.cost import cache_key`, `from hunches.settings import settings, resolve`); a test that needs a whole module uses `importlib.import_module("hunches.cost")`. Importing `hunches` does no I/O and imports none of textual, keyring, platformdirs, dotenv, boto3, psycopg, polars or pandas.
+- `src/goldlabel/__init__.py` exports exactly the public names. **Package quirk:** `goldlabel.cost` and `goldlabel.settings` on the package are the *function* and the *object*, not the submodules. Inside the package and in tests import by name (`from goldlabel.search import PgCorpus`, `from goldlabel.cost import cache_key`, `from goldlabel.settings import settings, resolve`); a test that needs a whole module uses `importlib.import_module("goldlabel.cost")`. Importing `goldlabel` does no I/O and imports none of textual, keyring, platformdirs, dotenv, boto3, psycopg, polars or pandas.
 - `search.py` (corpus classes `Table`/`S3Corpus`/`PgCorpus`, `search_vectors`, all pgvector code: `search_pg_exact`, `index` mode, `PgCorpus.check`, the scrubber; read-only, `psycopg.sql.Identifier`), `candidates.py` (`Candidates`, `get_candidates`/`aget_candidates`, `read_seeds`, bands), `taxonomy.py`, `classifier.py` (`Classifier`, `Predictions`, `Estimate`, `CostLimit`, `save`/`load`, cache), `evaluation.py` (`evaluate`, `Evaluation`, the log, `band_sample`), `metrics.py`, `cost.py` (ledger in the cache directory, prices via `genai-prices`), `gold.py` (`Gold`, `GoldSet`, `draw`, `import_rows`), `settings.py` (`settings.root`, `resolve`).
 - Private helpers: `_sync.py` (sync wrapper over a running loop), `_html.py` and `_frame.py` (reprs and polars/pandas), `_label.py` (the labelling server and `label`), `_gold_rule.py` + `gold_rule.md` (the canonical rule, `GOLD_RULE_SHORT/FULL`, `GoldError`), `web/` (index.html, app.js, app.css, input.css).
 - Development tooling (not shipped): `.specify/` (Spec Kit constitution, templates, scripts), `.claude/skills/speckit-*`, `.agents/skills/ponytail*` (symlinked from `.claude/skills/` and `.kiro/skills/`), `skills-lock.json`, `.kiro/steering/ponytail.md`.
-- Agents: `skills/hunches/SKILL.md` and `references/{workflow,tuning,running,reuse}.md`, `docs/agent-instructions.md` (the block pasted in `README.md`), `.kiro/steering/hunches.md`, `.claude-plugin/{plugin,marketplace}.json`, root `plugin.json`.
+- Agents: `skills/goldlabel/SKILL.md` and `references/{workflow,tuning,running,reuse}.md`, `docs/agent-instructions.md` (the block pasted in `README.md`), `.kiro/steering/goldlabel.md`, `.claude-plugin/{plugin,marketplace}.json`, root `plugin.json`.
 - `examples/sample/` is the walkthrough (`walkthrough.ipynb`, no outputs, and `walkthrough.py`, the same cells) over a tiny local corpus; `tests/` mirrors the modules; `specs/` is history plus 006.
 
 ## Testing notes
 
-- `tests/conftest.py` has autouse fixtures: `reset_settings` (root back to `.hunches`) and `no_real_models` (unusable keys; any un-stubbed model request fails the test). Use `tmp_path` and `monkeypatch.chdir`.
+- `tests/conftest.py` has autouse fixtures: `reset_settings` (root back to `.goldlabel`) and `no_real_models` (unusable keys; any un-stubbed model request fails the test). Use `tmp_path` and `monkeypatch.chdir`.
 - "No model call" is proved by counting `FunctionModel` invocations: a first `evaluate` makes one per row, an identical one none, a changed prompt one per row. `tests/test_e2e.py` runs the README chain this way, with the labelling done by a simulated human over HTTP in a background thread.
 - Metrics tests compare against hand-computed values written in the test; never derive an expected value by running the code under test.
-- `tests/fixtures/pre006/` holds files written by the pre-006 code (cache, gold, candidates, ledger) so compatibility is checked against the real thing; the pgvector tests use a fake `psycopg`; `tests/test_pg_integration.py` needs `HUNCHES_TEST_PG_URL`.
+- `tests/fixtures/pre006/` holds files written by the pre-006 code (cache, gold, candidates, ledger) so compatibility is checked against the real thing; the pgvector tests use a fake `psycopg`; `tests/test_pg_integration.py` needs `GOLDLABEL_TEST_PG_URL`.
 - Drift tests: `test_skills.py` (every code block in the skill and references uses real names; the rule is verbatim), `test_docs.py` (README blocks use public names, the README block equals `docs/agent-instructions.md`, notebook == script).
 
 ## Conventions
@@ -97,7 +97,7 @@ Ruff, ty and pytest must pass before every commit (pre-commit enforces it). Ther
 
 ## Ponytail (lazy senior dev mode)
 
-Source: https://github.com/DietrichGebert/ponytail (MIT). The skills are installed in `.agents/skills/` (symlinked from `.claude/skills/` and `.kiro/skills/`, pinned in `skills-lock.json`); the always-on rules are below and in `.kiro/steering/ponytail.md`. These are development tools for agents working on this repo; they are not part of the shipped plugin (`skills/hunches/`).
+Source: https://github.com/DietrichGebert/ponytail (MIT). The skills are installed in `.agents/skills/` (symlinked from `.claude/skills/` and `.kiro/skills/`, pinned in `skills-lock.json`); the always-on rules are below and in `.kiro/steering/ponytail.md`. These are development tools for agents working on this repo; they are not part of the shipped plugin (`skills/goldlabel/`).
 
 **Precedence:** this repo's own rules (the gold rule above all, then red/green TDD, hand-computed test expectations, the principles, ruff/ty/pytest before every commit) override ponytail where they conflict. Be lazy about the solution, never about those requirements.
 

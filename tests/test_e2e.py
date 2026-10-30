@@ -21,9 +21,9 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.usage import RequestUsage
 
-import hunches as hn
-from hunches import _label
-from hunches.classifier import CostLimit
+import goldlabel as gl
+from goldlabel import _label
+from goldlabel.classifier import CostLimit
 
 SAMPLE = Path(__file__).parent.parent / "examples" / "sample" / "corpus.jsonl"
 
@@ -91,7 +91,7 @@ def simulated_human(url: str) -> threading.Thread:
 
     def call(method, path, body=None):
         conn = http.client.HTTPConnection(host, port, timeout=5)
-        headers = {"X-Hunches-Token": token}
+        headers = {"X-Goldlabel-Token": token}
         if body is not None:
             headers["Content-Type"] = "application/json"
         conn.request(method, path, json.dumps(body) if body else None, headers)
@@ -128,8 +128,8 @@ def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     # 1. search: embeds the seeds (one live call per seed), calls no classifier model
     fake = FakeModel()
     embedder = HandEmbedder()
-    candidates = hn.get_candidates(
-        hn.Table(
+    candidates = gl.get_candidates(
+        gl.Table(
             corpus_file,
             id_column="id",
             vector_column="embedding",
@@ -141,57 +141,57 @@ def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     assert embedder.calls == 1
     assert fake.calls == 0
     assert [r["id"] for r in candidates.rows] == list(HUMAN)  # 0.95 ... 0.66, by hand
-    assert Path(".hunches/candidates.jsonl").exists()
+    assert Path(".goldlabel/candidates.jsonl").exists()
 
     # 2. taxonomy and classifier
-    taxonomy = hn.Taxonomy(
+    taxonomy = gl.Taxonomy(
         mode="single",
         labels={
             "layoff": "The author lost, or fears losing, their job.",
             "burnout": "The author is worn out by work.",
         },
     )
-    clf = hn.Classifier(fake.model, taxonomy, prompt="Label the post.")
+    clf = gl.Classifier(fake.model, taxonomy, prompt="Label the post.")
 
     # 3. gold: draw pending rows, a person labels them in the page
-    gold = hn.Gold()
+    gold = gl.Gold()
     gold.draw(candidates, n=3, split="dev", seed=4)
     assert all(r.labels is None for r in gold.pending.rows)
     dev_ids = {r.id for r in gold.pending.rows}
     assert "layoff-3" in dev_ids  # the item the first prompt gets wrong (see FakeModel)
-    hn.label(gold, taxonomy)  # blocks until the simulated human presses Done
+    gl.label(gold, taxonomy)  # blocks until the simulated human presses Done
     humans.pop().join(timeout=10)
     assert len(gold.dev.rows) == 3 and not gold.pending.rows
     assert {r.labelled_by for r in gold.dev.rows} == {"goldlabel-ui"}
     assert fake.calls == 0  # labelling never calls a model
 
     # 4. first evaluate: one live call per dev item; layoff-3 is wrong, so 2 of 3
-    ev1 = hn.evaluate(clf, gold.dev, target=0.9)
+    ev1 = gl.evaluate(clf, gold.dev, target=0.9)
     assert fake.calls == 3
     assert ev1.score() == pytest.approx(2 / 3)
     assert [d["id"] for d in ev1.disagreements] == ["layoff-3"]
 
     # 5. identical re-evaluate: all cached, zero calls
-    hn.evaluate(clf, gold.dev)
+    gl.evaluate(clf, gold.dev)
     assert fake.calls == 3
 
     # 6. a changed prompt: one call per item again, and it now agrees with the humans
     clf2 = clf.with_prompt("Label the post. Rumours count as layoffs.")
-    ev2 = hn.evaluate(clf2, gold.dev, target=0.9)
+    ev2 = gl.evaluate(clf2, gold.dev, target=0.9)
     assert fake.calls == 6
     assert ev2.score() == pytest.approx(1.0)
     assert ev2.digest != ev1.digest
 
     # 7. the test split is drawn, labelled and evaluated once
     gold.draw(candidates, n=1, split="test", seed=0)
-    hn.label(gold, taxonomy)
+    gl.label(gold, taxonomy)
     humans.pop().join(timeout=10)
-    final = hn.evaluate(clf2, gold.test)
+    final = gl.evaluate(clf2, gold.test)
     assert fake.calls == 7
     assert final.score() == pytest.approx(1.0)
 
     # 8. the band sample classifies the one candidate nobody has seen yet, live
-    report = hn.band_sample(clf2, candidates, per_band=30, seed=0)
+    report = gl.band_sample(clf2, candidates, per_band=30, seed=0)
     assert fake.calls == 8
     assert sum(r["n"] for r in report.rows) == 5
 
@@ -215,7 +215,7 @@ def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     clf2.save("classifiers/layoffs", evaluation=final)
 
     def pipeline(items, out):
-        loaded = hn.Classifier.load("classifiers/layoffs")
+        loaded = gl.Classifier.load("classifiers/layoffs")
         # a bundle stores the model as a string; swap in the stub instead of a real provider
         loaded = dataclasses.replace(loaded, model=fake.model)
         return loaded.classify(items, out=out)
@@ -232,7 +232,9 @@ def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     assert {x["run"] for x in lines} == {clf2.digest}
 
     # 11. the evaluation log: one line per evaluate call, with the prompt of each
-    log = [json.loads(x) for x in Path(".hunches/evals.jsonl").read_text().splitlines()]
+    log = [
+        json.loads(x) for x in Path(".goldlabel/evals.jsonl").read_text().splitlines()
+    ]
     assert [(x["split"], x["n"]) for x in log] == [
         ("dev", 3),
         ("dev", 3),
@@ -242,4 +244,4 @@ def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     assert [x["live_calls"] for x in log] == [3, 0, 3, 1]
     assert log[0]["prompt"] == "Label the post."
     assert log[2]["prompt"] == "Label the post. Rumours count as layoffs."
-    assert "test split evaluated 1 times (1 distinct prompts)" in repr(hn.eval_log())
+    assert "test split evaluated 1 times (1 distinct prompts)" in repr(gl.eval_log())

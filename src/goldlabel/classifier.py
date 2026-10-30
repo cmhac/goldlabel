@@ -19,8 +19,8 @@ from pydantic_ai.exceptions import (
 )
 from pydantic_ai.models import Model
 
-from hunches import _frame, _html, _sync
-from hunches.cost import (
+from goldlabel import _frame, _html, _sync
+from goldlabel.cost import (
     cache_get,
     cache_key,
     cache_put,
@@ -30,7 +30,7 @@ from hunches.cost import (
     record,
     record_timing,
 )
-from hunches.taxonomy import Taxonomy, all_labels, validate_labels
+from goldlabel.taxonomy import Taxonomy, all_labels, validate_labels
 
 
 @dataclass

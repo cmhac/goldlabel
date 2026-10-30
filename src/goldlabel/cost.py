@@ -10,8 +10,8 @@ from pydantic_ai.embeddings import EmbeddingResult
 from pydantic_ai.messages import ModelMessage, ModelResponse
 from pydantic_ai.usage import RequestUsage, RunUsage
 
-from hunches import _html
-from hunches.settings import resolve
+from goldlabel import _html
+from goldlabel.settings import resolve
 
 # `cache` below is a directory (str or Path), None for the default `<settings.root>/cache`,
 # or False for no cache: nothing is read or written and the ledger stays empty.

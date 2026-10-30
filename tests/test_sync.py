@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from hunches._sync import run
+from goldlabel._sync import run
 
 
 async def add(a, b):
@@ -63,7 +63,7 @@ async def test_worker_has_its_own_loop():
 def test_keyboard_interrupt_cancels_worker_tasks_and_joins():
     script = (
         "import asyncio, os, signal, threading\n"
-        "from hunches._sync import run\n"
+        "from goldlabel._sync import run\n"
         "state = []\n"
         "async def long():\n"
         "    try:\n"

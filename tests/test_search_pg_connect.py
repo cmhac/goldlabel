@@ -6,9 +6,11 @@ from typing import Any
 import pytest
 from botocore.exceptions import NoCredentialsError
 
-from hunches.search import PgCorpus
+from goldlabel.search import PgCorpus
 
-search = importlib.import_module("hunches.search")  # `hunches.search` is the function
+search = importlib.import_module(
+    "goldlabel.search"
+)  # `goldlabel.search` is the function
 
 URL = "postgresql://alice:s3cr%40t@db.example.com:5433/mydb"
 IAM_URL = "postgresql://bob@inst.abc123.us-east-1.rds.amazonaws.com:5432/mydb"
@@ -88,7 +90,7 @@ class FakeBoto3(types.ModuleType):
 @pytest.fixture(autouse=True)
 def project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("HUNCHES_PG_URL", raising=False)
+    monkeypatch.delenv("GOLDLABEL_PG_URL", raising=False)
 
 
 def setup(monkeypatch, url=URL, psycopg_error=None, **fields: Any):
@@ -106,7 +108,9 @@ def test_psycopg_missing(monkeypatch):
     monkeypatch.setitem(sys.modules, "psycopg", None)
     with pytest.raises(ImportError) as e:
         search.pg_connect(corpus)
-    assert str(e.value) == "The pgvector backend needs psycopg: pip install hunches[pg]"
+    assert (
+        str(e.value) == "The pgvector backend needs psycopg: pip install goldlabel[pg]"
+    )
 
 
 def test_url_unset_names_the_variable_and_never_a_keyring(monkeypatch):
@@ -114,7 +118,7 @@ def test_url_unset_names_the_variable_and_never_a_keyring(monkeypatch):
     with pytest.raises(ValueError) as e:
         search.pg_connect(corpus)
     assert str(e.value) == (
-        "The database URL is not set: set the environment variable HUNCHES_PG_URL"
+        "The database URL is not set: set the environment variable GOLDLABEL_PG_URL"
     )
     assert "keyring" not in str(e.value).lower()
 
@@ -127,7 +131,7 @@ def test_custom_url_env_named_in_message(monkeypatch):
 
 def test_url_is_read_from_the_named_variable_only(monkeypatch):
     fake, corpus = setup(monkeypatch, url=None, url_env="MY_PG")
-    monkeypatch.setenv("HUNCHES_PG_URL", "postgresql://wrong@elsewhere/db")
+    monkeypatch.setenv("GOLDLABEL_PG_URL", "postgresql://wrong@elsewhere/db")
     monkeypatch.setenv("MY_PG", URL)
     search.pg_connect(corpus)
     assert fake.conns[0].args == (URL,)
@@ -223,7 +227,7 @@ def test_iam_boto3_missing(monkeypatch):
     monkeypatch.setitem(sys.modules, "boto3", None)
     with pytest.raises(ImportError) as e:
         search.pg_connect(corpus)
-    assert str(e.value) == "IAM authentication needs boto3: pip install hunches[rds]"
+    assert str(e.value) == "IAM authentication needs boto3: pip install goldlabel[rds]"
 
 
 def test_connect_error_is_scrubbed(monkeypatch):

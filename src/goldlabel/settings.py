@@ -6,7 +6,7 @@ class Settings:
     """Process-wide settings. Assign `settings.root` to change where artifacts go."""
 
     def __init__(self):
-        self.root = Path(os.environ.get("HUNCHES_DIR") or ".hunches")
+        self.root = Path(os.environ.get("GOLDLABEL_DIR") or ".goldlabel")
 
 
 settings = Settings()

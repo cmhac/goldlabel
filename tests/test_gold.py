@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from hunches import gold as gold_module
-from hunches.candidates import Candidates
-from hunches.gold import Gold, GoldSet
-from hunches.settings import settings
-from hunches.taxonomy import Label, Taxonomy
+from goldlabel import gold as gold_module
+from goldlabel.candidates import Candidates
+from goldlabel.gold import Gold, GoldSet
+from goldlabel.settings import settings
+from goldlabel.taxonomy import Label, Taxonomy
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pre006" / "gold.jsonl"
 
@@ -410,7 +410,7 @@ def test_only_import_rows_can_set_a_label():
         for n in vars(gold_module)
         if not n.startswith("_")
         and callable(getattr(gold_module, n))
-        and getattr(getattr(gold_module, n), "__module__", None) == "hunches.gold"
+        and getattr(getattr(gold_module, n), "__module__", None) == "goldlabel.gold"
     }
     assert module_public == {"Gold", "GoldRow", "GoldSet"}
     assert not {n for n in dir(GoldSet) if not n.startswith("_")} - {

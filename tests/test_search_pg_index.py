@@ -3,9 +3,11 @@ from typing import Any
 
 import pytest
 
-from hunches.search import PgCorpus, S3Corpus
+from goldlabel.search import PgCorpus, S3Corpus
 
-search = importlib.import_module("hunches.search")  # `hunches.search` is the function
+search = importlib.import_module(
+    "goldlabel.search"
+)  # `goldlabel.search` is the function
 
 
 class Cur:
@@ -49,7 +51,7 @@ class Conn:
 @pytest.fixture(autouse=True)
 def project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("HUNCHES_PG_URL", raising=False)
+    monkeypatch.delenv("GOLDLABEL_PG_URL", raising=False)
 
 
 def setup(monkeypatch, conn, **fields: Any):

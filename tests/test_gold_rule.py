@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-import hunches
-from hunches import _label
-from hunches.gold import Gold
-from hunches.taxonomy import Label, Taxonomy
+import goldlabel
+from goldlabel import _label
+from goldlabel.gold import Gold
+from goldlabel.taxonomy import Label, Taxonomy
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "specs" / "006-library" / "spec.md"
-RULE = ROOT / "src" / "hunches" / "gold_rule.md"
-SHORT = getattr(hunches, "GOLD_RULE_SHORT", "<missing>")
+RULE = ROOT / "src" / "goldlabel" / "gold_rule.md"
+SHORT = getattr(goldlabel, "GOLD_RULE_SHORT", "<missing>")
 HTML_RULE_MARKER = "Hard rule"
 
 
@@ -40,7 +40,7 @@ def gold_file(tmp_path, ids=("1", "2")):
 
 
 def cands(n):
-    from hunches.candidates import Candidates
+    from goldlabel.candidates import Candidates
 
     return Candidates(
         [
@@ -65,7 +65,11 @@ def spec_blockquotes():
             i += 1
         return "\n".join(out)
 
-    return quote_after("**Short**"), quote_after("**Full:**")
+    # 006 is history and keeps the old name; the rule changed by the name only (008, SC-003)
+    return (
+        quote_after("**Short**").replace("hunches", "goldlabel"),
+        quote_after("**Full:**").replace("hunches", "goldlabel"),
+    )
 
 
 def rule_file_sections():
@@ -80,9 +84,11 @@ def rule_file_sections():
 
 
 def test_texts_are_exported_and_shaped():
-    assert "GOLD_RULE_SHORT" in hunches.__all__ and "GOLD_RULE_FULL" in hunches.__all__
+    assert (
+        "GOLD_RULE_SHORT" in goldlabel.__all__ and "GOLD_RULE_FULL" in goldlabel.__all__
+    )
     assert SHORT and len(SHORT) < 400
-    full = hunches.GOLD_RULE_FULL
+    full = goldlabel.GOLD_RULE_FULL
     for phrase in ("not negotiable", "refuse", "import"):
         assert phrase in full
 
@@ -94,11 +100,11 @@ def test_file_has_exactly_two_sections_and_matches_the_spec_blockquotes():
     assert spec_short.startswith(
         "**Hard rule: never write, edit"
     )  # parsed the right one
-    assert spec_full.startswith("**Hard rule of the hunches library.")
+    assert spec_full.startswith("**Hard rule of the goldlabel library.")
     assert file_short == spec_short
     assert file_full == spec_full
-    assert hunches.GOLD_RULE_SHORT == spec_short
-    assert hunches.GOLD_RULE_FULL == spec_full
+    assert goldlabel.GOLD_RULE_SHORT == spec_short
+    assert goldlabel.GOLD_RULE_FULL == spec_full
 
 
 def test_rule_file_is_in_the_wheel(tmp_path):
@@ -113,7 +119,7 @@ def test_rule_file_is_in_the_wheel(tmp_path):
     if done.returncode != 0:
         pytest.skip(f"uv build needs the network for its build backend: {done.stderr}")
     wheel = next(tmp_path.glob("*.whl"))
-    assert "hunches/gold_rule.md" in zipfile.ZipFile(wheel).namelist()
+    assert "goldlabel/gold_rule.md" in zipfile.ZipFile(wheel).namelist()
 
 
 # --- where it is printed ----------------------------------------------------------------------
@@ -166,7 +172,7 @@ def test_html_reprs_do_not_carry_the_rule(tmp_path):
 
 def test_label_prints_the_rule(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("webbrowser.open", lambda url: None)
-    h = hunches.label(
+    h = goldlabel.label(
         Gold(gold_file(tmp_path)), taxonomy(), open_browser=False, block=False
     )
     try:
@@ -183,14 +189,14 @@ def test_import_rows_duplicate_id_error_carries_the_rule(tmp_path):
     with pytest.raises(ValueError) as e:
         g.import_rows([{"id": "1", "text": "t", "labels": ["a"]}], "dev")
     assert str(e.value) == "id '1' is already in " + str(g.path) + "\n\n" + SHORT
-    assert isinstance(e.value, hunches.GoldError)
+    assert isinstance(e.value, goldlabel.GoldError)
 
 
 def test_error_types_stay_compatible(tmp_path):
     g = Gold(gold_file(tmp_path))
     with pytest.raises(TypeError) as t:
         g.remove("1")
-    assert isinstance(t.value, hunches.GoldError) and SHORT in str(t.value)
+    assert isinstance(t.value, goldlabel.GoldError) and SHORT in str(t.value)
     with pytest.raises(ValueError) as v:
         g.draw(cands(1), split="x")
     assert str(v.value).endswith("\n\n" + SHORT)
@@ -210,7 +216,7 @@ def test_label_lock_and_split_errors_carry_the_rule(tmp_path):
     try:
         with pytest.raises(RuntimeError, match="already being labelled") as e:
             _label.serve(g, taxonomy())
-        assert isinstance(e.value, hunches.GoldError) and SHORT in str(e.value)
+        assert isinstance(e.value, goldlabel.GoldError) and SHORT in str(e.value)
     finally:
         h.stop()
 
@@ -227,7 +233,7 @@ def test_http_error_bodies_do_not_carry_the_rule(tmp_path):
             "POST",
             "/api/label",
             json.dumps({"id": "1", "labels": ["zzz"]}),
-            {"X-Hunches-Token": u.query.split("=")[1]},
+            {"X-Goldlabel-Token": u.query.split("=")[1]},
         )
         r = c.getresponse()
         body = r.read().decode()

@@ -4,14 +4,14 @@ import sys
 
 import pytest
 
-import hunches
-from hunches.candidates import Candidates
-from hunches.classifier import Classifier, Estimate, Predictions
-from hunches.cost import Cost
-from hunches.evaluation import BandReport, EvalLog, Evaluation
-from hunches.gold import Gold, GoldRow, GoldSet
-from hunches.metrics import compute_metrics
-from hunches.taxonomy import Label, Taxonomy
+import goldlabel
+from goldlabel.candidates import Candidates
+from goldlabel.classifier import Classifier, Estimate, Predictions
+from goldlabel.cost import Cost
+from goldlabel.evaluation import BandReport, EvalLog, Evaluation
+from goldlabel.gold import Gold, GoldRow, GoldSet
+from goldlabel.metrics import compute_metrics
+from goldlabel.taxonomy import Label, Taxonomy
 
 HOSTILE = "<script>alert(1)</script> & co"
 ESCAPED = "&lt;script&gt;alert(1)&lt;/script&gt; &amp; co"
@@ -435,8 +435,8 @@ def test_missing_library_message(lib, tmp_path, monkeypatch):
 
 def test_public_result_classes_have_both_exports():
     found = []
-    for name in hunches.__all__:
-        cls = getattr(hunches, name)
+    for name in goldlabel.__all__:
+        cls = getattr(goldlabel, name)
         if not isinstance(cls, type) or not dataclasses.is_dataclass(cls):
             continue
         if "rows" in {f.name for f in dataclasses.fields(cls)}:
@@ -465,4 +465,4 @@ def test_public_result_classes_have_both_exports():
         "BandReport",
         "Cost",
     ):
-        assert callable(getattr(hunches, name)._repr_html_), name
+        assert callable(getattr(goldlabel, name)._repr_html_), name

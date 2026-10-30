@@ -397,6 +397,72 @@ wheels = [
 ]
 
 [[package]]
+name = "goldlabel"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "genai-prices" },
+    { name = "numpy" },
+    { name = "pydantic-ai-slim", extra = ["anthropic", "openai"] },
+    { name = "pyyaml" },
+]
+
+[package.optional-dependencies]
+local = [
+    { name = "pydantic-ai-slim", extra = ["sentence-transformers"] },
+]
+pg = [
+    { name = "psycopg", extra = ["binary"] },
+]
+rds = [
+    { name = "boto3" },
+    { name = "psycopg", extra = ["binary"] },
+]
+s3 = [
+    { name = "boto3" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pandas" },
+    { name = "polars" },
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-xdist" },
+    { name = "ruff" },
+    { name = "ty" },
+    { name = "types-pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "boto3", marker = "extra == 'rds'" },
+    { name = "boto3", marker = "extra == 's3'" },
+    { name = "genai-prices" },
+    { name = "numpy" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'pg'" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'rds'" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "openai"] },
+    { name = "pydantic-ai-slim", extras = ["sentence-transformers"], marker = "extra == 'local'" },
+    { name = "pyyaml" },
+]
+provides-extras = ["s3", "pg", "rds", "local"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pandas" },
+    { name = "polars" },
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-xdist" },
+    { name = "ruff" },
+    { name = "ty" },
+    { name = "types-pyyaml" },
+]
+
+[[package]]
 name = "griffelib"
 version = "2.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -523,72 +589,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/25/2a/484d112c0d8fc5f665d7b65137ac9cdb2953c982391598c3597968a12ee7/huggingface_hub-1.33.0.tar.gz", hash = "sha256:367be21a201db9523eddf8aeac7048f2602c1b308691c97640d5e72ed188007e", size = 1043548, upload-time = "2026-09-24T09:49:29.971Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fc/16/963096d224b80909432dc16561a615fd33d2d13beef3ce4c63fa25e40867/huggingface_hub-1.33.0-py3-none-any.whl", hash = "sha256:04e434b06e100eddbce9a6e817d72693a7884b10a79bd67ab48080d5c07eb899", size = 846435, upload-time = "2026-09-24T09:49:28.059Z" },
-]
-
-[[package]]
-name = "hunches"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "genai-prices" },
-    { name = "numpy" },
-    { name = "pydantic-ai-slim", extra = ["anthropic", "openai"] },
-    { name = "pyyaml" },
-]
-
-[package.optional-dependencies]
-local = [
-    { name = "pydantic-ai-slim", extra = ["sentence-transformers"] },
-]
-pg = [
-    { name = "psycopg", extra = ["binary"] },
-]
-rds = [
-    { name = "boto3" },
-    { name = "psycopg", extra = ["binary"] },
-]
-s3 = [
-    { name = "boto3" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pandas" },
-    { name = "polars" },
-    { name = "pre-commit" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-xdist" },
-    { name = "ruff" },
-    { name = "ty" },
-    { name = "types-pyyaml" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "boto3", marker = "extra == 'rds'" },
-    { name = "boto3", marker = "extra == 's3'" },
-    { name = "genai-prices" },
-    { name = "numpy" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'pg'" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'rds'" },
-    { name = "pydantic-ai-slim", extras = ["anthropic", "openai"] },
-    { name = "pydantic-ai-slim", extras = ["sentence-transformers"], marker = "extra == 'local'" },
-    { name = "pyyaml" },
-]
-provides-extras = ["s3", "pg", "rds", "local"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pandas" },
-    { name = "polars" },
-    { name = "pre-commit" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-xdist" },
-    { name = "ruff" },
-    { name = "ty" },
-    { name = "types-pyyaml" },
 ]
 
 [[package]]

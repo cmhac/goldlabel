@@ -32,7 +32,7 @@ async function call(method, path, body) {
   try {
     const r = await fetch(path, {
       method,
-      headers: { "X-Hunches-Token": token, "Content-Type": "application/json" },
+      headers: { "X-Goldlabel-Token": token, "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const data = await r.json();

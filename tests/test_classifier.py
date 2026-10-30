@@ -9,11 +9,11 @@ from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.usage import RequestUsage
 
-from hunches import classifier
-from hunches.settings import settings
-from hunches.taxonomy import Label, Taxonomy
+from goldlabel import classifier
+from goldlabel.settings import settings
+from goldlabel.taxonomy import Label, Taxonomy
 
-cost = importlib.import_module("hunches.cost")  # `hunches.cost` is the function
+cost = importlib.import_module("goldlabel.cost")  # `goldlabel.cost` is the function
 
 USAGE = RequestUsage(input_tokens=1, output_tokens=1)
 
@@ -281,7 +281,7 @@ def test_items_as_strings_dicts_and_objects_with_rows():
 
 
 def test_a_whole_corpus_list_estimates_and_classifies():
-    from hunches.candidates import Candidates
+    from goldlabel.candidates import Candidates
 
     whole = Candidates(
         [{"id": "w0", "text": "t0"}, {"id": "w1", "text": "t1"}],

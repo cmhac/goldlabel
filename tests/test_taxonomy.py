@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from hunches.taxonomy import Label, Taxonomy, all_labels, validate_labels
+from goldlabel.taxonomy import Label, Taxonomy, all_labels, validate_labels
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pre006" / "taxonomy.yaml"
 

@@ -7,7 +7,7 @@ Tune against the **dev** split. The gold rule applies throughout: you may read t
 1. Evaluate and read the disagreements:
 
 ```python
-ev = hn.evaluate(clf, gold.dev, target=0.80)
+ev = gl.evaluate(clf, gold.dev, target=0.80)
 df = ev.disagreements_to_polars()  # id, text, gold, predicted, reasoning
 df.filter(df["predicted"].is_not_null()).head(10)
 ev.metrics.per_label  # which label is weak: precision or recall?
@@ -19,17 +19,17 @@ ev.metrics.per_label  # which label is weak: precision or recall?
 
 ```python
 clf_v2 = clf.with_prompt(open("prompt.md").read())  # after editing prompt.md
-ev2 = hn.evaluate(clf_v2, gold.dev, target=0.80)
+ev2 = gl.evaluate(clf_v2, gold.dev, target=0.80)
 ```
 
    An unchanged prompt costs nothing to re-evaluate (cached). A changed prompt makes one live call per dev item, so say that before you run it on a large dev split.
 
 3. Compare `ev.score()` with `ev2.score()` and look at which rows flipped. A change that fixes three rows and breaks four is not progress.
 
-4. `hn.eval_log()` shows every evaluation so far, with the prompt it used:
+4. `gl.eval_log()` shows every evaluation so far, with the prompt it used:
 
 ```python
-log = hn.eval_log()
+log = gl.eval_log()
 log  # time, split, n, score, short digest, model; and how often the test split was used
 log.to_polars()
 ```
@@ -44,11 +44,11 @@ The test split exists to report an honest number once. Do not evaluate it to dec
 
 ```python
 gold.draw(candidates, n=50, split="test")  # pending; people label them
-hn.label(gold, taxonomy)
-final = hn.evaluate(clf, gold.test)
+gl.label(gold, taxonomy)
+final = gl.evaluate(clf, gold.test)
 ```
 
-If the result is disappointing, report it as it is and ask the user what they want; changing the prompt after seeing it makes the test split a second dev split, and `hn.eval_log()` will show that the test split was evaluated more than once. If the user insists on iterating, suggest a fresh test split drawn and labelled by people.
+If the result is disappointing, report it as it is and ask the user what they want; changing the prompt after seeing it makes the test split a second dev split, and `gl.eval_log()` will show that the test split was evaluated more than once. If the user insists on iterating, suggest a fresh test split drawn and labelled by people.
 
 ## Gold looks wrong or incomplete
 

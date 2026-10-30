@@ -214,7 +214,7 @@ class PgCorpus:
     vector_column: str = "embedding"
     text_table: str | None = None
     text_id_column: str | None = None
-    url_env: str = "HUNCHES_PG_URL"
+    url_env: str = "GOLDLABEL_PG_URL"
     search: str = "exact"  # "exact" or "index"
     statement_timeout_s: int | None = None  # None: the server's own; 0: no limit
     auth: str = "url"  # "url" or "rds_iam"
@@ -313,7 +313,7 @@ def pg_connect(corpus: PgCorpus):
         import psycopg
     except ImportError as e:
         raise ImportError(
-            "The pgvector backend needs psycopg: pip install hunches[pg]"
+            "The pgvector backend needs psycopg: pip install goldlabel[pg]"
         ) from e
     url = os.environ.get(corpus.url_env)
     if not url:
@@ -348,7 +348,7 @@ def _iam_token(corpus: PgCorpus, url: str) -> str:
         from botocore.exceptions import BotoCoreError, ClientError
     except ImportError as e:
         raise ImportError(
-            "IAM authentication needs boto3: pip install hunches[rds]"
+            "IAM authentication needs boto3: pip install goldlabel[rds]"
         ) from e
     parts = urlsplit(url)
     if not (parts.hostname and parts.username):
@@ -438,7 +438,7 @@ def column_type(conn, table: str, column: str) -> tuple[str, str, int | None]:
     typename, schema, typmod = row
     if typename not in ("vector", "halfvec"):
         raise RuntimeError(
-            f'Column "{column}" has type {typename}; hunches supports vector and halfvec.'
+            f'Column "{column}" has type {typename}; goldlabel supports vector and halfvec.'
         )
     return typename, schema, typmod if typmod > 0 else None  # -1: no dimension declared
 
@@ -539,7 +539,7 @@ def search_pg_exact(
                     )
         literals = ["[" + ",".join(repr(float(x)) for x in v) + "]" for v in vectors]
         per_seed: list[list[tuple]] = [[] for _ in literals]
-        with conn.cursor(name="hunches_pairs") as cur:
+        with conn.cursor(name="goldlabel_pairs") as cur:
             cur.itersize = PG_BATCH
             cur.execute(step1, (literals, floor, PG_TOP_K))
             for id_, i, sim in cur:
@@ -548,7 +548,7 @@ def search_pg_exact(
         ids = list(dict.fromkeys(id_ for rows in per_seed for id_, _ in rows))
         texts = {}
         if ids:
-            with conn.cursor(name="hunches_texts") as cur:
+            with conn.cursor(name="goldlabel_texts") as cur:
                 cur.itersize = PG_BATCH
                 cur.execute(_texts_query(corpus), (ids,))
                 for id_, text in cur:
@@ -643,7 +643,7 @@ def pg_items(
             query = sql.SQL("SELECT {id}, {text} FROM {table} ORDER BY {id}")
         query = query.format(**names)
         received = rows_in = 0
-        with conn.cursor(name="hunches_items") as cur:
+        with conn.cursor(name="goldlabel_items") as cur:
             cur.itersize = PG_BATCH
             cur.execute(query, params)
             for id_, text in cur:
@@ -753,7 +753,9 @@ def search_vectors(
     try:
         import boto3
     except ImportError as e:
-        raise ImportError("The S3 backend needs boto3: pip install hunches[s3]") from e
+        raise ImportError(
+            "The S3 backend needs boto3: pip install goldlabel[s3]"
+        ) from e
     client = boto3.client("s3vectors", region_name=corpus.region)
     params = {
         "vectorBucketName": corpus.bucket,
@@ -788,7 +790,9 @@ def s3_items(corpus: S3Corpus):
         import boto3
         from botocore.exceptions import ClientError
     except ImportError as e:
-        raise ImportError("The S3 backend needs boto3: pip install hunches[s3]") from e
+        raise ImportError(
+            "The S3 backend needs boto3: pip install goldlabel[s3]"
+        ) from e
     client = boto3.client("s3vectors", region_name=corpus.region)
     params = {
         "vectorBucketName": corpus.bucket,

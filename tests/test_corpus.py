@@ -2,7 +2,7 @@ import dataclasses
 
 import pytest
 
-from hunches.search import PgCorpus, S3Corpus
+from goldlabel.search import PgCorpus, S3Corpus
 
 
 def test_pg_defaults_are_the_old_pg_defaults():
@@ -10,7 +10,7 @@ def test_pg_defaults_are_the_old_pg_defaults():
     c = PgCorpus("public.docs")
     assert (c.id_column, c.text_column, c.vector_column) == ("id", "text", "embedding")
     assert (c.text_table, c.text_id_column) == (None, None)
-    assert c.url_env == "HUNCHES_PG_URL"
+    assert c.url_env == "GOLDLABEL_PG_URL"
     assert (c.search, c.auth) == ("exact", "url")
     assert (c.statement_timeout_s, c.aws_region, c.aws_profile) == (None, None, None)
     assert c.max_result_mb == 512

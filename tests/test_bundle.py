@@ -7,10 +7,10 @@ import pytest
 from pydantic_ai.messages import ModelResponse, ToolCallPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from hunches.classifier import Classifier
-from hunches.evaluation import evaluate
-from hunches.gold import Gold
-from hunches.taxonomy import Label, Taxonomy
+from goldlabel.classifier import Classifier
+from goldlabel.evaluation import evaluate
+from goldlabel.gold import Gold
+from goldlabel.taxonomy import Label, Taxonomy
 
 
 @pytest.fixture(autouse=True)

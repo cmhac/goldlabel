@@ -17,10 +17,10 @@ from pathlib import Path
 
 from pydantic_ai import Embedder
 
-from hunches import _frame, _html
-from hunches._sync import run
-from hunches.cost import cache_get, cache_key, cache_put, embedding_dollars, record
-from hunches.search import (
+from goldlabel import _frame, _html
+from goldlabel._sync import run
+from goldlabel.cost import cache_get, cache_key, cache_put, embedding_dollars, record
+from goldlabel.search import (
     PgCorpus,
     S3Corpus,
     Table,
@@ -32,7 +32,7 @@ from hunches.search import (
     search_vectors,
     table_rows,
 )
-from hunches.settings import resolve
+from goldlabel.settings import resolve
 
 FLOOR = 0.60
 # Lower edges of the similarity bands; the last band (0.75+) is open-ended.

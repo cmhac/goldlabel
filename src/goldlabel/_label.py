@@ -18,13 +18,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from urllib.parse import parse_qs, urlparse
 
-from hunches._gold_rule import GOLD_RULE_SHORT, GoldError, GoldRuntimeError
-from hunches.gold import SPLITS, Gold, GoldSet
-from hunches.taxonomy import OFF_TOPIC, Taxonomy, validate_labels
+from goldlabel._gold_rule import GOLD_RULE_SHORT, GoldError, GoldRuntimeError
+from goldlabel.gold import SPLITS, Gold, GoldSet
+from goldlabel.taxonomy import OFF_TOPIC, Taxonomy, validate_labels
 
 OFF_TOPIC_DESCRIPTION = "the item matches none of the labels above"
 MAX_BODY = 1_000_000
-PAGES = {  # the only static paths: URL path -> (file in hunches/web, content type)
+PAGES = {  # the only static paths: URL path -> (file in goldlabel/web, content type)
     "/": ("index.html", "text/html"),
     "/app.js": ("app.js", "text/javascript"),
     "/app.css": ("app.css", "text/css"),
@@ -217,7 +217,7 @@ class _Request(BaseHTTPRequestHandler):
         ):
             return False
         given = (
-            self.headers.get("X-Hunches-Token")
+            self.headers.get("X-Goldlabel-Token")
             or (parse_qs(urlparse(self.path).query).get("token", [""])[0])
         )
         return secrets.compare_digest(given.encode(), handle.token.encode())
@@ -237,7 +237,7 @@ class _Request(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in PAGES:
             name, kind = PAGES[path]
-            page = resources.files("hunches").joinpath("web", name).read_text("utf-8")
+            page = resources.files("goldlabel").joinpath("web", name).read_text("utf-8")
             return self._send(200, page.replace("__TOKEN__", handle.token), kind)
         if path == "/api/state":
             return self._send(200, handle.state())

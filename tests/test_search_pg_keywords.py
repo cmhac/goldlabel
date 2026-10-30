@@ -8,11 +8,11 @@ from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
 from pydantic_ai.usage import RequestUsage
 
-from hunches.candidates import get_candidates
-from hunches.search import PgCorpus, S3Corpus, Table
-from hunches.settings import settings
+from goldlabel.candidates import get_candidates
+from goldlabel.search import PgCorpus, S3Corpus, Table
+from goldlabel.settings import settings
 
-search = importlib.import_module("hunches.search")  # for the pg_connect patch
+search = importlib.import_module("goldlabel.search")  # for the pg_connect patch
 
 EXT_VERSION = ("0.8.1", "extensions")
 
@@ -59,7 +59,7 @@ class Conn:
 def project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     settings.root = tmp_path / "root"
-    monkeypatch.delenv("HUNCHES_PG_URL", raising=False)
+    monkeypatch.delenv("GOLDLABEL_PG_URL", raising=False)
 
 
 def setup(monkeypatch, conn, **fields: Any):
@@ -231,7 +231,7 @@ def test_keyword_search_has_no_size_guard(monkeypatch):
 
 
 def test_errors_are_scrubbed_of_the_url(monkeypatch):
-    monkeypatch.setenv("HUNCHES_PG_URL", "postgres://u:hunter2@h/db")
+    monkeypatch.setenv("GOLDLABEL_PG_URL", "postgres://u:hunter2@h/db")
     conn = Conn(Exception("could not connect: postgres://u:hunter2@h/db"))
     with pytest.raises(RuntimeError) as e:
         get_candidates(setup(monkeypatch, conn), out=False)

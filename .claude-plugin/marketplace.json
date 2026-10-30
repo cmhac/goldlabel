@@ -1,5 +1,5 @@
 {
-  "name": "hunches",
+  "name": "goldlabel",
   "owner": {
     "name": "Chris Hacker"
   },
@@ -8,7 +8,7 @@
   },
   "plugins": [
     {
-      "name": "hunches",
+      "name": "goldlabel",
       "source": "./",
       "description": "Content analysis over a corpus: candidates from seed-phrase semantic search, keywords or the whole corpus, and an LLM classifier checked against human-labelled gold data, in a notebook or script.",
       "version": "0.1.0"

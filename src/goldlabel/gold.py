@@ -7,10 +7,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from hunches import _frame, _html
-from hunches._gold_rule import GOLD_RULE_SHORT, GoldError, GoldTypeError
-from hunches.settings import resolve
-from hunches.taxonomy import Taxonomy
+from goldlabel import _frame, _html
+from goldlabel._gold_rule import GOLD_RULE_SHORT, GoldError, GoldTypeError
+from goldlabel.settings import resolve
+from goldlabel.taxonomy import Taxonomy
 
 SPLITS = ("dev", "test")
 
