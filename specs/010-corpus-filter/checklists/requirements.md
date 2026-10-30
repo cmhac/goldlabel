@@ -31,8 +31,8 @@
 
 ## Notes
 
-- Two markers remain (FR-002 the restriction's form, FR-007 the table in the two-table Postgres
-  layout); both wait for the user.
+- One marker remains (FR-005: polars as a core dependency or an extra). The Postgres and S3
+  filter forms are proposals the user asked to review before the spec moves on.
 - Like 007 and 009, this is a library spec: corpus class names, `get_candidates` and the backend
   names are the user-facing vocabulary, not implementation detail. The Context section's
   S3 Vectors and pgvector facts were checked against AWS and pgvector docs on 2026-10-30.

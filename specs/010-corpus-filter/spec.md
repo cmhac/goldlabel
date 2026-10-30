@@ -4,29 +4,130 @@
 
 **Created**: 2026-10-30
 
-**Status**: Draft, 2 questions open (marked `[NEEDS CLARIFICATION]`)
+**Status**: Draft. The Table design and the two-table Postgres rule are decided (user, 2026-10-30). The Postgres and S3 filter forms below are proposals the user wants to see in detail before the spec moves on.
 
 **Input**: User description: "currently, goldlabel does not support filtering the corpus before keyword filters are applied. for example, we might want to apply a where clause on a postgres table to filter on some categorical column, THEN do keyword filters. Ideally, this would be applied on the corpus, before we call get_candidates. I would want this to work on all corpus types, not just postgres."
 
+**Review decisions (user, 2026-10-30)**:
+
+- Each corpus type gets its own filter, in the form that suits its backend. The classes are
+  already separate, so the three forms do not need to match.
+- `Table` reads and filters with polars only. A pandas DataFrame is still accepted and is
+  converted with `polars.from_pandas`. Files are read only by polars. This removes the current
+  mix (the standard library for CSV and JSONL, polars or else pandas for Parquet, `to_dicts` or
+  `to_dict` for frames), so there is one reading path and one filtering method.
+- A `Table` filter is a function the user passes. It takes one row and returns a boolean, and it
+  is applied with polars `map_elements`.
+- In the Postgres two-table layout (`text_table`), the filter columns must be in the text table,
+  and the docs say so plainly.
+
 ## Context
 
-Today a corpus (`Table`, `S3Corpus`, `PgCorpus`) is "every item in the source". `get_candidates`
-then applies at most one filter (seeds or keywords) to all of it. A user who only cares about one
-section, one outlet or one year has no way to say so on a Postgres table or an S3 Vectors index; on
-a `Table` they can filter the DataFrame themselves first, but not a file path, and the result is a
-different idiom per backend.
+Today a corpus is "every item in the source". `get_candidates` then applies at most one filter
+(seeds or keywords) to all of it. This feature adds a filter that lives on the corpus object.
+Every way `get_candidates` reads a filtered corpus (whole corpus, keywords, seeds) then sees only
+the items that pass. The filter is a statement about the corpus ("the politics section of this
+table"), not a fourth candidate filter.
 
-This feature adds one restriction that lives on the corpus object, so the same `get_candidates`
-call (whole corpus, keywords or seeds) sees only the items that pass it. The restriction is
-metadata about the corpus ("the politics section of this table"), not a fourth candidate filter.
+Facts this spec relies on (checked 2026-10-30):
 
-Facts this spec relies on (checked 2026-10-30): S3 Vectors `QueryVectors` accepts a metadata
-`filter` (bare value = `$eq`, plus `$in`, `$and` and others; all metadata is filterable unless the
-index declared a key non-filterable) and may return fewer than topK hits when few vectors match;
-`ListVectors` has no filter, so listing must filter the returned metadata itself. pgvector applies
-a `WHERE` after the HNSW index scan; iterative scans (0.8.0+, already turned on in index mode) keep
-scanning up to `hnsw.max_scan_tuples`, so a filtered index search can still return fewer hits than
-an exact one.
+- **polars**: `map_elements` runs the function once per row in Python. The polars docs call it
+  strongly discouraged next to native expressions, which run in Rust, in parallel and optimised
+  ([Expr.map_elements](https://docs.pola.rs/api/python/dev/reference/expressions/api/polars.Expr.map_elements.html)).
+  A row-wise function is therefore about as slow as a pandas row-wise `apply`; it is the
+  user's chosen form, and the docs will say what it costs.
+  - `polars.from_pandas` requires pyarrow
+    ([from_pandas](https://docs.pola.rs/py-polars/html/reference/api/polars.from_pandas.html)).
+  - Checked on the installed polars 2.1.0: `read_csv` infers types by default, which turns the
+    id `"007"` into the number `7`. `infer_schema=False` keeps every value as text, as the
+    current CSV reader does.
+  - `pl.struct(pl.all()).map_elements(f, return_dtype=pl.Boolean)` passes `f` one dict per
+    row.
+- **S3 Vectors**: `QueryVectors` takes a metadata `filter` document. Its operators are `$eq`
+  (also the meaning of a bare value; on a list value it matches any element), `$ne`, `$gt`,
+  `$gte`, `$lt`, `$lte`, `$startsWith` (ENHANCED query behaviour only), `$in`, `$nin`, `$exists`,
+  `$and` and `$or`.
+  - On CLASSIC indexes, a filtered query may return fewer than topK hits.
+  - `ListVectors` has no filter parameter. Metadata the index declared non-filterable cannot be
+    used in a filter, but it is still returned
+    ([metadata filtering](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors-metadata-filtering.html),
+    [ListVectors](https://docs.aws.amazon.com/AmazonS3/latest/API/API_S3VectorBuckets_ListVectors.md)).
+  - The docs do not say how a vector without the key is treated by `$ne` and `$nin`, or how
+    `$in` treats a list value.
+- **pgvector**: a `WHERE` is applied after the HNSW index scan. Iterative scans (0.8.0+, already
+  on in index mode) keep scanning up to `hnsw.max_scan_tuples`, so a filtered index search can
+  still return fewer hits than an exact one
+  ([pgvector 0.8.0 README](https://pgxn.org/dist/vector/0.8.0/README.html)).
+
+## Proposed filter forms *(for the user's review)*
+
+### Table (decided)
+
+```python
+corpus = gl.Table(
+    "articles.parquet",
+    id_column="id",
+    where=lambda row: row["section"] == "politics" and row["year"] >= 2024,
+)
+```
+
+- `row` is a dict of every column in the source, under the source's own names and with the
+  values polars read.
+- A CSV is read with every value as text, so the example above would write
+  `row["year"] >= "2024"` or `int(row["year"]) >= 2024`.
+- The function must return `True` or `False`. Any other value (including `None`) is an error
+  that names the first offending row.
+- The filter runs before the existing row checks, so a row that is filtered out cannot fail the
+  read (for example, by having an empty text).
+
+### PgCorpus (proposal)
+
+```python
+corpus = gl.PgCorpus(
+    "articles",
+    where="section = %s AND published >= %s",
+    where_params=("politics", "2024-01-01"),
+)
+```
+
+- `where` is the SQL condition as written, in Postgres syntax. Any operator, function or column
+  of the table can be used.
+- Values belong in `where_params`, sent as bound parameters. With parameters, a literal `%` in
+  the SQL is written `%%` (the driver's rule).
+- The condition runs inside the existing read-only transaction, so it cannot change data.
+- The SQL text is code the user wrote in their own notebook against their own database. The
+  library passes it through unchanged and does not try to validate it.
+- Two-table layout: the condition is evaluated against the text table only. The library wraps it
+  as `id IN (SELECT text_id FROM text_table WHERE <condition>)`, so an unqualified column name
+  always means a column of the text table, and a column that is only in the vector table is the
+  database's own "column does not exist" error.
+- Single table: the condition is added to the query's `WHERE` as is.
+- Alternative the user may prefer: equality only, as a mapping (`where={"section": "politics"}`).
+  It is safer (no SQL text), but it cannot express dates, ranges or `IN` lists.
+
+### S3Corpus (proposal)
+
+```python
+corpus = gl.S3Corpus(
+    "my-bucket",
+    "articles",
+    where={"$and": [{"section": "politics"}, {"year": {"$gte": 2024}}]},
+)
+```
+
+- `where` is the service's own filter document, sent unchanged as `filter` on every similarity
+  query.
+- Listing has no filter, so for the whole corpus and keywords the library evaluates the same
+  document on each listed vector's metadata. It supports every documented operator except
+  `$startsWith`, which is refused for listing because its availability depends on the index
+  mode.
+- Where the AWS docs are silent, the library's rules are written down and tested:
+  - A vector without the key fails every operator except `$exists: false` and `$ne`/`$nin`,
+    which it passes.
+  - `$in` on a list value matches if any element is in the list, as `$eq` does.
+  - Both rules are marked as unverified against the service (manual check, below).
+- Alternative the user may prefer: a filter document for queries plus a separate Python function
+  for listing. It is simpler to build, but it means two filters that can disagree.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -37,164 +138,184 @@ section only. They say so once on the corpus, then call `get_candidates(corpus, 
 exactly as today. Rows outside the section never leave the server.
 
 **Why this priority**: it is the case that prompted the request, and the one where filtering in
-Python afterwards is not an option (the table may not fit in memory).
+Python afterwards is not an option, because the table may not fit in memory.
 
-**Independent Test**: with the fake `psycopg`, build a corpus restricted to `section = politics`,
-ask for keywords with and without `server_side`, and check the SQL sent carries the restriction as
-a bound parameter and that only the restricted rows come back.
+**Independent Test**: using the fake `psycopg`, build a filtered corpus and ask for keywords with
+and without `server_side`. Check that the condition is in the SQL sent, that its values arrive
+only as bound parameters, and that only the filtered rows come back.
 
 **Acceptance Scenarios**:
 
 1. **Given** a table where rows 1-3 are `politics` and rows 4-5 are `sports`, and rows 2 and 4
-   contain "ballot", **When** the user restricts the corpus to `section = politics` and asks for
-   the keyword "ballot", **Then** the result holds only row 2.
+   contain "ballot", **When** the user filters to `section = politics` and asks for the keyword
+   "ballot", **Then** the result holds only row 2.
 2. **Given** the same corpus and no keywords, **When** the user asks for the whole corpus,
    **Then** the result holds rows 1-3 in id order.
-3. **Given** a restriction to "one of" two values (`politics` or `opinion`), **When** the search
-   runs, **Then** a row in either value is kept.
-4. **Given** a restriction on two columns (`section = politics` and `outlet = post`), **When** the
-   search runs, **Then** a row is kept only if it passes both.
-5. **Given** a restriction value that contains a quote, a semicolon or SQL text, **When** the
-   search runs, **Then** it is compared as a plain value and never becomes part of the query
-   text; a column name is always quoted as a name.
-6. **Given** a restriction that no row passes, **When** the search runs, **Then** the result is
-   empty and says so in words (0 candidates), not an error.
+3. **Given** a two-table layout whose `section` column is in the text table, **When** the user
+   filters on it, **Then** the right rows come back, in every mode.
+4. **Given** a two-table layout and a filter on a column that is only in the vector table,
+   **When** the search runs, **Then** it fails with the database's error, and the message adds
+   that filter columns must be in the text table.
+5. **Given** a filter that no row passes, **When** the search runs, **Then** the result is empty
+   and says so in words (0 candidates), not an error.
 
 ---
 
-### User Story 2 - The same restriction on a Table and on S3 Vectors (Priority: P1)
+### User Story 2 - The same need on a Table (Priority: P1)
 
-The same user, working from a Parquet export or an S3 Vectors index, writes the same restriction
-in the same form and gets the same behaviour.
+The same user works from a Parquet, CSV or JSONL file, a polars or pandas DataFrame, or a list of
+rows. They pass a row function and get the same behaviour.
 
-**Why this priority**: the user asked for every corpus type; one form for all three is the point.
+**Why this priority**: the user asked for every corpus type, and `Table` is the default corpus.
 
-**Independent Test**: on a tiny hand-built `Table` (file and DataFrame) and a stubbed S3 client,
-apply the restrictions from story 1 and check the exact ids against a hand-written expectation.
+**Independent Test**: build one tiny dataset as every source type and apply the same function.
+Check the exact ids against a hand-written expectation for each source.
 
 **Acceptance Scenarios**:
 
-1. **Given** a `Table` whose rows carry a `section` column, **When** it is restricted to
-   `section = politics`, **Then** whole-corpus, keyword and seed candidates hold only those rows.
-2. **Given** a `Table` restricted on a column it does not have, **When** it is read, **Then** the
-   call fails with a message that names the column and the first row without it.
-3. **Given** an S3 Vectors index whose vectors carry `section` metadata, **When** it is restricted
-   and the whole corpus or keywords are asked for, **Then** only vectors whose metadata passes are
-   kept (filtered after listing, since listing has no filter).
-4. **Given** the same S3 corpus and seeds, **When** the search runs, **Then** the restriction is
-   sent with every similarity query, so hits outside it never come back and do not use up topK.
-5. **Given** an S3 vector with no value for a restricted key, **When** the corpus is read,
-   **Then** that vector is left out (it does not pass), as the service's own filter does.
+1. **Given** a `Table` whose rows carry a `section` column and a function keeping `politics`,
+   **When** the user asks for the whole corpus, keywords or seeds, **Then** only those rows are
+   candidates.
+2. **Given** a function that returns something other than a boolean for some row, **When** the
+   corpus is read, **Then** the call fails with a message naming the row.
+3. **Given** a function that raises (for example, a column the source does not have), **When**
+   the corpus is read, **Then** the error says it came from the filter and keeps the original
+   exception.
+4. **Given** a pandas DataFrame and no pyarrow installed, **When** the corpus is read, **Then**
+   the call fails with a message that says to install pyarrow.
 
 ---
 
-### User Story 3 - Seed search over a restricted corpus (Priority: P2)
-
-A user restricts the corpus and then runs seed search; the similarity hits come only from the
-restricted items.
-
-**Why this priority**: "the restriction is on the corpus" means every way of reading the corpus
-honours it. Leaving seed search out would make the same corpus object mean two things.
-
-**Independent Test**: restrict a `Table` with hand-built vectors where the best match for a seed
-is outside the restriction; check that the result's best row is the best one inside it.
+### User Story 3 - The same need on S3 Vectors (Priority: P2)
 
 **Acceptance Scenarios**:
 
-1. **Given** a restricted `Table`, `PgCorpus` (exact and index search) or `S3Corpus`, **When** the
-   user runs seed search, **Then** no candidate falls outside the restriction.
-2. **Given** a restricted `PgCorpus` in index search, **When** the result is shown, **Then** it
-   carries the existing approximate-search warning, because a filtered index scan can miss hits.
+1. **Given** an S3 index whose vectors carry `section` metadata, **When** the corpus is filtered
+   and the whole corpus or keywords are asked for, **Then** only vectors whose metadata passes
+   are kept.
+2. **Given** the same corpus and seeds, **When** the search runs, **Then** the filter is sent
+   with every similarity query, so hits outside it never come back and do not use up topK.
+3. **Given** a filter document that is not a dict, or uses an unknown operator, **When** the
+   corpus is built, **Then** it is refused with a message naming the problem.
 
 ---
 
-### User Story 4 - Nothing changes for an unrestricted corpus (Priority: P1)
-
-Every existing notebook, corpus and saved candidate file behaves exactly as before.
+### User Story 4 - Seed search over a filtered corpus (Priority: P2)
 
 **Acceptance Scenarios**:
 
-1. **Given** a corpus built without a restriction, **When** any existing call runs, **Then** the
-   result and the queries sent are identical to today's; the existing tests pass unchanged.
+1. **Given** a filtered `Table`, `PgCorpus` (exact and index search) or `S3Corpus`, **When** the
+   user runs seed search, **Then** no candidate falls outside the filter.
+2. **Given** a filtered `PgCorpus` in index search, **When** the result is shown, **Then** it
+   carries the existing approximate-search warning.
+
+---
+
+### User Story 5 - Nothing else changes (Priority: P1)
+
+**Acceptance Scenarios**:
+
+1. **Given** a corpus built without a filter, **When** any existing call runs, **Then** the
+   result, the queries sent and the ids are identical to today's. That includes CSV ids such as
+   `"007"`, and JSONL and Parquet values.
+2. **Given** an existing test of `Table` reading, **When** the polars-only reader replaces the
+   current one, **Then** the test passes unedited, or the plan names each edit and why (for
+   example, an error message whose wording changes).
 
 ### Edge Cases
 
-- A `Table` from a CSV holds every value as text: a restriction to the number `2024` does not
-  match the text `"2024"`. Values are compared as the source holds them, and the docs say so.
-- An empty restriction (no columns), an empty "one of" list, or a blank column name is refused
+- A CSV value is always text, including in the filter function's `row`. The docs say so.
+- JSONL rows with missing keys: polars fills them with null. The existing "no column" error must
+  still fire for the text and id columns, not turn into a null-text error with a different
+  message.
+- A JSONL or list-of-rows source whose values change type between rows: if polars cannot build
+  one column type, the error names the column.
+- Postgres up-front "result too large" refusal: it uses whole-table statistics, which overstate a
+  filtered read. With a filter it is skipped, and the streaming size check still applies.
+- `where_params` without `where`, or a `where` given as something other than a string: refused
   when the corpus is built.
-- A missing value (`None`) as a restriction value is refused when the corpus is built.
-- A Postgres column that does not exist: the database's own error, scrubbed as today.
-- With a restriction, the Postgres up-front "result too large" refusal for the whole corpus uses
-  whole-table statistics, which overstate a filtered read; it is skipped when a restriction is set,
-  and the streaming size check still applies.
-- A restriction on the Postgres two-table layout: see FR-007.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: Each corpus type (`Table`, `S3Corpus`, `PgCorpus`) MUST accept an optional
-  restriction when it is built; without one it behaves exactly as today.
-- **FR-002**: The restriction MUST have the same form for all three corpus types:
-  [NEEDS CLARIFICATION: which form? Recommended: a mapping of column name to one value (equal to)
-  or a list of values (one of), all columns ANDed, e.g. `where={"section": "politics", "outlet":
-  ["post", "wire"]}`. Alternatives: the same plus a Postgres-only raw SQL string; or each backend's
-  native form (SQL text, S3 filter document, a Python callable for a Table).]
-- **FR-003**: Every way `get_candidates` reads a restricted corpus (whole corpus, keywords
-  in Python, keywords on the server, seed search in every mode) MUST see only the items that pass.
-- **FR-004**: On Postgres the restriction MUST run in the database, with column names quoted as
-  identifiers and values sent only as bound parameters, inside the existing read-only transaction.
-- **FR-005**: On S3 Vectors similarity queries MUST send the restriction as the service's metadata
-  filter; listing MUST apply the same rule to the returned metadata.
-- **FR-006**: On a `Table` the restriction MUST be applied to the rows as read, before any other
-  check that would refuse a row outside it (a row outside the restriction with an empty text does
-  not fail the read).
-- **FR-007**: On a Postgres two-table layout (`text_table`) the restricted columns MUST be looked
-  up in [NEEDS CLARIFICATION: which table? Recommended: the text table, where article fields
-  usually live next to the text. Alternatives: the vector table; or either, chosen per column.]
-- **FR-008**: A restriction MUST be checked when the corpus is built (empty mapping, blank or
-  non-string column name, empty list, `None` value) and refused with a message naming the problem.
-- **FR-009**: The restriction MUST be part of the corpus's plain `repr` so a notebook shows what
-  was read; nothing new is written to `candidates.jsonl` or its `.meta.json`.
-- **FR-010**: The agent skills (`goldlabel-connect`, `goldlabel-candidates`) and the README MUST
-  show the restriction once, using real names (the drift tests check them).
-- **FR-011**: Whether to restrict and to what is the user's decision; the skills MUST tell agents
-  to ask, never to pick a restriction themselves.
+- **FR-001**: `Table`, `PgCorpus` and `S3Corpus` MUST each accept an optional filter when they
+  are built, in the forms above. Without one, each behaves exactly as today.
+- **FR-002**: Every way `get_candidates` reads a filtered corpus MUST see only the items that
+  pass. That covers the whole corpus, keywords in Python, keywords on the server, and seed search
+  in every mode.
+- **FR-003**: `Table` MUST read every source with polars only:
+  - Files with `read_csv` (every value as text), `read_ndjson` and `read_parquet`.
+  - Polars DataFrames as they are.
+  - pandas DataFrames through `polars.from_pandas`.
+  - Lists of rows through `polars.DataFrame`.
+  - Nothing in `Table` reading may use pandas, the `csv` module or `json` line parsing.
+- **FR-004**: `Table` MUST apply the filter function with `map_elements` over a struct of every
+  column, then run the existing row checks and produce the same `{id, text[, vector]}` rows as
+  today.
+- **FR-005**: polars MUST become a runtime dependency of goldlabel: [NEEDS CLARIFICATION: a core
+  dependency (recommended: `Table` is the default corpus and would not work without it), or an
+  extra such as `goldlabel[table]`?]. Importing `goldlabel` MUST still not import polars.
+  Result exports keep both `.to_polars()` and `.to_pandas()` (constitution VII).
+- **FR-006**: On Postgres, the filter MUST run in the database, inside the existing read-only
+  transaction. Its values MUST be sent only as bound parameters, and in the two-table layout it
+  MUST be evaluated against the text table only.
+- **FR-007**: On S3 Vectors, similarity queries MUST send the filter document unchanged. Listing
+  MUST evaluate the same document on the returned metadata, by the rules above.
+- **FR-008**: A malformed filter MUST be refused when the corpus is built, with a message naming
+  the problem. Examples: a Table filter that is not callable, a Postgres `where` that is not a
+  string, an S3 document with an unknown operator.
+- **FR-009**: A corpus's plain `repr` MUST show that it is filtered. It shows the SQL text or
+  the S3 document as given, and for a function its name or `<lambda>`. Nothing new is written
+  to `candidates.jsonl` or its `.meta.json`.
+- **FR-010**: The README and the agent skills `goldlabel-connect` and `goldlabel-candidates` MUST
+  show each backend's filter once, using real names that the drift tests check. They MUST say
+  that Postgres filter columns must be in the text table in the two-table layout, and that a
+  Table filter runs once per row in Python.
+- **FR-011**: Whether to filter, and on what, is the user's decision. The skills MUST tell agents
+  to ask, never to choose a filter themselves.
 
 ### Key Entities
 
-- **Restriction**: an optional, immutable part of a corpus: the columns (Postgres), keys (S3
-  metadata) or fields (Table rows) an item must match, with the value or values each may take.
+- **Corpus filter**: an optional, immutable part of a corpus.
+  - Table: a Python function that takes a row and returns a boolean.
+  - Postgres: SQL condition text plus bound values.
+  - S3 Vectors: a metadata filter document.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
-- **SC-001**: One restriction written once runs unchanged on all three corpus types and gives the
-  same ids on the same data (checked on one hand-built dataset loaded into each).
-- **SC-002**: On Postgres, no row outside the restriction is received by the client in any mode
-  (checked by what the fake driver returns for the SQL it is sent).
-- **SC-003**: No restriction value ever appears in the text of a query sent to Postgres.
-- **SC-004**: Every existing test passes without being edited.
+- **SC-001**: For each backend, a filtered corpus gives exactly the hand-written expected ids in
+  every mode: whole corpus, keywords and seeds.
+- **SC-002**: On Postgres, no row outside the filter is received by the client in any mode,
+  checked by what the fake driver returns for the SQL it is sent. No `where_params` value ever
+  appears in the query text.
+- **SC-003**: `Table` reads every source type through one polars path. A search of the source
+  for `pandas`, `csv.` and line-by-line `json` parsing in Table reading finds none.
+- **SC-004**: Every existing test passes, apart from the edits the plan names under User Story 5.
 
 ## Assumptions
 
-- The restriction is about equality on categorical values, as in the request; ranges and other
-  comparisons are out of scope (see below) unless FR-002 is answered otherwise.
-- The S3 metadata keys used in a restriction are filterable; if a key was declared non-filterable,
-  the service's error is shown as is.
-- Postgres needs an index on a restricted column to be fast; the library does not create one.
-- Candidate files do not record the restriction: the notebook is the record (Principle V).
+- Postgres needs an index on a filtered column to be fast. The library does not create one.
+- S3 metadata keys used in a similarity-query filter are filterable. If one is not, the
+  service's error is shown as it is.
+- Candidate files do not record the filter, because the notebook is the record (Principle V).
+- Manual checks a human must do, which tests cannot: a filtered keyword, whole-corpus and seed
+  search against a real Postgres (single and two-table), and against a real S3 Vectors index,
+  including the missing-key and list-value rules.
 
 ## Deliberately skipped *(Ponytail)*
 
-- Ranges, "not equal", "not in", `IS NULL`, `LIKE`, OR across columns, nested logic.
-- A raw SQL `where` string for Postgres (unless chosen for FR-002).
-- A Python callable or polars/pandas expression as the restriction for a `Table`: filter the
-  DataFrame before building the `Table`.
-- Restricting at `get_candidates` time instead of on the corpus (the request puts it on the corpus).
-- Recording the restriction in `candidates.jsonl` / `.meta.json`, or in the evaluation log.
-- Counting how many items pass a restriction before searching.
-- Creating indexes or checking that a restricted column is indexed (`PgCorpus.check` unchanged).
-- Coercing types (text `"2024"` vs number `2024`) between the restriction and the source.
+- A polars expression (`pl.col("section") == "politics"`) as the Table filter, which would be the
+  fast path. The user chose a row function; this is easy to add later if speed matters.
+- Filtering at `get_candidates` time instead of on the corpus, because the request puts it on the
+  corpus.
+- One filter form shared by all backends, because the user chose per-backend forms.
+- Recording the filter in `candidates.jsonl`, `.meta.json` or the evaluation log.
+- Counting how many items pass a filter before searching.
+- Creating indexes, or checking that a filtered Postgres column is indexed (`PgCorpus.check` is
+  unchanged).
+- `$startsWith` when listing S3 vectors.
+- Lazy or streaming polars reads (`scan_*`) for tables larger than memory: `Table` already reads
+  the whole source today.
