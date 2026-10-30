@@ -62,7 +62,7 @@ waived `/ponytail-review` of spec, plan and tasks for this feature.
 
 ## Phase 6: Polish
 
-- [ ] T014 Run quickstart steps 1 to 5 and record the outputs; `uv run pytest` full, `uv build` (wheel contains the skills and script), `claude plugin validate .`; mark the 009 entry in `AGENTS.md` "Current state" (what a human must still do: install in each agent and list skills, the gold-rule refusal trial in each, Kiro custom-agent `resources`, Codex/Copilot real discovery, `copilot skill add` unverified); run `/ponytail-debt` and list the `shortcut:` comments; final report with red/green evidence, check outputs, deviations (the waived `/ponytail-review`), the Ponytail line and what only a human can do. Files: `AGENTS.md`, `specs/009-agent-skills-installer/quickstart.md` (record outputs only).
+- [x] T014 Run quickstart steps 1 to 5 and record the outputs; `uv run pytest` full, `uv build` (wheel contains the skills and script), `claude plugin validate .`; mark the 009 entry in `AGENTS.md` "Current state" (what a human must still do: install in each agent and list skills, the gold-rule refusal trial in each, Kiro custom-agent `resources`, Codex/Copilot real discovery, `copilot skill add` unverified); run `/ponytail-debt` and list the `shortcut:` comments; final report with red/green evidence, check outputs, deviations (the waived `/ponytail-review`), the Ponytail line and what only a human can do. Files: `AGENTS.md`, `specs/009-agent-skills-installer/quickstart.md` (record outputs only).
 
 ## Dependencies and order
 

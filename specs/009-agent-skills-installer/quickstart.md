@@ -27,3 +27,12 @@ All offline; no real agent, key or database. Run from the repository root.
 6. **Needs a human** (report, never fake): each agent really lists the skills after install (Codex
    `$`, Copilot `/skills reload`, Kiro default agent and a custom agent with the `resources` line,
    Claude Code `/goldlabel:...` and plain skill names), and the gold-rule refusal trial in each.
+
+## Results (2026-10-30, T014)
+
+- Checks: ruff, ruff format, ty clean; `uv run pytest`: 621 passed, 18 skipped (the Postgres integration tests need `GOLDLABEL_TEST_PG_URL`; one Parquet test needs `pyarrow`).
+- Step 2: in a scratch project and home, `goldlabel install claude codex copilot kiro` wrote 22 items (7 skill folders in each of `.claude/skills`, `.agents/skills` once, `.kiro/skills`, plus `.kiro/steering/goldlabel.md`); the second run reported every line "up to date"; an edited `SKILL.md` exited 1 with "differs (use --force to replace)".
+- Step 3: wheel built and installed in a clean venv without the checkout; `goldlabel install --dir` worked (see the T006 commit).
+- Step 4: `claude plugin validate .` passes with `"skills": ["./src/goldlabel/skills"]`.
+- Step 5: `tests/test_e2e.py::test_a_spent_test_split_is_folded_and_a_fresh_one_is_labelled_by_people`.
+- Step 6: not run (needs a person in each agent).
