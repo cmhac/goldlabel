@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "goldlabel",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Content analysis over a corpus: candidates from seed-phrase semantic search, keywords or the whole corpus, and an LLM classifier checked against human-labelled gold data, in a notebook or script.",
   "author": {
     "name": "Chris Hacker"
