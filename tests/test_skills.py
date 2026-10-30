@@ -338,10 +338,9 @@ def test_connect_skill_shaping_example_runs_and_leaves_the_source_alone(
         '[{"post_id": 7, "body": "first post"}, {"post_id": 8, "body": "second post"}]'
     )
     before = source.read_text()
-    scope = {
-        "gl": goldlabel
-    }  # the block continues the earlier `import goldlabel as gl`
-    exec(block_with("goldlabel-connect", "write_ndjson"), scope)  # noqa: S102
+    scope: dict[str, Any] = {}
+    # the block continues the earlier `import goldlabel as gl`
+    exec(block_with("goldlabel-connect", "write_ndjson"), {"gl": goldlabel}, scope)  # noqa: S102
     rows = goldlabel.get_candidates(scope["corpus"]).rows
     assert rows == [
         {"id": "7", "text": "first post"},
