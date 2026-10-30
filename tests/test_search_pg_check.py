@@ -3,9 +3,11 @@ from typing import Any
 
 import pytest
 
-from hunches.search import PgCorpus
+from goldlabel.search import PgCorpus
 
-search = importlib.import_module("hunches.search")  # `hunches.search` is the function
+search = importlib.import_module(
+    "goldlabel.search"
+)  # `goldlabel.search` is the function
 
 URL = "postgresql://alice:s3cr%40t@db.example.com:5432/mydb"
 
@@ -79,7 +81,7 @@ class Conn:
 
 @pytest.fixture
 def check(monkeypatch):
-    monkeypatch.setenv("HUNCHES_PG_URL", URL)
+    monkeypatch.setenv("GOLDLABEL_PG_URL", URL)
 
     def run(conn, seeds=None, **fields: Any):
         kwargs: dict[str, Any] = {"table": "public.docs", **fields}
@@ -174,7 +176,7 @@ def test_halfvec_dimension(check):
 def test_sparsevec_warns_and_other_pieces_still_report(check):
     got = check(Conn(atttypmod=[("sparsevec", "extensions", 3)]))
     assert got["warnings"] == [
-        'Column "embedding" has type sparsevec; hunches supports vector and halfvec.'
+        'Column "embedding" has type sparsevec; goldlabel supports vector and halfvec.'
     ]
     assert got["type"] is None and got["errors"] == {}
     assert got["rows"] == 1234 and got["sample"] is not None
@@ -259,14 +261,16 @@ def test_exact_mode_on_old_pgvector_has_no_version_warning(check):
 
 
 def test_pooler_hint_for_port_6543(check, monkeypatch):
-    monkeypatch.setenv("HUNCHES_PG_URL", "postgresql://u:p@db.example.com:6543/x")
+    monkeypatch.setenv("GOLDLABEL_PG_URL", "postgresql://u:p@db.example.com:6543/x")
     got = check(Conn())
     assert got["notes"] == [search.POOLER_HINT]
     assert "direct or session-mode URL" in search.POOLER_HINT
 
 
 def test_pooler_hint_for_pooler_host(check, monkeypatch):
-    monkeypatch.setenv("HUNCHES_PG_URL", "postgresql://u:p@aws-0.pooler.supabase.com/x")
+    monkeypatch.setenv(
+        "GOLDLABEL_PG_URL", "postgresql://u:p@aws-0.pooler.supabase.com/x"
+    )
     assert check(Conn())["notes"] == [search.POOLER_HINT]
 
 

@@ -11,12 +11,12 @@ from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
 from pydantic_ai.usage import RequestUsage
 
-from hunches import candidates
-from hunches.candidates import Candidates, aget_candidates, get_candidates, read_seeds
-from hunches.search import PgCorpus, S3Corpus, Table
-from hunches.settings import settings
+from goldlabel import candidates
+from goldlabel.candidates import Candidates, aget_candidates, get_candidates, read_seeds
+from goldlabel.search import PgCorpus, S3Corpus, Table
+from goldlabel.settings import settings
 
-cost = importlib.import_module("hunches.cost")  # `hunches.cost` is the function
+cost = importlib.import_module("goldlabel.cost")  # `goldlabel.cost` is the function
 
 FIXTURES = Path(__file__).parent / "fixtures" / "pre006"
 

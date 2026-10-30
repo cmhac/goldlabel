@@ -1,7 +1,7 @@
 from pytest import approx
 
-from hunches.metrics import compute_metrics, default_target_metric, target_value
-from hunches.taxonomy import Label, Taxonomy
+from goldlabel.metrics import compute_metrics, default_target_metric, target_value
+from goldlabel.taxonomy import Label, Taxonomy
 
 
 def S(*labels):

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from hunches.taxonomy import Taxonomy
+from goldlabel.taxonomy import Taxonomy
 
 
 @dataclass

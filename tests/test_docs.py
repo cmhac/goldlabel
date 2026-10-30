@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 
-import hunches
+import goldlabel
 
 ROOT = Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"
@@ -20,18 +20,18 @@ def python_blocks(text):
 
 
 def public_names_used(code):
-    """Every first-level `hn.X` / `hunches.X` and every name in `from hunches import ...`."""
+    """Every first-level `gl.X` / `goldlabel.X` and every name in `from goldlabel import ...`."""
     tree = ast.parse(code)
-    aliases, names = {"hunches"}, []
+    aliases, names = {"goldlabel"}, []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             aliases |= {
-                a.asname for a in node.names if a.name == "hunches" and a.asname
+                a.asname for a in node.names if a.name == "goldlabel" and a.asname
             }
-        if isinstance(node, ast.ImportFrom) and node.module == "hunches":
+        if isinstance(node, ast.ImportFrom) and node.module == "goldlabel":
             names += [a.name for a in node.names]
         if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
-            "hunches."
+            "goldlabel."
         ):
             raise AssertionError(f"private module import: {node.module}")
     for node in ast.walk(tree):
@@ -50,8 +50,8 @@ def test_readme_python_blocks_use_public_names_only():
     used = [n for code in blocks for n in public_names_used(code)]
     assert used
     for name in used:
-        assert name in hunches.__all__, f"README uses hunches.{name}, not public"
-    for needle in ("hn.get_candidates(", "hn.label(", "hn.evaluate(", "clf.classify("):
+        assert name in goldlabel.__all__, f"README uses goldlabel.{name}, not public"
+    for needle in ("gl.get_candidates(", "gl.label(", "gl.evaluate(", "clf.classify("):
         assert any(needle in b for b in blocks), needle
     assert any(".to_polars()" in b for b in blocks)
 
@@ -64,9 +64,9 @@ def test_no_doc_mentions_the_removed_corpus_or_its_folder_layout():
         README,
         INSTRUCTIONS,
         ROOT / "AGENTS.md",
-        ROOT / ".kiro/steering/hunches.md",
+        ROOT / ".kiro/steering/goldlabel.md",
     ]
-    files += (ROOT / "skills" / "hunches").rglob("*.md")
+    files += (ROOT / "skills" / "goldlabel").rglob("*.md")
     files += [SAMPLE / "README.md", PY, IPYNB]
     for path in files:
         for word in REMOVED:
@@ -83,23 +83,23 @@ def test_nothing_calls_the_library_embedded_corpus_only():
         README,
         INSTRUCTIONS,
         ROOT / "AGENTS.md",
-        ROOT / ".kiro/steering/hunches.md",
+        ROOT / ".kiro/steering/goldlabel.md",
     ]
     files += [ROOT / "plugin.json", *(ROOT / ".claude-plugin").glob("*.json")]
-    files += (ROOT / "skills" / "hunches").rglob("*.md")
+    files += (ROOT / "skills" / "goldlabel").rglob("*.md")
     for path in files:
         assert not ALREADY_EMBEDDED.search(path.read_text()), path.name
     description = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
     assert not ALREADY_EMBEDDED.search(description["description"])
-    assert not ALREADY_EMBEDDED.search(hunches.__doc__ or "")
+    assert not ALREADY_EMBEDDED.search(goldlabel.__doc__ or "")
 
 
 def test_the_docs_describe_the_three_candidate_sources_and_the_table_format():
-    for path in (README, ROOT / "skills/hunches/references/workflow.md"):
+    for path in (README, ROOT / "skills/goldlabel/references/workflow.md"):
         text = path.read_text()
         for needle in (
             "get_candidates",
-            "hn.Table(",
+            "gl.Table(",
             "keywords=",
             "server_side=True",
             "vector_column",
@@ -113,7 +113,7 @@ def test_the_docs_describe_the_three_candidate_sources_and_the_table_format():
             "order is the service's",
         ):
             assert needle in text, f"{path.name} does not mention {needle}"
-    assert "hn.get_candidates(" in (ROOT / "skills/hunches/SKILL.md").read_text()
+    assert "gl.get_candidates(" in (ROOT / "skills/goldlabel/SKILL.md").read_text()
 
 
 def test_readme_tables_use_polars_and_mention_pandas():
@@ -124,8 +124,8 @@ def test_readme_tables_use_polars_and_mention_pandas():
 
 def test_readme_holds_the_instruction_block_verbatim():
     readme = README.read_text()
-    assert hunches.GOLD_RULE_FULL in readme, (
-        f"README.md must contain the Full gold rule verbatim. Paste this:\n\n{hunches.GOLD_RULE_FULL}\n"
+    assert goldlabel.GOLD_RULE_FULL in readme, (
+        f"README.md must contain the Full gold rule verbatim. Paste this:\n\n{goldlabel.GOLD_RULE_FULL}\n"
     )
     block = INSTRUCTIONS.read_text().partition("## The block\n\n")[2].strip()
     assert block, "docs/agent-instructions.md has no block"
@@ -138,16 +138,16 @@ def test_readme_holds_the_instruction_block_verbatim():
 def test_readme_says_what_it_must_say():
     text = README.read_text()
     for needle in (
-        "pip install hunches",
-        "hunches[s3]",
-        "hunches[pg]",
-        "hunches[rds]",
-        "hunches[local]",
-        "/plugin marketplace add cmhac/hunches",
-        "/plugin install hunches@hunches",
-        "copilot plugin marketplace add cmhac/hunches",
-        "codex plugin marketplace add cmhac/hunches",
-        ".kiro/steering/hunches.md",
+        "pip install goldlabel",
+        "goldlabel[s3]",
+        "goldlabel[pg]",
+        "goldlabel[rds]",
+        "goldlabel[local]",
+        "/plugin marketplace add cmhac/goldlabel",
+        "/plugin install goldlabel@goldlabel",
+        "copilot plugin marketplace add cmhac/goldlabel",
+        "codex plugin marketplace add cmhac/goldlabel",
+        ".kiro/steering/goldlabel.md",
         "keyring",
         ".env",
         "evals.jsonl",
@@ -185,19 +185,19 @@ def test_walkthrough_script_and_notebook_hold_the_same_cells():
 def test_walkthrough_is_honest_about_gold_and_keys():
     code = "\n".join(src for kind, src in py_cells() if kind == "code")
     ast.parse(code)
-    assert "hn.label(" in code and "gold.draw(" in code
+    assert "gl.label(" in code and "gold.draw(" in code
     for bad in ("labelled_by", "import_rows", "api_key", "sk-", "postgres://"):
         assert bad not in code, bad
     assert not re.search(r"\blabels\s*=\s*\[", code)  # no hand-written gold rows
     for name in public_names_used(code):
-        assert name in hunches.__all__, name
-    assert not (SAMPLE / ".hunches" / "config.toml").exists()
+        assert name in goldlabel.__all__, name
+    assert not (SAMPLE / ".goldlabel" / "config.toml").exists()
 
 
 def test_agents_md_holds_the_rule_and_claude_md_is_its_symlink():
     agents = ROOT / "AGENTS.md"
-    assert hunches.GOLD_RULE_FULL in agents.read_text(), (
-        f"AGENTS.md must contain the Full gold rule verbatim. Paste this:\n\n{hunches.GOLD_RULE_FULL}\n"
+    assert goldlabel.GOLD_RULE_FULL in agents.read_text(), (
+        f"AGENTS.md must contain the Full gold rule verbatim. Paste this:\n\n{goldlabel.GOLD_RULE_FULL}\n"
     )
     assert (ROOT / "CLAUDE.md").is_symlink()
     assert (ROOT / "CLAUDE.md").resolve() == agents.resolve()

@@ -10,13 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from hunches import candidates, classifier
-from hunches.classifier import Classifier
-from hunches.cost import breakdown, cache_get, cache_key
-from hunches.gold import Gold
-from hunches.search import Table, search_table, table_rows
-from hunches.settings import settings
-from hunches.taxonomy import Taxonomy
+from goldlabel import candidates, classifier
+from goldlabel.classifier import Classifier
+from goldlabel.cost import breakdown, cache_get, cache_key
+from goldlabel.gold import Gold
+from goldlabel.search import Table, search_table, table_rows
+from goldlabel.settings import settings
+from goldlabel.taxonomy import Taxonomy
 
 FIXTURES = Path(__file__).parent / "fixtures" / "pre006"
 
@@ -28,24 +28,24 @@ def expected():
 
 @pytest.fixture
 def project(tmp_path, monkeypatch):
-    shutil.copytree(FIXTURES, tmp_path / ".hunches")
+    shutil.copytree(FIXTURES, tmp_path / ".goldlabel")
     monkeypatch.chdir(tmp_path)
-    settings.root = tmp_path / ".hunches"
+    settings.root = tmp_path / ".goldlabel"
     return tmp_path
 
 
 def read_jsonl(project, name):
-    path = project / ".hunches" / name
+    path = project / ".goldlabel" / name
     return [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
 
 
 def test_files_are_well_formed(project):
-    taxonomy = Taxonomy.read(project / ".hunches" / "taxonomy.yaml")
+    taxonomy = Taxonomy.read(project / ".goldlabel" / "taxonomy.yaml")
     assert taxonomy.mode == "multi"
     assert [label.name for label in taxonomy.labels] == ["alpha", "beta"]
-    assert candidates.read_seeds(".hunches/seeds.csv") == ["alpha seed"]
-    assert (project / ".hunches" / "prompt.md").read_text() == "Classify the item.\n"
-    meta = json.loads((project / ".hunches" / "candidates.meta.json").read_text())
+    assert candidates.read_seeds(".goldlabel/seeds.csv") == ["alpha seed"]
+    assert (project / ".goldlabel" / "prompt.md").read_text() == "Classify the item.\n"
+    meta = json.loads((project / ".goldlabel" / "candidates.meta.json").read_text())
     assert meta == {
         "seeds_digest": candidates.seeds_digest(["alpha seed"]),
         "written_at": meta["written_at"],
@@ -55,10 +55,10 @@ def test_files_are_well_formed(project):
     assert [
         c["id"]
         for c in candidates.Candidates.read(
-            project / ".hunches" / "candidates.jsonl"
+            project / ".goldlabel" / "candidates.jsonl"
         ).rows
     ] == ["a1", "a2"]
-    gold = Gold(project / ".hunches" / "gold.jsonl").all.rows
+    gold = Gold(project / ".goldlabel" / "gold.jsonl").all.rows
     assert [(g.id, g.split, g.labels) for g in gold] == [
         ("a1", "dev", ["alpha"]),
         ("b1", "dev", ["beta"]),
@@ -71,7 +71,7 @@ def test_files_are_well_formed(project):
 
 def fixture_table(project):
     return Table(
-        project / ".hunches" / "corpus.jsonl",
+        project / ".goldlabel" / "corpus.jsonl",
         id_column="id",
         vector_column="embedding",
         embedding_model="fake-embed",
@@ -86,9 +86,9 @@ def test_corpus_is_well_formed(project):
 
 def test_cache_and_cost_are_well_formed(project, expected):
     cls, emb = expected["classification"], expected["seed_embedding"]
-    names = sorted(p.stem for p in (project / ".hunches" / "cache").glob("*.json"))
+    names = sorted(p.stem for p in (project / ".goldlabel" / "cache").glob("*.json"))
     assert names == sorted([cls["cache_key"], emb["cache_key"]])
-    # the pre-006 .hunches/cost.json is not read; the ledger now lives in the cache directory
+    # the pre-006 .goldlabel/cost.json is not read; the ledger now lives in the cache directory
     assert breakdown(None) == {}
     emb_entry, cls_entry = (
         cache_get(None, emb["cache_key"]),
@@ -104,7 +104,7 @@ def test_cache_and_cost_are_well_formed(project, expected):
 
 def test_expected_matches_current_code(project, expected):
     cls = expected["classification"]
-    taxonomy = Taxonomy.read(project / ".hunches" / "taxonomy.yaml")
+    taxonomy = Taxonomy.read(project / ".goldlabel" / "taxonomy.yaml")
     system = classifier.system_prompt(cls["prompt"], taxonomy)
     assert system == cls["system_prompt"]
     assert cache_key(cls["model"], system, cls["text"]) == cls["cache_key"]

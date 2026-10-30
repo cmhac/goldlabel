@@ -3,9 +3,11 @@ import threading
 
 import pytest
 
-from hunches.search import PgCorpus
+from goldlabel.search import PgCorpus
 
-search = importlib.import_module("hunches.search")  # `hunches.search` is the function
+search = importlib.import_module(
+    "goldlabel.search"
+)  # `goldlabel.search` is the function
 
 EXT_VERSION = ("0.8.1", "extensions")
 MB = 1024 * 1024
@@ -76,7 +78,7 @@ def setup(monkeypatch, conn, limit_mb=None):
 @pytest.fixture(autouse=True)
 def project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("HUNCHES_PG_URL", raising=False)
+    monkeypatch.delenv("GOLDLABEL_PG_URL", raising=False)
 
 
 def scans(conn):

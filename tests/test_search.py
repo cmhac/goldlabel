@@ -3,10 +3,12 @@ import importlib
 import numpy as np
 import pytest
 
-from hunches.candidates import get_candidates
-from hunches.search import S3Corpus, Table
+from goldlabel.candidates import get_candidates
+from goldlabel.search import S3Corpus, Table
 
-search = importlib.import_module("hunches.search")  # `hunches.search` is the function
+search = importlib.import_module(
+    "goldlabel.search"
+)  # `goldlabel.search` is the function
 
 
 @pytest.fixture(autouse=True)

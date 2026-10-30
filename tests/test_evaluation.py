@@ -8,9 +8,9 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.usage import RequestUsage
 from pytest import approx
 
-from hunches import classifier
-from hunches.candidates import Candidates
-from hunches.evaluation import (
+from goldlabel import classifier
+from goldlabel.candidates import Candidates
+from goldlabel.evaluation import (
     BandReport,
     EvalLog,
     Evaluation,
@@ -19,9 +19,9 @@ from hunches.evaluation import (
     eval_log,
     evaluate,
 )
-from hunches.gold import Gold
-from hunches.settings import settings
-from hunches.taxonomy import Label, Taxonomy
+from goldlabel.gold import Gold
+from goldlabel.settings import settings
+from goldlabel.taxonomy import Label, Taxonomy
 
 
 @pytest.fixture(autouse=True)
@@ -193,14 +193,14 @@ def test_rows_without_a_stamp_and_imported_rows_are_accepted_and_counted():
         [
             g("1", ["a"]),
             g("2", ["a"], labelled_by="imported"),
-            g("3", ["b"], labelled_by="hunches-ui"),
+            g("3", ["b"], labelled_by="goldlabel-ui"),
             g("4", ["b"], labelled_by="hand", extra="kept"),
         ]
     )
     ev = evaluate(clf(model), gold.dev)
     assert ev.n == 4 and ev.score("accuracy") == 1
-    assert ev.sources == {"hunches-ui": 1, "imported": 1, "unstamped": 2}
-    assert "hunches-ui 1, imported 1, unstamped 2" in repr(ev)
+    assert ev.sources == {"goldlabel-ui": 1, "imported": 1, "unstamped": 2}
+    assert "goldlabel-ui 1, imported 1, unstamped 2" in repr(ev)
 
 
 def test_repr_shows_the_per_label_table():
@@ -245,7 +245,7 @@ def test_each_call_appends_one_line_with_every_field():
     [row] = log_rows()
     assert set(row) == {
         "time", "split", "n", "gold", "model", "digest", "prompt", "taxonomy", "metric",
-        "target", "score", "metrics", "dollars", "live_calls", "cached_calls", "hunches",
+        "target", "score", "metrics", "dollars", "live_calls", "cached_calls", "goldlabel",
     }  # fmt: skip
     assert before <= datetime.fromisoformat(row["time"])
     assert (row["split"], row["n"], row["model"]) == ("dev", 5, "m")
@@ -264,7 +264,7 @@ def test_each_call_appends_one_line_with_every_field():
     assert row["metrics"]["per_label"]["a"]["recall"] == approx(0.5)
     assert row["dollars"] is None or row["dollars"] == 0  # unpriced FunctionModel
     assert (row["live_calls"], row["cached_calls"]) == (5, 0)
-    assert row["hunches"] == "0.1.0"
+    assert row["goldlabel"] == "0.1.0"
 
 
 def test_log_is_append_only_and_records_cached_calls():

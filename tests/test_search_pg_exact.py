@@ -4,9 +4,11 @@ from typing import Any
 
 import pytest
 
-from hunches.search import PgCorpus
+from goldlabel.search import PgCorpus
 
-search = importlib.import_module("hunches.search")  # `hunches.search` is the function
+search = importlib.import_module(
+    "goldlabel.search"
+)  # `goldlabel.search` is the function
 
 EXT_VERSION = ("0.8.1", "extensions")
 
@@ -52,7 +54,7 @@ class Conn:
 @pytest.fixture(autouse=True)
 def project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("HUNCHES_PG_URL", raising=False)
+    monkeypatch.delenv("GOLDLABEL_PG_URL", raising=False)
 
 
 def setup(monkeypatch, conn, **fields: Any):
@@ -215,7 +217,7 @@ def test_connection_closed_on_success_and_never_written(monkeypatch):
 
 
 def test_error_closes_the_connection_and_is_scrubbed(monkeypatch):
-    monkeypatch.setenv("HUNCHES_PG_URL", "postgresql://u:hunter2@h/db")
+    monkeypatch.setenv("GOLDLABEL_PG_URL", "postgresql://u:hunter2@h/db")
     conn = Conn(
         [EXT_VERSION],
         [("vector", "extensions", 3)],

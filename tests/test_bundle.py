@@ -7,10 +7,10 @@ import pytest
 from pydantic_ai.messages import ModelResponse, ToolCallPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from hunches.classifier import Classifier
-from hunches.evaluation import evaluate
-from hunches.gold import Gold
-from hunches.taxonomy import Label, Taxonomy
+from goldlabel.classifier import Classifier
+from goldlabel.evaluation import evaluate
+from goldlabel.gold import Gold
+from goldlabel.taxonomy import Label, Taxonomy
 
 
 @pytest.fixture(autouse=True)
@@ -98,7 +98,7 @@ def test_evaluation_is_written_and_read_back(tmp_path):
     assert data["score"] == pytest.approx(2 / 3)
     assert data["metrics"]["exact_match"] == pytest.approx(2 / 3)
     assert data["digest"] == c.digest
-    assert data["sources"] == {"hunches-ui": 0, "imported": 0, "unstamped": 3}
+    assert data["sources"] == {"goldlabel-ui": 0, "imported": 0, "unstamped": 3}
     assert data["date"].startswith("20")
     with warnings.catch_warnings():
         warnings.simplefilter("error")

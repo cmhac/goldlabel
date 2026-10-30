@@ -4,7 +4,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from hunches import _html
+from goldlabel import _html
 
 OFF_TOPIC = "off_topic"
 

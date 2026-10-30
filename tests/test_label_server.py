@@ -9,8 +9,8 @@ from urllib.parse import urlparse
 
 import pytest
 
-from hunches import _label
-from hunches.taxonomy import Label, Taxonomy
+from goldlabel import _label
+from goldlabel.taxonomy import Label, Taxonomy
 
 
 def rows(*specs):
@@ -124,7 +124,7 @@ def test_token_in_header_is_accepted(start):
     h = start()
     c = Client(h)
     conn = http.client.HTTPConnection(c.host, c.port, timeout=5)
-    conn.request("GET", "/api/state", headers={"X-Hunches-Token": c.token})
+    conn.request("GET", "/api/state", headers={"X-Goldlabel-Token": c.token})
     assert conn.getresponse().status == 200
 
 
@@ -258,7 +258,7 @@ def test_label_writes_and_stamps_and_leaves_other_rows_identical(start, gold_pat
     assert new[0] == lines[0] and new[2:] == lines[2:]  # other rows byte-identical
     row = json.loads(new[1])
     assert row["labels"] == ["b"]
-    assert row["labelled_by"] == "hunches-ui"
+    assert row["labelled_by"] == "goldlabel-ui"
     datetime.fromisoformat(row["labelled_at"])
     assert (row["id"], row["text"], row["split"]) == ("2", "text 2", "dev")
     assert s["counts"]["b"] == 1
@@ -439,6 +439,7 @@ def test_nothing_public_beyond_serve():
     public = {
         n
         for n, v in vars(_label).items()
-        if not n.startswith("_") and getattr(v, "__module__", None) == "hunches._label"
+        if not n.startswith("_")
+        and getattr(v, "__module__", None) == "goldlabel._label"
     }
     assert public == {"serve", "label", "Handle"}

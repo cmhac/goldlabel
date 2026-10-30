@@ -9,10 +9,10 @@ from urllib.parse import urlparse
 
 import pytest
 
-import hunches
-from hunches import _label
-from hunches.gold import Gold
-from hunches.taxonomy import Label, Taxonomy
+import goldlabel
+from goldlabel import _label
+from goldlabel.gold import Gold
+from goldlabel.taxonomy import Label, Taxonomy
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ("index.html", "app.js", "app.css")
@@ -52,7 +52,7 @@ def post(url, path, body=None):
         "POST",
         path,
         json.dumps(body or {}),
-        {"X-Hunches-Token": u.query.removeprefix("token=")},
+        {"X-Goldlabel-Token": u.query.removeprefix("token=")},
     )
     r = conn.getresponse()
     return r.status, json.loads(r.read())
@@ -66,7 +66,9 @@ def handle(gold_path):
 
 
 def packaged(name):
-    return resources.files("hunches").joinpath("web", name).read_text(encoding="utf-8")
+    return (
+        resources.files("goldlabel").joinpath("web", name).read_text(encoding="utf-8")
+    )
 
 
 # --- the page -------------------------------------------------------------------------------
@@ -125,7 +127,7 @@ def test_js_posts_only_to_the_existing_routes_and_shows_no_prediction():
     posted = set(re.findall(r"/api/[a-z]+", js))
     assert posted == {"/api/state", "/api/label", "/api/back", "/api/skip", "/api/done"}
     assert "predict" not in (js + packaged("index.html")).lower()
-    assert "X-Hunches-Token" in js
+    assert "X-Goldlabel-Token" in js
 
 
 def test_page_is_mobile_first_and_has_the_controls():
@@ -152,15 +154,15 @@ def test_web_files_are_in_the_wheel(tmp_path):
     wheel = next(tmp_path.glob("*.whl"))
     names = set(zipfile.ZipFile(wheel).namelist())
     for name in WEB:
-        assert f"hunches/web/{name}" in names
+        assert f"goldlabel/web/{name}" in names
 
 
-# --- hn.label -------------------------------------------------------------------------------
+# --- gl.label -------------------------------------------------------------------------------
 
 
 def test_label_is_exported():
-    assert hunches.label is _label.label
-    assert "label" in hunches.__all__
+    assert goldlabel.label is _label.label
+    assert "label" in goldlabel.__all__
 
 
 def test_label_without_blocking_returns_a_working_handle(
@@ -168,7 +170,7 @@ def test_label_without_blocking_returns_a_working_handle(
 ):
     opened = []
     monkeypatch.setattr("webbrowser.open", opened.append)
-    h = hunches.label(Gold(gold_path), taxonomy(), open_browser=False, block=False)
+    h = goldlabel.label(Gold(gold_path), taxonomy(), open_browser=False, block=False)
     try:
         assert isinstance(h, _label.Handle)
         assert get(h.url, "/api/state")[0] == 200
@@ -186,7 +188,7 @@ def test_label_blocks_until_done_and_returns_the_labelled_rows(
     monkeypatch.setattr("webbrowser.open", urls.append)
     result = []
     t = threading.Thread(
-        target=lambda: result.append(hunches.label(Gold(gold_path), taxonomy())),
+        target=lambda: result.append(goldlabel.label(Gold(gold_path), taxonomy())),
         daemon=True,
     )
     t.start()
@@ -219,7 +221,7 @@ def test_label_reports_orphans_and_continues(tmp_path, monkeypatch, capsys):
         + "\n"
     )
     monkeypatch.setattr("webbrowser.open", lambda url: True)
-    h = hunches.label(Gold(p), taxonomy(), open_browser=False, block=False)
+    h = goldlabel.label(Gold(p), taxonomy(), open_browser=False, block=False)
     try:
         assert "1 labelled row" in capsys.readouterr().out
         assert get(h.url, "/api/state")[0] == 200
@@ -232,5 +234,5 @@ def test_label_stops_the_server_if_interrupted(gold_path, monkeypatch):
         _label.Handle, "wait", lambda self: (_ for _ in ()).throw(KeyboardInterrupt)
     )
     with pytest.raises(KeyboardInterrupt):
-        hunches.label(Gold(gold_path), taxonomy(), open_browser=False)
+        goldlabel.label(Gold(gold_path), taxonomy(), open_browser=False)
     assert not gold_path.with_name("gold.jsonl.lock").exists()

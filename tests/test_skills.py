@@ -1,5 +1,5 @@
 """006 task 16: the skill, its references, the instruction block, the Kiro steering file and the
-plugin manifests. The gold rule copies must equal `src/hunches/gold_rule.md` (FR-24); a mismatch
+plugin manifests. The gold rule copies must equal `src/goldlabel/gold_rule.md` (FR-24); a mismatch
 prints the text to paste."""
 
 import ast
@@ -13,15 +13,15 @@ from pathlib import Path
 import pytest
 import yaml
 
-import hunches
-from hunches import GOLD_RULE_FULL, GOLD_RULE_SHORT
+import goldlabel
+from goldlabel import GOLD_RULE_FULL, GOLD_RULE_SHORT
 
 ROOT = Path(__file__).resolve().parent.parent
-SKILL_DIR = ROOT / "skills" / "hunches"
+SKILL_DIR = ROOT / "skills" / "goldlabel"
 SKILL = SKILL_DIR / "SKILL.md"
 REFS = ["workflow.md", "tuning.md", "running.md", "reuse.md"]
 INSTRUCTIONS = ROOT / "docs" / "agent-instructions.md"
-STEERING = ROOT / ".kiro" / "steering" / "hunches.md"
+STEERING = ROOT / ".kiro" / "steering" / "goldlabel.md"
 CLAUDE_PLUGIN = ROOT / ".claude-plugin" / "plugin.json"
 MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
 ROOT_PLUGIN = ROOT / "plugin.json"
@@ -59,7 +59,7 @@ def python_blocks(path):
 
 def test_skill_frontmatter():
     meta, body = split_frontmatter(SKILL.read_text())
-    assert meta["name"] == "hunches" == SKILL_DIR.name
+    assert meta["name"] == "goldlabel" == SKILL_DIR.name
     assert (
         re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", meta["name"])
         and len(meta["name"]) <= 64
@@ -74,7 +74,7 @@ def test_skill_frontmatter():
 def test_description_ends_with_the_short_rule():
     meta, _ = split_frontmatter(SKILL.read_text())
     assert meta["description"].endswith(GOLD_RULE_SHORT), paste_help(
-        "the `description` in skills/hunches/SKILL.md (as its last sentence)",
+        "the `description` in skills/goldlabel/SKILL.md (as its last sentence)",
         "Short",
         GOLD_RULE_SHORT,
     )
@@ -83,7 +83,7 @@ def test_description_ends_with_the_short_rule():
 def test_body_opens_with_the_full_rule():
     _, body = split_frontmatter(SKILL.read_text())
     assert body.lstrip().startswith(GOLD_RULE_FULL), paste_help(
-        "the body of skills/hunches/SKILL.md (as its first lines)",
+        "the body of skills/goldlabel/SKILL.md (as its first lines)",
         "Full",
         GOLD_RULE_FULL,
     )
@@ -94,7 +94,7 @@ def test_instruction_block_and_steering_hold_the_full_rule():
         "docs/agent-instructions.md", "Full", GOLD_RULE_FULL
     )
     assert GOLD_RULE_FULL in STEERING.read_text(), paste_help(
-        ".kiro/steering/hunches.md", "Full", GOLD_RULE_FULL
+        ".kiro/steering/goldlabel.md", "Full", GOLD_RULE_FULL
     )
 
 
@@ -115,7 +115,7 @@ def test_instruction_block_names_every_harness_file():
     ):
         assert name in text
     for ref in REFS:
-        assert f"skills/hunches/references/{ref}" in text
+        assert f"skills/goldlabel/references/{ref}" in text
 
 
 def test_skill_lists_every_reference_and_they_exist():
@@ -145,13 +145,13 @@ DOCS = [SKILL, *(SKILL_DIR / "references" / n for n in REFS)]
 
 # variable name used in the samples -> the class it holds
 VARS = {
-    "clf": hunches.Classifier,
-    "gold": hunches.Gold,
-    "ev": hunches.Evaluation,
-    "final": hunches.Evaluation,
-    "candidates": hunches.Candidates,
-    "est": hunches.Estimate,
-    "taxonomy": hunches.Taxonomy,
+    "clf": goldlabel.Classifier,
+    "gold": goldlabel.Gold,
+    "ev": goldlabel.Evaluation,
+    "final": goldlabel.Evaluation,
+    "candidates": goldlabel.Candidates,
+    "est": goldlabel.Estimate,
+    "taxonomy": goldlabel.Taxonomy,
 }
 
 
@@ -170,14 +170,18 @@ def test_code_blocks_parse_and_use_real_names(path):
         assert blocks, f"{path.name} needs concrete code"
     for code in blocks:
         tree = ast.parse(code)
-        for chain in re.findall(r"\b(?:hn|hunches)((?:\.\w+)+)", code):
-            obj = hunches
+        for chain in re.findall(r"\b(?:gl|goldlabel)((?:\.\w+)+)", code):
+            obj = goldlabel
             for part in chain.lstrip(".").split("."):
-                assert hasattr(obj, part), f"{path.name}: hunches{chain} does not exist"
+                assert hasattr(obj, part), (
+                    f"{path.name}: goldlabel{chain} does not exist"
+                )
                 obj = getattr(obj, part)
-        for name in re.findall(r"from hunches import ([\w, ]+)", code):
+        for name in re.findall(r"from goldlabel import ([\w, ]+)", code):
             for n in name.split(","):
-                assert hasattr(hunches, n.strip()), f"{path.name}: hunches.{n.strip()}"
+                assert hasattr(goldlabel, n.strip()), (
+                    f"{path.name}: goldlabel.{n.strip()}"
+                )
         for node in ast.walk(tree):
             if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
                 var, attr = node.value.id, node.attr
@@ -202,20 +206,20 @@ def test_samples_keep_secrets_and_gold_edits_out():
 def test_the_samples_cover_the_main_calls():
     all_code = "\n".join(c for p in DOCS for c in python_blocks(p))
     for needle in (
-        "hn.get_candidates(",
-        "hn.Taxonomy(",
-        "hn.Classifier(",
-        "hn.Gold(",
+        "gl.get_candidates(",
+        "gl.Taxonomy(",
+        "gl.Classifier(",
+        "gl.Gold(",
         "gold.draw(",
-        "hn.label(",
-        "hn.evaluate(",
+        "gl.label(",
+        "gl.evaluate(",
         "clf.estimate(",
         "clf.classify(",
         "max_cost=",
         "clf.save(",
-        "hn.Classifier.load(",
-        "hn.band_sample(",
-        "hn.eval_log(",
+        "gl.Classifier.load(",
+        "gl.band_sample(",
+        "gl.eval_log(",
         "gold.import_rows(",
         "clf.with_prompt(",
         ".to_polars()",
@@ -233,7 +237,7 @@ def load(path):
 
 def test_claude_plugin_manifest():
     m = load(CLAUDE_PLUGIN)
-    assert m["name"] == "hunches"
+    assert m["name"] == "goldlabel"
     assert not m["name"].startswith(("claude-", "anthropic-"))
     assert m["description"] and m["version"]
     assert "hooks" not in m
@@ -241,11 +245,11 @@ def test_claude_plugin_manifest():
 
 def test_marketplace_manifest():
     m = load(MARKETPLACE)
-    assert m["name"] == "hunches"
+    assert m["name"] == "goldlabel"
     assert not m["name"].startswith(("claude-", "anthropic-"))
     assert m["owner"]["name"]
     (plugin,) = m["plugins"]
-    assert plugin["name"] == "hunches"
+    assert plugin["name"] == "goldlabel"
     assert plugin["source"] == "./"
     assert "hooks" not in plugin
 
@@ -256,12 +260,12 @@ def test_root_plugin_json_is_agent_plugins_1_0():
     assert (
         re.fullmatch(r"[a-z0-9]+([.-][a-z0-9]+)*", m["name"]) and len(m["name"]) <= 64
     )
-    assert m["name"] == "hunches"
+    assert m["name"] == "goldlabel"
     assert set(m) <= AGENT_PLUGINS_FIELDS, (
         "the 1.0 manifest is closed; no component paths"
     )
     assert (
-        ROOT / "skills" / "hunches" / "SKILL.md"
+        ROOT / "skills" / "goldlabel" / "SKILL.md"
     ).is_file()  # fixed location `skills/`
     assert not (ROOT / "hooks").exists()
 

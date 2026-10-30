@@ -2,7 +2,9 @@ import importlib
 
 import pytest
 
-search = importlib.import_module("hunches.search")  # `hunches.search` is the function
+search = importlib.import_module(
+    "goldlabel.search"
+)  # `goldlabel.search` is the function
 
 
 class Cur:
@@ -92,7 +94,7 @@ def test_column_type_sparsevec_refused():
     with pytest.raises(RuntimeError) as e:
         search.column_type(Conn([("sparsevec", "extensions", 3)]), "t", "embedding")
     assert str(e.value) == (
-        'Column "embedding" has type sparsevec; hunches supports vector and halfvec.'
+        'Column "embedding" has type sparsevec; goldlabel supports vector and halfvec.'
     )
 
 

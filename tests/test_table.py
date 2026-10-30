@@ -8,9 +8,9 @@ from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
 from pydantic_ai.usage import RequestUsage
 
-from hunches.candidates import aget_candidates, get_candidates
-from hunches.search import Table, search_table, table_rows
-from hunches.settings import settings
+from goldlabel.candidates import aget_candidates, get_candidates
+from goldlabel.search import Table, search_table, table_rows
+from goldlabel.settings import settings
 
 FIVE = [
     {"post_id": "a", "body": "the ballot", "note": 1},
@@ -197,8 +197,8 @@ def test_the_floor_is_inclusive():
 
 def test_the_table_is_read_once_for_all_seeds(monkeypatch):
     module = importlib.import_module(
-        "hunches.search"
-    )  # `hunches.search` is the function
+        "goldlabel.search"
+    )  # `goldlabel.search` is the function
 
     calls = []
     real = module.table_rows

@@ -1,6 +1,6 @@
 # pre006 fixtures
 
-A tiny project written by the pre-006 code (TUI-era `hunches`), using stubbed models only
+A tiny project written by the pre-006 code (TUI-era `goldlabel`), using stubbed models only
 (a `FunctionModel` classifier, a fake embedder returning `[1, 0, 0]`). 006 tasks assert the new
 code reproduces `expected.json` and reads these files (spec FR-4, SC-4). The values here were
 recorded from the old code on purpose; do not regenerate them from new code.
@@ -20,7 +20,7 @@ Generated at commit `345c4ff63d7e23bc56e690dc8c21b0bd2878fd3a`.
 
 ## Baseline (before task 02)
 
-- `find src/hunches -name '*.py' | xargs wc -l | tail -1`: **11588 total**
+- `find src/goldlabel -name '*.py' | xargs wc -l | tail -1`: **11588 total**
 - Test files at this point (tests/): test_app.py test_assistant_context.py test_assistant_thinking.py test_brief.py test_browse_screen.py test_candidates.py test_chat.py test_classifier.py test_cost.py test_e2e.py test_files.py test_final_screen.py test_gold_orphan_screen.py test_gold_orphans.py test_gold_screen.py test_history.py test_history_screens.py test_isolation.py test_keys.py test_metrics.py test_model_picker.py test_models.py test_new_project.py test_paths.py test_pg_integration.py test_pre006_fixtures.py test_progress.py test_project_settings.py test_projects.py test_rail.py test_redo_plan.py test_run_screen.py test_search.py test_search_pg_check.py test_search_pg_connect.py test_search_pg_exact.py test_search_pg_guards.py test_search_pg_index.py test_search_pg_probes.py test_search_screen.py test_sizes.py test_stale_ui.py test_status.py test_system.py test_system_screen.py test_taxonomy_screen.py test_theme.py test_threshold_screen.py test_tune_screen.py test_versions.py 
 
 ## Generator (one-off, not committed as code; only works on the pre-006 code)
@@ -47,8 +47,8 @@ out = Path(sys.argv[1]).resolve()
 work = Path(tempfile.mkdtemp())
 os.chdir(work)
 
-from hunches import candidates, classifier, cost, files
-from hunches.search import search
+from goldlabel import candidates, classifier, cost, files
+from goldlabel.search import search
 
 files.ensure_root()
 files.write_config(
@@ -173,7 +173,7 @@ expected = {
 }
 if out.exists():
     shutil.rmtree(out)
-shutil.copytree(work / ".hunches", out)
+shutil.copytree(work / ".goldlabel", out)
 shutil.copytree(corpus, out / "corpus")
 (out / "config.toml").unlink()  # holds a temp path; tests write their own
 (out / "expected.json").write_text(json.dumps(expected, indent=2) + "\n")

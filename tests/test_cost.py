@@ -9,9 +9,9 @@ from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RequestUsage
 
-from hunches.settings import settings
+from goldlabel.settings import settings
 
-cost = importlib.import_module("hunches.cost")  # `hunches.cost` is the function
+cost = importlib.import_module("goldlabel.cost")  # `goldlabel.cost` is the function
 
 FIXTURES = Path(__file__).parent / "fixtures" / "pre006"
 
@@ -165,7 +165,7 @@ def test_cache_false_writes_nothing_and_reads_nothing(tmp_path, monkeypatch):
 def test_cache_dir_resolves_none_to_settings_root_and_keeps_false(
     tmp_path, monkeypatch
 ):
-    assert cost.cache_dir(None) == Path(".hunches") / "cache"
+    assert cost.cache_dir(None) == Path(".goldlabel") / "cache"
     monkeypatch.setattr(settings, "root", tmp_path / "r")
     assert cost.cache_dir(None) == tmp_path / "r" / "cache"
     assert cost.cache_dir(tmp_path / "x") == tmp_path / "x"

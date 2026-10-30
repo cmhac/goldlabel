@@ -5,7 +5,7 @@ Do this when the user says the classifier is final. It is for notebooks and auto
 ## Save a bundle
 
 ```python
-final = hn.evaluate(clf, gold.test)  # the one reported number; see tuning.md
+final = gl.evaluate(clf, gold.test)  # the one reported number; see tuning.md
 clf.save("classifiers/scams/", evaluation=final)
 ```
 
@@ -14,9 +14,9 @@ The folder holds `classifier.yaml` (the model), `taxonomy.yaml`, `prompt.md` and
 ## Use it in a pipeline
 
 ```python
-import hunches as hn
+import goldlabel as gl
 
-clf = hn.Classifier.load(
+clf = gl.Classifier.load(
     "classifiers/scams/"
 )  # warns if prompt/model no longer match the recorded evaluation
 results = clf.classify(new_items, out="out/results.jsonl", max_cost=2.00)
@@ -34,12 +34,12 @@ A shared module works as well as a bundle:
 
 ```python
 # classifiers/scams.py
-import hunches as hn
+import goldlabel as gl
 
-taxonomy = hn.Taxonomy(
+taxonomy = gl.Taxonomy(
     mode="multi", labels={"scam": "Offers a fake prize ...", "satire": "Parody ..."}
 )
-classifier = hn.Classifier(
+classifier = gl.Classifier(
     "anthropic:claude-haiku-5-5", taxonomy, prompt=open("classifiers/scams.md").read()
 )
 ```
@@ -48,10 +48,10 @@ Other notebooks then `from classifiers.scams import classifier`. Use a bundle wh
 
 ## Recording the evaluation
 
-`hn.evaluate` appends every run to `.hunches/evals.jsonl` with the full prompt, so the history of what was tried is in the file. `hn.eval_log()` reads it back. If a report is written for others, state the evaluation honestly: the split, `n`, who labelled the gold rows (`final.sources` counts rows by `hunches-ui`, `imported` and unstamped), and how many times the test split was evaluated.
+`gl.evaluate` appends every run to `.goldlabel/evals.jsonl` with the full prompt, so the history of what was tried is in the file. `gl.eval_log()` reads it back. If a report is written for others, state the evaluation honestly: the split, `n`, who labelled the gold rows (`final.sources` counts rows by `goldlabel-ui`, `imported` and unstamped), and how many times the test split was evaluated.
 
 ```python
 final.sources
-hn.eval_log()
+gl.eval_log()
 final.write("reports/scams-evaluation.json")
 ```

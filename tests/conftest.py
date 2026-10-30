@@ -7,12 +7,12 @@ def reset_settings(monkeypatch):
     """`settings.root` is process-wide state: every test starts from the default."""
     from pathlib import Path
 
-    from hunches.settings import settings
+    from goldlabel.settings import settings
 
-    monkeypatch.delenv("HUNCHES_DIR", raising=False)
-    settings.root = Path(".hunches")
+    monkeypatch.delenv("GOLDLABEL_DIR", raising=False)
+    settings.root = Path(".goldlabel")
     yield
-    settings.root = Path(".hunches")
+    settings.root = Path(".goldlabel")
 
 
 class _ModelRequestsBlocked:

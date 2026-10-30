@@ -1,12 +1,12 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "hunches",
+  "name": "goldlabel",
   "version": "0.1.0",
   "description": "Content analysis over a corpus: candidates from seed-phrase semantic search, keywords or the whole corpus, and an LLM classifier checked against human-labelled gold data, in a notebook or script.",
   "author": {
     "name": "Chris Hacker"
   },
-  "repository": "https://github.com/cmhac/hunches",
+  "repository": "https://github.com/cmhac/goldlabel",
   "keywords": [
     "content-analysis",
     "classification",

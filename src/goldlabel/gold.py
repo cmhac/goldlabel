@@ -7,10 +7,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from hunches import _frame, _html
-from hunches._gold_rule import GOLD_RULE_SHORT, GoldError, GoldTypeError
-from hunches.settings import resolve
-from hunches.taxonomy import Taxonomy
+from goldlabel import _frame, _html
+from goldlabel._gold_rule import GOLD_RULE_SHORT, GoldError, GoldTypeError
+from goldlabel.settings import resolve
+from goldlabel.taxonomy import Taxonomy
 
 SPLITS = ("dev", "test")
 
@@ -24,7 +24,7 @@ class GoldRow(BaseModel):
     text: str
     labels: list[str] | None
     split: Literal["dev", "test"]
-    labelled_by: str | None = None  # "hunches-ui", "imported" or absent
+    labelled_by: str | None = None  # "goldlabel-ui", "imported" or absent
     labelled_at: str | None = None
 
     def dump(self) -> dict:
@@ -65,7 +65,7 @@ class GoldSet:
 
     def _summary(self) -> str:
         labelled = [r for r in self.rows if r.labels]
-        sources = {"hunches-ui": 0, "imported": 0, "unstamped": 0}
+        sources = {"goldlabel-ui": 0, "imported": 0, "unstamped": 0}
         for r in labelled:
             key = r.labelled_by if r.labelled_by in sources else "unstamped"
             sources[key] += 1

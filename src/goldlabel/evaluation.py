@@ -5,22 +5,22 @@ from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from hunches import _frame, _html, _sync
-from hunches.candidates import BANDS, band_of
-from hunches.classifier import UNKNOWN_COST, Classifier, _dollars, _model_name
-from hunches.metrics import (
+from goldlabel import _frame, _html, _sync
+from goldlabel.candidates import BANDS, band_of
+from goldlabel.classifier import UNKNOWN_COST, Classifier, _dollars, _model_name
+from goldlabel.metrics import (
     Metrics,
     compute_metrics,
     default_target_metric,
     target_value,
 )
-from hunches.settings import resolve
-from hunches.taxonomy import OFF_TOPIC, validate_labels
+from goldlabel.settings import resolve
+from goldlabel.taxonomy import OFF_TOPIC, validate_labels
 
 
-def _hunches_version() -> str | None:
+def _goldlabel_version() -> str | None:
     try:
-        return version("hunches")
+        return version("goldlabel")
     except PackageNotFoundError:
         return None
 
@@ -36,7 +36,7 @@ class Evaluation:
     skipped_pending: int
     sources: dict[
         str, int
-    ]  # labelled rows by `labelled_by`: hunches-ui, imported, unstamped
+    ]  # labelled rows by `labelled_by`: goldlabel-ui, imported, unstamped
     digest: str
     disagreements: list[dict]
     labels: list[str] = field(
@@ -175,7 +175,7 @@ async def aevaluate(
     gold = [set(r.labels or []) for r in rows]
     predicted = [set(p["labels"] or []) for p in preds.rows]
     metrics = compute_metrics(gold, predicted, taxonomy.names)
-    sources = {"hunches-ui": 0, "imported": 0, "unstamped": 0}
+    sources = {"goldlabel-ui": 0, "imported": 0, "unstamped": 0}
     for r in rows:
         sources[r.labelled_by if r.labelled_by in sources else "unstamped"] += 1
     splits = {r.split for r in rows}
@@ -218,7 +218,7 @@ async def aevaluate(
             "dollars": preds.cost,
             "live_calls": preds.live,
             "cached_calls": preds.cached,
-            "hunches": _hunches_version(),
+            "goldlabel": _goldlabel_version(),
         }
         path = resolve(log, "evals.jsonl")
         path.parent.mkdir(parents=True, exist_ok=True)

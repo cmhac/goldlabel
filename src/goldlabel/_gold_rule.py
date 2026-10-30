@@ -2,7 +2,9 @@
 
 from importlib import resources
 
-_text = resources.files("hunches").joinpath("gold_rule.md").read_text(encoding="utf-8")
+_text = (
+    resources.files("goldlabel").joinpath("gold_rule.md").read_text(encoding="utf-8")
+)
 _short, _, _full = _text.partition("## Full")
 GOLD_RULE_SHORT = _short.removeprefix("## Short").strip()
 GOLD_RULE_FULL = _full.strip()

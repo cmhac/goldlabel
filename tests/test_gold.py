@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from hunches import gold as gold_module
-from hunches.candidates import Candidates
-from hunches.gold import Gold, GoldSet
-from hunches.settings import settings
-from hunches.taxonomy import Label, Taxonomy
+from goldlabel import gold as gold_module
+from goldlabel.candidates import Candidates
+from goldlabel.gold import Gold, GoldSet
+from goldlabel.settings import settings
+from goldlabel.taxonomy import Label, Taxonomy
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pre006" / "gold.jsonl"
 
@@ -263,7 +263,7 @@ def test_views_and_counts_single_and_multi(tmp_path):
 def test_goldset_repr_is_plain_text_with_sources(tmp_path):
     path = write(
         tmp_path / "g.jsonl",
-        row("1", ["a"], labelled_by="hunches-ui"),
+        row("1", ["a"], labelled_by="goldlabel-ui"),
         row("2", ["a"], labelled_by="imported"),
         row("3", ["b"], labelled_by="imported"),
         row("4", ["b"]),
@@ -271,10 +271,10 @@ def test_goldset_repr_is_plain_text_with_sources(tmp_path):
     )
     # the last line is the Short gold rule (006/15), tested in test_gold_rule.py
     assert repr(Gold(path).dev).splitlines()[0] == (
-        "GoldSet dev: 4 rows (4 labelled, 0 pending); hunches-ui 1, imported 2, unstamped 1"
+        "GoldSet dev: 4 rows (4 labelled, 0 pending); goldlabel-ui 1, imported 2, unstamped 1"
     )
     assert repr(Gold(path).all).splitlines()[0] == (
-        "GoldSet all: 5 rows (4 labelled, 1 pending); hunches-ui 1, imported 2, unstamped 1"
+        "GoldSet all: 5 rows (4 labelled, 1 pending); goldlabel-ui 1, imported 2, unstamped 1"
     )
 
 
@@ -307,7 +307,7 @@ def test_remove_moves_rows_to_removed_file_and_keeps_all_fields(tmp_path):
         row(
             "1",
             ["a"],
-            labelled_by="hunches-ui",
+            labelled_by="goldlabel-ui",
             labelled_at="2026-01-01T00:00:00+00:00",
             note="n",
         ),
@@ -323,7 +323,7 @@ def test_remove_moves_rows_to_removed_file_and_keeps_all_fields(tmp_path):
         row(
             "1",
             ["a"],
-            labelled_by="hunches-ui",
+            labelled_by="goldlabel-ui",
             labelled_at="2026-01-01T00:00:00+00:00",
             note="n",
         ),
@@ -386,7 +386,7 @@ def test_only_import_rows_can_set_a_label():
         for n in vars(gold_module)
         if not n.startswith("_")
         and callable(getattr(gold_module, n))
-        and getattr(getattr(gold_module, n), "__module__", None) == "hunches.gold"
+        and getattr(getattr(gold_module, n), "__module__", None) == "goldlabel.gold"
     }
     assert module_public == {"Gold", "GoldRow", "GoldSet"}
     assert not {n for n in dir(GoldSet) if not n.startswith("_")} - {
