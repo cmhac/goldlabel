@@ -22,9 +22,11 @@ Two sources: the skills in this repository, and three notebooks the user supplie
 - *A cache of the input data* (all three): fetch the data, `if not RAW.exists(): ... write_parquet(RAW)`, then read it back (`36198549`, `66e7afaa`, `6d8fee58`), with a comment "Snapshot, so every rerun reads the same segments". `gl.Table` already takes a DataFrame, so the parquet round trip and the exists-check are not needed to use the library.
 - *Guards that stand in for a cache of gold and evaluation results*: `if not gold.all.rows: gold.draw(...)` (`4ba5c4fb`, `df889478`, `d093f22d`), a second draw guard that reloads `gl.Gold()` (`aee728ab`), and "evaluate the test split at most once" built from `gl.eval_log()` (`3307d71c`) that prints the recorded row instead of calling `evaluate`.
 - *Hand-written helpers and long constants*: a fetch function with SSM and psycopg (`36198549`); about 60 lines of regex constants plus `near()` and `after()` helpers (`d41bea31`); about 100 lines of shingle/Jaccard deduplication written twice, once more for the three-month run (`297a582b`, `76e7fe02`, `4605d4b0`, `c4cac451`).
-- *Prompt edited in the notebook by string replacement* (`e8e475d0`), although the skills say to keep the prompt in `prompt.md`.
+- *A prompt edited by a chain of `.replace` calls* on the original string (`e8e475d0`) rather than by editing the string in its cell.
 - *Housekeeping and decoration*: `os.chdir` to find `pyproject.toml`, `load_dotenv` from another repository's `.env` (the library itself never loads a `.env`), repeated imports, `assert MAX_COST is not None`, a chart cell pasted twice.
 - *Analysis after the classifier*: weekly aggregates, Altair charts, an f-string "fact-check" section with asserts, CSV export (Somali notebook, `acec2f33` onward). Whether the user asked for these is not visible in the notebook; they are outside what goldlabel does.
+
+**The skills send agents to side files.** 27 lines in 9 files (eight skill files and the README, counted by search; some describe the bundle `clf.save` writes, which stays) tell the agent to create or read `taxonomy.yaml`, `prompt.md`, `seeds.csv` or a `taxonomy-notes.md`; `goldlabel-search-terms` even has the agent write `seeds.csv` with polars, and `goldlabel/SKILL.md` tells the user to commit them. Of the three supplied notebooks, only the email one wrote a side file for this (`taxonomy.write(OUT / "taxonomy.yaml")`, `7ae328e3`); the taxonomy and prompt were code cells in all three, and none used seeds. So the instruction is in the skills and one notebook followed it. `tests/test_skills.py` also checks a code block that reads `taxonomy.yaml`. The user's position: a taxonomy, a prompt and a seed list are a few lines each and belong in the notebook, and in general everything stays in code instead of being split over files.
 
 **What the skills say about it.** Nothing forbids any of the above. `goldlabel-connect` teaches a polars transform that writes a file; `goldlabel-taxonomy` suggests a notes file; `goldlabel-tune` shows `open("prompt.md").read()` and an `assert`. No skill says "write only goldlabel calls".
 
@@ -63,7 +65,7 @@ A user watches an agent build the analysis in a notebook or script. The cells co
 1. **Given** any stage skill, **When** an agent follows it, **Then** every code block is goldlabel calls plus the allowed constructs, and the skill states "write only goldlabel calls; anything else needs the user's yes, shown first".
 2. **Given** the data must be fetched from a database or service the library cannot read directly, **When** the agent writes the query, **Then** it is the single approved non-goldlabel step, its result goes straight into `gl.Table(df, ...)`, and no snapshot file or exists-check is written unless the user asks for one.
 3. **Given** a notebook is re-run, **When** the agent would add a guard around `draw`, `evaluate` or a fetch, **Then** the skills tell it not to, and what to say to the user instead (see the open question).
-4. **Given** the prompt, **When** it is more than a line, **Then** it lives in `prompt.md` and a change is an edit to that file followed by `with_prompt`, never a `.replace` chain in the notebook.
+4. **Given** a taxonomy, a prompt or a seed list, **When** the agent writes it, **Then** it is a variable in a notebook cell (`gl.Taxonomy(...)`, a string, a list of strings), not a `taxonomy.yaml`, `prompt.md` or `seeds.csv`; a change to the prompt is an edit to that string in its cell followed by `with_prompt`, never a `.replace` chain on the old one.
 5. **Given** the classified output exists, **When** `goldlabel-run` finishes, **Then** the agent stops and names the optional follow-ups; charts, deduplication, aggregates, fact-check cells and exports are written only if the user asks for them.
 6. **Given** a task the skills do not cover, **When** the agent would write a helper, **Then** it asks instead.
 
@@ -107,7 +109,9 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - **FR-007**: Every code block in the skills MUST consist of goldlabel calls and a short list of allowed constructs (a polars expression for `where=`, a path to a seeds or prompt file and its read, the corpus-fetch step of FR-008), except in sections marked as user-directed; the skills MUST NOT teach writing a snapshot or cache, a guard around a library call, a helper function, a class or a transform that is not user-directed.
 - **FR-008**: When the data cannot be read by a goldlabel corpus, the skills MUST allow one fetch step, written only after the user agrees, whose result is passed directly to `gl.Table`; they MUST NOT have it write and re-read a snapshot file unless the user asks.
 - **FR-009**: The skills MUST say how to handle a notebook being re-run without writing guards [NEEDS CLARIFICATION: see the open question].
-- **FR-010**: The skills MUST keep a prompt longer than a line in `prompt.md` and change it by editing that file.
+- **FR-010**: The skills MUST have the agent define the taxonomy (`gl.Taxonomy(...)`), the prompt (a string) and the seed or keyword list (a list) as code in the notebook or script, and MUST NOT tell it to create, write or read `taxonomy.yaml`, `prompt.md`, `seeds.csv` or a notes file. A prompt is changed by editing its string in place.
+- **FR-010b**: As a general rule the overview and every stage skill MUST say: keep everything in code in the one notebook or script; do not split inputs across files unless the user asks. The files that remain are the corpus, the files the library writes itself (`.goldlabel/`, the `out=` results) and, only when the user wants to reuse the classifier, the bundle that `clf.save` writes. The "commit these files" guidance changes to "commit the notebook".
+- **FR-010c**: Notes taken while reading the corpus for the taxonomy stay in the conversation, not in a file.
 - **FR-010a**: The skills MUST say that nothing is done after `goldlabel-run` except what the user asks (charts, deduplication, aggregates, exports, fact-check cells), and that `.env` files are not loaded by the agent: keys are expected in the environment.
 - **FR-011**: The gold rule text in every skill MUST stay verbatim as today; this change MUST NOT alter `gold_rule.md` or any way a gold label is set.
 - **FR-012**: A test MUST fail when a stage skill lacks any part named in FR-002, when the chain of closing lines is broken, or when a code block breaks FR-007.
@@ -117,7 +121,7 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 ### Key Entities
 
 - **Stage skill**: one of the six, with the four parts of FR-002.
-- **Entry check / exit check**: a short list of conditions a person can verify; the entry check is read against files and approvals that exist, never against a stored status (the library keeps none).
+- **Entry check / exit check**: a short list of conditions a person can verify; the entry check is read against the notebook's cells, the files the library wrote and the user's approvals, never against a stored status (the library keeps none). With everything in code, "the taxonomy is approved" means the cell exists and the user said yes.
 - **Closing line**: the fixed-form last line of a stage, naming the next skill.
 
 ## Success Criteria *(mandatory)*
@@ -139,6 +143,7 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - A linter that parses notebooks an agent produced; the check is the skills' own text and the trial.
 - New library calls to reload candidates or evaluations (the notebooks show no need).
 - Making `gold.draw` or `evaluate` safe to re-run, unless the user chooses that in the open question.
+- Removing `Taxonomy.read`/`write`, `read_seeds` or the classifier bundle from the library: the library keeps them for people who want files; only the agent guidance changes.
 - Changing the gold rule, the labelling page, `fold_test`, metrics or any search backend.
 - Splitting or renaming the six skills, or changing `goldlabel install`.
 - Hooks that stop an agent writing non-goldlabel code; the rule is text plus a trial.
@@ -148,6 +153,7 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - "Spec Kit-style" means the pattern of ordered skills that each end by naming the next command and that carry a completion checklist, not Spec Kit's files or CLI.
 - Strict means refuse-and-offer by default, with the user able to override in words; it is not a hard block.
 - The minimal-code rule is carried in skill text and a trial, because skills cannot be enforced by the library.
+- The notebook is the record, so a diff of the notebook is what shows a changed prompt; the user accepts that over per-file diffs.
 - The list of non-library constructs allowed is short: a `where=` polars expression, a path to a seeds file, the text of a prompt read from a file, and the documented reads.
 - The three supplied notebooks are representative; which lines the user disliked is inferred from the user's description (caches of input data and of gold evaluation results, and verbose code), not told cell by cell.
 
