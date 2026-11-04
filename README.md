@@ -220,9 +220,13 @@ appear in a notebook, a script or any committed file.
 ## The labelling page
 
 `gl.label(gold, taxonomy)` starts a server on `127.0.0.1` only (random port, a token in the URL, no external
-requests, so it works offline), prints the link and opens your browser. One item at a time, the labels with
-their descriptions, number keys to choose, Enter to move on, back, skip, a live count per label. Every click is
-saved to the gold file at once; close the tab and run `gl.label` again to resume. The classifier's prediction
+requests, so it works offline), prints the link and opens your browser. One item at a time: the text
+on the left and the labels, an optional note and the buttons on the right (one column on a phone). In `single`
+mode a number key or a click saves the label and opens the next row, so a whole session can run from the keyboard:
+`1`-`9` label, `←` back, `S` skip, `N` jump to the note (`Esc` leaves it, `Ctrl`/`⌘`+`Enter` saves from it). In
+`multi` mode the number keys toggle and `Enter` saves. A note is stored with the row in the gold file as `note`,
+to help you tune edge cases later; it is never sent to a model, and a skipped row keeps none. Every save goes to
+the gold file at once; close the tab and run `gl.label` again to resume. The classifier's prediction
 is never shown. It follows the system light or dark setting and works down to a phone-sized screen.
 `gl.label` waits until you press **Done** and returns the labelled rows. If no row in the chosen split is
 unlabelled it opens nothing: it prints that everything is labelled and returns at once. Pass `force_open_ui=True`
