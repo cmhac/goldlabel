@@ -429,4 +429,7 @@ def test_a_note_on_a_gold_row_never_reaches_the_model():
     gold = write_gold([g("1", ["a"], note="secret edge case"), g("2", ["b"])])
     model, calls = answering({"t1": ["a"], "t2": ["b"]})
     evaluate(clf(model), gold.dev)
-    assert calls == ["t1", "t2"]
+    assert sorted(calls) == [
+        "t1",
+        "t2",
+    ]  # items run concurrently: arrival order is not fixed
