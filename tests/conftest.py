@@ -1,3 +1,6 @@
+import http.client
+from urllib.parse import urlparse
+
 import pytest
 from pydantic_ai import models
 
@@ -41,3 +44,20 @@ def no_real_models(monkeypatch):
     assert not blocked.hits, (
         "test made an un-stubbed (real) model request; use TestModel/FunctionModel"
     )
+
+
+@pytest.fixture
+def press_done_on_open(monkeypatch):
+    """Stand in for the person: `webbrowser.open` presses Done on the page it is given."""
+    urls: list[str] = []
+
+    def open_(url):
+        urls.append(url)
+        u = urlparse(url)
+        conn = http.client.HTTPConnection(u.hostname, u.port, timeout=5)
+        token = u.query.removeprefix("token=")
+        conn.request("POST", "/api/done", "{}", {"X-Goldlabel-Token": token})
+        conn.getresponse().read()
+
+    monkeypatch.setattr("webbrowser.open", open_)
+    return urls

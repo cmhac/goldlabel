@@ -30,7 +30,7 @@ If the `UserWarning` about the digest appears, the bundle's model or prompt was 
 
 ## A classifier declared in code
 
-A shared module works as well as a bundle:
+A shared module works as well as a bundle, if the user asks for one:
 
 ```python
 # classifiers/scams.py
@@ -40,7 +40,9 @@ taxonomy = gl.Taxonomy(
     mode="multi", labels={"scam": "Offers a fake prize ...", "satire": "Parody ..."}
 )
 classifier = gl.Classifier(
-    "anthropic:claude-haiku-5-5", taxonomy, prompt=open("classifiers/scams.md").read()
+    "anthropic:claude-haiku-5-5",
+    taxonomy,
+    prompt="Classify each post by what it is doing.",
 )
 ```
 
@@ -53,5 +55,4 @@ Other notebooks then `from classifiers.scams import classifier`. Use a bundle wh
 ```python
 final.sources
 gl.eval_log()
-final.write("reports/scams-evaluation.json")
 ```

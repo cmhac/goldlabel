@@ -18,7 +18,7 @@ ev.metrics.per_label  # which label is weak: precision or recall?
 2. Change **one** thing, with the user's agreement: a sentence in the prompt, a label description (which changes the taxonomy), or a new example in the prompt. Resist rewriting everything; you will not know what helped.
 
 ```python
-clf_v2 = clf.with_prompt(open("prompt.md").read())  # after editing prompt.md
+clf_v2 = clf.with_prompt(prompt_v2)  # prompt_v2 is the edited prompt string
 ev2 = gl.evaluate(clf_v2, gold.dev, target=0.80)
 ```
 

@@ -298,20 +298,32 @@ def label(
     taxonomy: Taxonomy,
     *,
     split: str | None = None,
-    block: bool = True,
+    force_open_ui: bool = False,
     open_browser: bool = True,
     port: int | None = None,
 ):
-    """Open the labelling page. Returns the labelled rows after **Done**, or the `Handle` when
-    `block=False`. Resumes at the first unlabelled row; every click is saved at once."""
+    """Open the labelling page and wait for **Done**; returns the labelled rows. Resumes at the
+    first unlabelled row; every click is saved at once. If no row in `split` is pending it prints
+    one line and returns at once, unless `force_open_ui=True` (to review or relabel)."""
+    if split is not None and split not in SPLITS:
+        raise GoldError(f"split must be 'dev', 'test' or None, not {split!r}")
+    orphans = len(gold.orphaned(taxonomy))
+    if orphans:
+        print(
+            f"{orphans} labelled row(s) in {gold.path} use labels that are not in this "
+            "taxonomy; continuing."
+        )
+    scope = [r for r in gold._read() if split in (None, r.split)]
+    if not force_open_ui and all(r.labels for r in scope):
+        print(
+            f"All {len(scope)} rows in {split or 'all'} are labelled; nothing to label. "
+            "Pass force_open_ui=True to review or relabel."
+            if scope
+            else f"No rows to label in {split or 'all'}: draw some first (gold.draw)."
+        )
+        return GoldSet(scope, split or "all", gold.path)
     handle = serve(gold, taxonomy, split=split, port=port)
     try:
-        orphans = len(gold.orphaned(taxonomy))
-        if orphans:
-            print(
-                f"{orphans} labelled row(s) in {gold.path} use labels that are not in this "
-                "taxonomy; continuing."
-            )
         print(
             f"Labelling page: {handle.url}\n"
             "Label the rows in your browser, then press Done on the page.\n"
@@ -319,8 +331,6 @@ def label(
         )
         if open_browser:
             webbrowser.open(handle.url)
-        if not block:
-            return handle
         handle.wait()
     except BaseException:
         handle.stop()
