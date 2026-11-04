@@ -19,6 +19,12 @@ Decisions from the user in the conversation of 2026-11-04 (the final ones; earli
 7. Everything is saved in the one storage folder, with no option to switch it off or send a file elsewhere: `log=False`, `log=<path>`, `Gold(path=)` and `gl.eval_log` are removed.
 8. A dataset name (`gl.Gold(candidates, name="corpus-b")`) picks the gold file; a sample name tags rows inside it.
 
+## Clarifications
+
+### Session 2026-11-04
+
+- Q: What is a gold row's sample name called in the gold file and in the Python and table views? → A: `sample` everywhere (file key, `row.sample`, the `sample` column), replacing `split`; goldlabel is early alpha, so nothing written before this feature (gold files, logs, bundles) is read or kept compatible, and there are no aliases or shims.
+
 ## Where things are today
 
 - **#23 is not a bug in the draw.** `gold.draw(candidates, n=50, split="dev")` writes exactly 50 rows. The user's notebook (`2026-11-04-trump-on-the-ballot-v2.ipynb`) then called `gl.label(gold, taxonomy)` with no `split`. That call pages every row in the file, labelled or not, in both splits, so one 50-row draw opened a page of 100. The README, the walkthrough and the stage skills all use that bare call.
@@ -32,7 +38,7 @@ Decisions from the user in the conversation of 2026-11-04 (the final ones; earli
 
 ### User Story 1 - Draw a named sample and get it back; rerunning does nothing (Priority: P1)
 
-A user creates the gold dataset once: `gold = gl.Gold(candidates)`. `dev = gold.draw_sample("dev")` makes sure the sample named "dev" holds `sample_size` rows. It draws only what is missing and returns that Sample. `gold.draw_sample("test")` and later `gold.draw_sample("test-2")` work the same way. A sample is a fixed set of rows in the dataset, tagged with its name. Rerunning any draw cell, at any point in the notebook's life, therefore draws nothing and returns the same rows.
+A user creates the gold dataset once: `gold = gl.Gold(candidates)`. `dev = gold.draw_sample("dev")` makes sure the sample named "dev" holds `sample_size` rows. It draws only what is missing and returns that Sample. `gold.draw_sample("test")` and later `gold.draw_sample("test-2")` work the same way. A sample is a fixed set of rows in the dataset, tagged with its name in each row's `sample` field. Rerunning any draw cell, at any point in the notebook's life, therefore draws nothing and returns the same rows.
 
 Rows come in an order fixed by their ids and the dataset's name. There is no seed. A colleague running the notebook from scratch over the same candidates gets the same rows, and widening the candidates does not move rows already drawn. `n` asks for a different size for that sample in that call and never changes `sample_size`. `gold["test-2"]` returns a sample without drawing.
 
@@ -55,7 +61,7 @@ Rows come in an order fixed by their ids and the dataset's name. There is no see
 4. **Given** "test" exists, **When** `draw_sample("test-2")` is called, **Then** a separate sample of 50 is drawn from candidates in no sample, and "test" is unchanged.
 5. **Given** a sample name that is empty or has characters other than letters, digits, `-` and `_`, or no name, **Then** the call is refused and nothing is written.
 6. **Given** two fresh datasets with the same name over the same candidates, **Then** they draw the same ids; different dataset names give different orders.
-7. **Given** rows of a sample were removed with `gold.remove(ids)`, **When** its draw is rerun, **Then** it draws replacements and says how many.
+7. **Given** rows of a sample were removed with `gold.remove(ids)`, **When** its draw is rerun, **Then** it draws replacements from candidates that are in no sample and not in the dataset's removed-rows file, and says how many; a removed row is never drawn again.
 8. **Given** fewer unused candidates than the shortfall, **Then** the draw writes nothing and fails with both numbers; **Given** `sample_size` or `n` that is not a whole number of at least 1, **Then** it is refused.
 9. **Given** a `Gold` with no candidates, **When** a draw has no shortfall, **Then** it works; **When** it has one, **Then** it fails saying to give the candidates when creating the `Gold`.
 10. **Given** `gold["test-2"]`, **Then** it returns that sample without drawing; an unknown name raises `KeyError` listing the sample names.
@@ -157,7 +163,7 @@ Corpus A's dataset is untouched. B's rows, labels, samples, page, lock and evalu
 
 **Acceptance Scenarios**:
 
-1. **Given** no name, **Then** the dataset is `<root>/gold.jsonl`, as today, so existing gold files keep working.
+1. **Given** no name, **Then** the dataset is `<root>/gold.jsonl`.
 2. **Given** a name, **Then** the dataset is `<root>/gold-<name>.jsonl`; the name follows the same rule as sample names and also fixes the draw order.
 3. **Given** two datasets, **Then** a row id may be in both, and each has its own lock and removed-rows file.
 4. **Given** a dataset with only one sample, **Then** it is labelled and evaluated as any other.
@@ -198,8 +204,7 @@ The skills also give a second corpus its own named `Gold`, and say the evaluatio
 
 ### Edge Cases
 
-- **Old gold files.** A row's existing `split` field ("dev" or "test") is its sample name, so every pre-014 file already holds the samples "dev" and "test". Rows that a past `fold_test` moved are simply "dev" rows. Rows stay as drawn; only later top-ups use the id order.
-- **Old log lines.** Lines with no sample names count for the sample named in their `split`. Old `test_folded` events are ignored.
+- **Files from before this feature are not supported** (early alpha). A gold file with `split` and no `sample` fails to load with the existing "not a gold row" error, a log line without `samples` is not counted for any sample, and an old classifier bundle's `evaluation.json` is not read back.
 - **A drawn id that is no longer a candidate** stays in its sample and counts toward its size.
 - **The id order** is the same on every machine and Python version (it does not use Python's per-process string hashing).
 - **A Sample never caches rows.** A variable made before labelling or a top-up shows the file as it is now.
@@ -211,9 +216,9 @@ The skills also give a second corpus its own named `Gold`, and say the evaluatio
 ### Functional Requirements
 
 - **FR-001**: The constructor MUST be `Gold(candidates=None, *, name=None, sample_size=50)`. The file is `<root>/gold.jsonl` with no name, or `<root>/gold-<name>.jsonl`. There MUST be no path argument. `sample_size` MUST be a whole number of at least 1.
-- **FR-002**: Every row MUST belong to exactly one sample, the name in its `split` field. Names MUST match `[A-Za-z0-9_-]+`. The library MUST treat no sample name specially.
+- **FR-002**: Every row MUST belong to exactly one sample, the name in its `sample` field, which replaces `split` in the file, on `GoldRow` and in every table and summary. Names MUST match `[A-Za-z0-9_-]+`. The library MUST treat no sample name specially.
 - **FR-003**: `gold.draw_sample(name, n=None)` MUST make the sample `name` (required) hold at least `n` rows (default `sample_size`). It MUST:
-  - draw only the shortfall, from candidates in no sample of the file;
+  - draw only the shortfall, from candidates that are in no sample of the file and not in its removed-rows file;
   - never remove rows;
   - write nothing if there is no shortfall or not enough candidates;
   - return the Sample.
@@ -227,7 +232,7 @@ The skills also give a second corpus its own named `Gold`, and say the evaluatio
   - The page MUST name the sample, and its "x of N" MUST count only the pass.
   - It returns the Sample.
 - **FR-008**: `clf.evaluate(sample, *, metric=None, target=None)` and `await clf.aevaluate(...)` MUST replace `gl.evaluate` and `gl.aevaluate`, and MUST accept only a Sample.
-  - Every evaluation MUST be appended to `evals.jsonl` in the folder of the dataset's gold file, naming the gold file and the samples.
+  - Every evaluation MUST be appended to `evals.jsonl` in the folder of the dataset's gold file, naming the gold file and the samples. `Evaluation`, the log line and a saved classifier bundle carry `samples` (the list of names) in place of `split`.
   - An identical evaluation already in the log MUST NOT be written again. Identical means the same gold file, samples, row ids and labels, prompt digest, model, metric and target.
   - There MUST be no argument to skip or move the log, and no refusal based on which sample is scored or how often.
 - **FR-009**: `clf.band_sample(candidates, *, per_band=30)` and `await clf.aband_sample(...)` MUST replace `gl.band_sample`. They MUST pick rows in the id-fixed order with no seed, and write no log line.
@@ -255,14 +260,14 @@ The skills also give a second corpus its own named `Gold`, and say the evaluatio
 - **SC-003**: Two people running the same notebook over the same candidates from an empty folder draw the same rows.
 - **SC-004**: Every evaluation appears in the log exactly once, and each Sample's summary gives the right number of evaluations and prompts in 100% of tests.
 - **SC-005**: A second dataset over another corpus can be drawn, labelled and scored without touching the first, and the first dataset's samples and counts are identical before and after.
-- **SC-006**: Every gold file and log written before this feature loads and behaves as described in the Edge Cases. No doc or skill example uses a removed name, and a test fails when one does.
+- **SC-006**: No doc or skill example uses a removed name, and a test fails when one does.
 
 ## Assumptions
 
 - The constitution is amended to 1.3.0 (Principle VI). `fold_test` is replaced by combining samples. Every evaluation is always logged. The library does not police samples, and the test discipline is a rule for agents. The user approved this on 2026-11-04.
 - Dataset and sample names only pick a file and tag rows. There is no registry, list command or stored metadata.
 - `n` means "this sample should hold at least `n` rows", not "add `n`".
-- The row field keeps its name `split` in the file, so old files need no change; the API and docs call it the sample name.
+- goldlabel is early alpha: this feature keeps no compatibility with gold files, logs or classifier bundles written before it, and adds no aliases or shims.
 - `GoldSet` stays for `gold.all`, `gold.pending`, `remove`, `import_rows` and `orphaned`. Only per-sample views are Samples.
 - `gl.label` stays a library function taking a Sample.
 - The band check writes no log line, because it is not an evaluation against gold.
@@ -281,6 +286,6 @@ The skills also give a second corpus its own named `Gold`, and say the evaluatio
 - A history viewer to replace `gl.eval_log` (read `evals.jsonl` with polars).
 - A sample picker, tabs or a dataset switcher in the page.
 - Merging, copying or diffing datasets, and moving rows between datasets.
-- Migrating or renaming existing gold files or logs.
+- Any compatibility with, or migration of, gold files, logs or bundles written before this feature.
 - Any change to the classifier, cache, cost ledger or metrics beyond moving evaluation and the band check onto the classifier.
 - Rewording the gold rule, and any new way to write a label.
