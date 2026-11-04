@@ -24,6 +24,7 @@ Decisions from the user in the conversation of 2026-11-04 (the final ones; earli
 ### Session 2026-11-04
 
 - Q: What is a gold row's sample name called in the gold file and in the Python and table views? → A: `sample` everywhere (file key, `row.sample`, the `sample` column), replacing `split`; goldlabel is early alpha, so nothing written before this feature (gold files, logs, bundles) is read or kept compatible, and there are no aliases or shims.
+- Q: Should drawing, importing and removing rows be refused while a labelling page is open on the same dataset? → A: No; there is no check, as today, and the user takes care not to write to a dataset from another process while it is being labelled.
 
 ## Where things are today
 
@@ -209,7 +210,7 @@ The skills also give a second corpus its own named `Gold`, and say the evaluatio
 - **The id order** is the same on every machine and Python version (it does not use Python's per-process string hashing).
 - **A Sample never caches rows.** A variable made before labelling or a top-up shows the file as it is now.
 - **Dataset names cannot collide with the default.** The default dataset and one named "gold" are `gold.jsonl` and `gold-gold.jsonl`.
-- **A row drawn by another process after a labelling pass began** is not added to that pass.
+- **A row drawn by another process after a labelling pass began** is not added to that pass. Draws, `import_rows` and `remove` do not check the labelling lock; writing to a dataset from another process while it is being labelled is the user's to avoid.
 
 ## Requirements *(mandatory)*
 
