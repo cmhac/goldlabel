@@ -151,15 +151,9 @@ def test_html_reprs_do_not_carry_the_rule(tmp_path):
     assert HTML_RULE_MARKER not in g.pending._repr_html_()
 
 
-def test_label_prints_the_rule(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr("webbrowser.open", lambda url: None)
-    h = goldlabel.label(
-        Gold(gold_file(tmp_path)), taxonomy(), open_browser=False, block=False
-    )
-    try:
-        assert SHORT in capsys.readouterr().out
-    finally:
-        h.stop()
+def test_label_prints_the_rule(tmp_path, press_done_on_open, capsys):
+    goldlabel.label(Gold(gold_file(tmp_path)), taxonomy())
+    assert SHORT in capsys.readouterr().out
 
 
 # --- errors ---------------------------------------------------------------------------------

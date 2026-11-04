@@ -218,7 +218,9 @@ requests, so it works offline), prints the link and opens your browser. One item
 their descriptions, number keys to choose, Enter to move on, back, skip, a live count per label. Every click is
 saved to the gold file at once; close the tab and run `gl.label` again to resume. The classifier's prediction
 is never shown. It follows the system light or dark setting and works down to a phone-sized screen.
-`block=False` returns a handle with `.url`, `.wait()` and `.stop()`.
+`gl.label` waits until you press **Done** and returns the labelled rows. If no row in the chosen split is
+unlabelled it opens nothing: it prints that everything is labelled and returns at once. Pass `force_open_ui=True`
+to open the page anyway, to review or relabel.
 
 People who already labelled a dataset elsewhere can bring it: point `gl.Gold("their_file.jsonl")` at it, or
 `gold.import_rows(rows, split="dev")`. Rows carry `labelled_by` (`goldlabel-ui` or `imported`) and the
