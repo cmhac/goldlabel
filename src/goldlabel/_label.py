@@ -139,7 +139,12 @@ class Handle:
         ]
         descriptions.append((OFF_TOPIC, OFF_TOPIC_DESCRIPTION))
         return {
-            "item": {"id": row.id, "text": row.text, "labels": row.labels or None}
+            "item": {
+                "id": row.id,
+                "text": row.text,
+                "labels": row.labels or None,
+                "note": row.note,
+            }
             if row
             else None,
             "position": position,
@@ -160,7 +165,7 @@ class Handle:
         with self._mutex:
             return self._state()
 
-    def label(self, id_: str, labels: list[str]) -> dict:
+    def label(self, id_: str, labels: list[str], note: str | None = None) -> dict:
         validate_labels(labels, self.taxonomy)
         with self._mutex:
             all_rows = self.gold._read()
@@ -173,6 +178,8 @@ class Handle:
                 "labelled_by": "goldlabel-ui",
                 "labelled_at": datetime.now(UTC).isoformat(),
             }
+            if note is not None:  # None: an older client, keep the row's note
+                stamp["note"] = note.strip() or None
             self.gold._write(
                 [r.model_copy(update=stamp) if r is target else r for r in all_rows]
             )
@@ -252,13 +259,19 @@ class _Request(BaseHTTPRequestHandler):
         if body is None:
             return self._send(400, {"error": "the body must be a JSON object"})
         if path == "/api/label":
-            id_, labels = body.get("id"), body.get("labels")
-            if not isinstance(id_, str) or not (
-                isinstance(labels, list) and all(isinstance(x, str) for x in labels)
+            id_, labels, note = body.get("id"), body.get("labels"), body.get("note")
+            if (
+                not isinstance(id_, str)
+                or not (
+                    isinstance(labels, list) and all(isinstance(x, str) for x in labels)
+                )
+                or not isinstance(note, str | None)
             ):
-                return self._send(400, {"error": "send {id: str, labels: [str]}"})
+                return self._send(
+                    400, {"error": "send {id: str, labels: [str], note?: str}"}
+                )
             try:
-                return self._send(200, handle.label(id_, labels))
+                return self._send(200, handle.label(id_, labels, note))
             except KeyError:
                 return self._send(404, {"error": f"no row {id_!r} in this split"})
             except ValueError as e:

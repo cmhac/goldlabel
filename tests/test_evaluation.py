@@ -422,3 +422,11 @@ def test_band_sample_refuses_a_list_without_similarity_scores():
     with pytest.raises(ValueError, match="band_sample needs similarity scores.*all"):
         band_sample(clf(model), other)
     assert calls == []
+
+
+def test_a_note_on_a_gold_row_never_reaches_the_model():
+    # guard (013): green before the notes feature too, and it keeps the notes out of prompts
+    gold = write_gold([g("1", ["a"], note="secret edge case"), g("2", ["b"])])
+    model, calls = answering({"t1": ["a"], "t2": ["b"]})
+    evaluate(clf(model), gold.dev)
+    assert calls == ["t1", "t2"]
