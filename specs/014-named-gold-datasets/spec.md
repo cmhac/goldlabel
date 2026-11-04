@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: User description: "Fix issues #22 and #23 and improve how gold labelling works." Issue #22, *Multiple gold datasets/separate evals*: "Users may want to set up multiple gold datasets for evaluation. For example, you might tune a prompt on one corpus, then want to apply it to another and just create a test set there without going through the dev/test workflow. Test is often sufficient in such cases. Need to be able to create separate, named golden datasets." Issue #23, *gold labeling not respecting draw's n parameter*: "I just ran a gold.draw with n=50, and the UI is showing 100. There's also a test draw in the notebook with another n=50, but not sure why the gold dataset is not treating those as separate." Follow-up decisions from the user (2026-11-04): the labelling page only shows the items being labelled in that pass; there is never a reason to label without a split; `Gold` takes the candidates when it is created and a `sample_size` (default 50) per split; `draw` becomes `draw_sample` with `draw_dev` and `draw_test` shortcuts, with a per-call size override; no `if not gold.all.rows:` guard and no seed numbers (option 3: a draw tops a split up to its size, in an order fixed by the row ids); the draw calls return a `Sample` that is passed to `gl.label` and `gl.evaluate`.
+**Input**: User description: "Fix issues #22 and #23 and improve how gold labelling works." Issue #22, *Multiple gold datasets/separate evals*: "Users may want to set up multiple gold datasets for evaluation. For example, you might tune a prompt on one corpus, then want to apply it to another and just create a test set there without going through the dev/test workflow. Test is often sufficient in such cases. Need to be able to create separate, named golden datasets." Issue #23, *gold labeling not respecting draw's n parameter*: "I just ran a gold.draw with n=50, and the UI is showing 100. There's also a test draw in the notebook with another n=50, but not sure why the gold dataset is not treating those as separate." Follow-up decisions from the user (2026-11-04): the labelling page only shows the items being labelled in that pass; there is never a reason to label without a split; `Gold` takes the candidates when it is created and a `sample_size` (default 50) per split; `draw` becomes `draw_sample` with `draw_dev` and `draw_test` shortcuts, with a per-call size override; no `if not gold.all.rows:` guard and no seed numbers (option 3: a draw tops a split up to its size, in an order fixed by the row ids); the draw calls return a `Sample` that is passed to `gl.label` and to the evaluation; evaluation becomes a method of the classifier (`clf.evaluate(sample)`), like `clf.classify` and `clf.estimate`.
 
 ## Where things are today
 
@@ -14,6 +14,7 @@
 - **A draw is an append.** Each `draw` adds `n` more rows. Re-running the cell, even with the same seed, appends a *different* 50 (rows already drawn are excluded, so the seeded shuffle runs over a smaller pool; checked on the current code: 0 overlap, 150 rows after three 50-row draws). So the notebook needed `if not gold.all.rows:` and `if not any(r.split == "test" ...)` guards, and a seed per draw for reproducibility, which also changes meaning whenever the candidates change.
 - **The draw's result is easy to drop.** `draw` returns the drawn rows, but every example ignores it and then passes the whole `gold` plus a split to `gl.label` and `gold.dev` / `gold.test` (labelled rows only, a snapshot) to `gl.evaluate`. The notebook reloaded `gl.Gold()` twice "so the new rows show", though every `Gold` property already re-reads the file.
 - **#22.** A `Gold` is one file (`gold.jsonl` under the root, or any path passed in). A second corpus can already get its own file by passing a path, but nothing says so, and the evaluation log is shared: "the test split was evaluated N times" and `fold_test`'s "evaluated since the last fold" check count test evaluations from *every* gold file (each log line records the gold file; those checks ignore it).
+- **Evaluation is the odd one out.** `clf.classify(items)` and `clf.estimate(items)` are classifier methods, but evaluation is `gl.evaluate(clf, gold_set)` / `gl.aevaluate(...)`, a library function that takes the classifier as an argument.
 - **A partly labelled test split can be evaluated.** `evaluate` skips pending rows and counts them, so a test split can be scored, and so spent, before people finish labelling it; the notebook guarded this with an `assert`.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -62,9 +63,9 @@ The user passes the Sample to the labelling call: `gl.label(dev, taxonomy)`. The
 
 ---
 
-### User Story 3 - Evaluate a Sample; a test Sample must be fully labelled (Priority: P1)
+### User Story 3 - The classifier evaluates a Sample; a test Sample must be fully labelled (Priority: P1)
 
-The user passes the same Sample to the evaluation: `gl.evaluate(clf, dev, target=0.95)`. The Sample reads the file when it is used, so the labels saved by the page a moment ago are there, with no reload. A dev Sample with pending rows is scored on its labelled rows, with the pending ones counted as skipped, as today. A test Sample with any pending row is refused, because scoring a half-labelled test split spends it. `gold.dev` and `gold.test` return the same Samples without drawing, for a notebook that only reads.
+The user evaluates the same Sample with the classifier, the way they classify with it: `clf.evaluate(dev, target=0.95)` (and `await clf.aevaluate(...)`, like `classify` / `aclassify`). `gl.evaluate` and `gl.aevaluate` are removed. The Sample reads the file when it is used, so the labels saved by the page a moment ago are there, with no reload. A dev Sample with pending rows is scored on its labelled rows, with the pending ones counted as skipped, as today. A test Sample with any pending row is refused, because scoring a half-labelled test split spends it. `gold.dev` and `gold.test` return the same Samples without drawing, for a notebook that only reads.
 
 **Why this priority**: the Sample is only clearer than today if the same object goes to `label` and `evaluate`; the test refusal replaces the notebook's `assert` and protects the "test once" discipline.
 
@@ -78,12 +79,14 @@ The user passes the same Sample to the evaluation: `gl.evaluate(clf, dev, target
 4. **Given** `gold.dev` / `gold.test`, **Then** they return the Sample of that split (including pending rows), equal to what `draw_dev()` / `draw_test()` returns once nothing is missing.
 5. **Given** the test Sample was evaluated, **Then** the log line names its dataset's gold file and split, as today, which the per-dataset counts (US5) use.
 6. **Given** `fold_test` moved the test rows to dev, **When** an existing test Sample is shown, **Then** it has 0 rows; `draw_test()` then draws a fresh one.
+7. **Given** `clf.evaluate(sample, metric=..., target=..., log=...)`, **Then** it takes the same keyword options and returns the same `Evaluation`, and writes the same log line, as `gl.evaluate(clf, ...)` does today; `clf.aevaluate` is its async form and the sync form works inside a running notebook loop.
+8. **Given** the old `gl.evaluate(clf, ...)` / `gl.aevaluate(clf, ...)`, **Then** they no longer exist (not exported); every doc, skill, example and test uses the method.
 
 ---
 
 ### User Story 4 - A second, separately named gold dataset (Priority: P1)
 
-A user tuned a prompt on corpus A. They apply it to corpus B and only want a test set there: `gold_b = gl.Gold(candidates_b, name="corpus-b")`, `test_b = gold_b.draw_test(n=30)`, label it, evaluate it. A's dataset is untouched; B's rows, labels, counts, page, lock and evaluations never mix with A's. A dataset with only a test split (or only dev) needs no dev/test ceremony.
+A user tuned a prompt on corpus A. They apply it to corpus B and only want a test set there: `gold_b = gl.Gold(candidates_b, name="corpus-b")`, `test_b = gold_b.draw_test(n=30)`, label it, `clf.evaluate(test_b)`. A's dataset is untouched; B's rows, labels, counts, page, lock and evaluations never mix with A's. A dataset with only a test split (or only dev) needs no dev/test ceremony.
 
 **Why this priority**: this is issue #22.
 
@@ -120,9 +123,9 @@ Evaluating B's test Sample does not touch A's "test evaluated N times" line or A
 
 ### User Story 6 - The docs and skills teach the Sample flow (Priority: P2)
 
-An agent following the stage skills writes `gold = gl.Gold(candidates)`, `dev = gold.draw_dev()`, `gl.label(dev, taxonomy)`, `gl.evaluate(clf, dev, ...)`, then the same for test, with no guards, seeds or reloads, and knows a second corpus gets a second named `Gold`, usually test-only.
+An agent following the stage skills writes `gold = gl.Gold(candidates)`, `dev = gold.draw_dev()`, `gl.label(dev, taxonomy)`, `clf.evaluate(dev, ...)`, then the same for test, with no guards, seeds or reloads, and knows a second corpus gets a second named `Gold`, usually test-only.
 
-**Independent Test**: the drift tests (`tests/test_skills.py`, `tests/test_skill_stages.py`, `tests/test_docs.py`) pass with the changed examples, and a check fails when an example calls `.draw(`, passes `seed=` to a draw, or calls `gl.label` with a `Gold`.
+**Independent Test**: the drift tests (`tests/test_skills.py`, `tests/test_skill_stages.py`, `tests/test_docs.py`) pass with the changed examples, and a check fails when an example calls `.draw(`, passes `seed=` to a draw, calls `gl.label` with a `Gold`, or calls `gl.evaluate(`.
 
 **Acceptance Scenarios**:
 
@@ -153,18 +156,18 @@ An agent following the stage skills writes `gold = gl.Gold(candidates)`, `dev = 
 - **FR-004**: Every draw call MUST return a **Sample** for its split; `gold.dev` and `gold.test` MUST return the same Samples without drawing. A Sample MUST read its dataset's file each time it is used, MUST hold no labels of its own, and its summary MUST give the dataset name, split, rows, labelled, pending, and how many the call that made it drew.
 - **FR-005**: `gl.label(sample, taxonomy)` MUST take a Sample and no split argument; anything else is refused with a message showing the Sample form. A pass MUST page and count only the rows pending in the Sample's split at the call (every row of that split with `force_open_ui=True`), never the other split; its total is fixed for the pass. It returns the Sample.
 - **FR-006**: The labelling page MUST show which split it is labelling, and its "x of N" MUST count only the rows of this pass.
-- **FR-007**: `gl.evaluate(clf, sample)` MUST accept a Sample and use the labels in the file at that moment. A test Sample with any pending row MUST be refused before any model call or log line; a dev Sample keeps today's skip-and-count behaviour.
+- **FR-007**: Evaluation MUST be a classifier method, `clf.evaluate(sample, *, metric=None, target=None, log=None)` with the async form `clf.aevaluate(...)`, keeping today's options, result and log line; `gl.evaluate` and `gl.aevaluate` MUST be removed (no alias). It MUST accept a Sample (and the `GoldSet` views that exist today) and use the labels in the file at that moment. A test Sample with any pending row MUST be refused before any model call or log line; a dev Sample keeps today's skip-and-count behaviour.
 - **FR-008**: A user MUST be able to create a gold dataset by name; the name selects a file beside the default one, and an unnamed `Gold` MUST remain the existing default file. A name MUST be refused if it is empty or contains anything other than letters, digits, `-` and `_`.
 - **FR-009**: Each dataset MUST have its own rows, lock, removed-rows file and labelling session; the "id is not already in the file" rules of drawing and `import_rows` MUST apply per dataset.
 - **FR-010**: A dataset MUST be usable with only one split, with no message implying the other is missing.
 - **FR-011**: The test-evaluation count and `fold_test`'s "evaluated since the last fold" check MUST consider only evaluations logged for that dataset's gold file; `test_folded` events MUST record their dataset; reading an older log MUST not fail.
-- **FR-012**: The README, the walkthrough (notebook and script), `goldlabel` references, the stage skills and `docs/agent-instructions.md` MUST use the Sample flow and describe the second-corpus, test-only case; a drift test MUST fail when an example calls `.draw(`, passes `seed=` to a draw, or passes a `Gold` to `gl.label`.
+- **FR-012**: The README, the walkthrough (notebook and script), `goldlabel` references, the stage skills and `docs/agent-instructions.md` MUST use the Sample flow and describe the second-corpus, test-only case; a drift test MUST fail when an example calls `.draw(`, passes `seed=` to a draw, passes a `Gold` to `gl.label`, or calls `gl.evaluate(`.
 - **FR-013**: Nothing in this change MAY add a way to write a gold label or alter `gold_rule.md`; only the labelling server and `Gold.import_rows` write labels. A Sample has no way to set a label.
 
 ### Key Entities
 
 - **Gold dataset**: one file of human-labelled rows, with an optional name (which also fixes its draw order), the candidates it samples from, and a sample size per split. Its rows are dev or test; it may hold either or both.
-- **Sample**: a live view of one split of one dataset: what a draw returns and what `gl.label` and `gl.evaluate` take. It reads the file when used and stores nothing.
+- **Sample**: a live view of one split of one dataset: what a draw returns, what `gl.label` takes and what `clf.evaluate` scores. It reads the file when used and stores nothing.
 - **Pass**: the pending rows of a Sample's split at the moment `gl.label` is called.
 - **Evaluation log**: one append-only file shared by all datasets; each line already names its gold file, which separates the datasets' histories.
 
@@ -172,12 +175,12 @@ An agent following the stage skills writes `gold = gl.Gold(candidates)`, `dev = 
 
 ### Measurable Outcomes
 
-- **SC-001**: A notebook's whole gold section is `gold = gl.Gold(candidates)`, then per split one draw, one label and one evaluate call, with no guard, seed or reload, and running it top to bottom twice leaves the gold file identical after the second run.
+- **SC-001**: A notebook's whole gold section is `gold = gl.Gold(candidates)`, then per split one draw, one label and one `clf.evaluate` call, with no guard, seed or reload, and running it top to bottom twice leaves the gold file identical after the second run.
 - **SC-002**: A user who draws dev and labels it sees "of 50"; after drawing test, the page for test shows "of 50" (not 100) with no dev row, in 100% of tests covering that flow, including a rerun against a file that already holds both splits.
 - **SC-003**: Two people who run the same notebook over the same candidates from an empty gold directory draw the same rows.
 - **SC-004**: Scoring a test Sample with a pending row is refused in 100% of tests, with no model call.
 - **SC-005**: A second dataset over another corpus can be drawn, labelled and scored without reading or editing the first dataset's file; the first dataset's counts, evaluation count and fold eligibility are identical before and after.
-- **SC-006**: Every gold file written before this feature loads and behaves as before; no example calls `.draw(`, passes a draw `seed=`, or passes a `Gold` to `gl.label`, and a test fails when one does.
+- **SC-006**: Every gold file written before this feature loads and behaves as before; no example calls `.draw(`, passes a draw `seed=`, passes a `Gold` to `gl.label`, or calls `gl.evaluate(`, and a test fails when one does.
 
 ## Assumptions
 
@@ -189,6 +192,8 @@ An agent following the stage skills writes `gold = gl.Gold(candidates)`, `dev = 
 - `gold.pending`, `gold.all`, `orphaned`, `remove`, `import_rows` and `fold_test` keep returning a `GoldSet` (a snapshot); only the per-split views become Samples.
 - The page names the split in its existing header or status text; no redesign (013 stays as built).
 - `gl.label` stays a library function taking the Sample; it does not become a Sample method in this change.
+- `gl.band_sample(clf, candidates)` and `gl.eval_log()` stay library functions; only evaluation moves onto the classifier, as the user asked.
+- Evaluation is pre-1.0 public API used by `Classifier.save(dir, evaluation=...)` callers and the bundle tests; those keep working with the `Evaluation` the method returns.
 
 ## Deliberately skipped
 
@@ -196,7 +201,8 @@ An agent following the stage skills writes `gold = gl.Gold(candidates)`, `dev = 
 - An append-style draw ("add 10 more"): ask for a bigger total.
 - Drawing inside `gl.label`, or drawing both splits at `Gold` creation.
 - A draw record or "draw key" stored on rows.
-- A `draw` alias or deprecation period, and the old `gl.label(gold, taxonomy, split=...)` form.
+- A `draw` or `gl.evaluate` alias or deprecation period, and the old `gl.label(gold, taxonomy, split=...)` form.
+- Moving `band_sample` onto the classifier as well.
 - A dataset registry, listing command, config file or stored "current dataset".
 - A split picker, tabs or a dataset switcher in the page.
 - Merging, copying or diffing datasets, and cross-dataset metrics.
