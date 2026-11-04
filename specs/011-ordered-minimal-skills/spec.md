@@ -10,14 +10,25 @@
 
 ## Where things are today (assessment, 2026-11-04)
 
-Read from the repository, not from agent transcripts (see the open question):
+Two sources: the skills in this repository, and three notebooks the user supplied as examples of output they did not like (`2026-11-02-somalis`, `2026-11-03-trump-on-the-ballot`, `2026-11-03-existential-election-emails`; cell ids below are from those files).
 
-- **No enforced order.** `goldlabel/SKILL.md` says "This is a guide to idioms, not a procedure: do what the user asks for, in the order that fits", and `references/workflow.md` says "Skip, repeat or reorder as the user's work needs". The six stage skills do end with a `## Next` pointer (connect, search-terms, candidates) or name their neighbours in the opening line (taxonomy, tune, run), but the wording varies, `goldlabel-run` and `goldlabel-tune` have no `## Next`, and nothing makes an agent check that the previous stage is finished before starting the next.
-- **No entry or exit checks.** A stage skill states a "Goal" and what comes "Before this", as prose. Nothing says what must exist (a file, an approved list, a number the user chose) before the stage starts, or what must be shown to the user before it is done. Spec Kit's skills close with a "Done When" checklist and a completion report that names the next command; goldlabel's do not.
-- **Steps are menus, not procedures.** The skills show alternatives side by side (three corpus kinds, keywords or seeds or whole corpus, unattended or together) and the numbered steps appear in only two places (the taxonomy loop and the test-split recovery).
-- **Skills invite non-library code.** `goldlabel-connect` teaches a hand-written polars transform that writes a new file; `goldlabel-taxonomy` suggests a `taxonomy-notes.md` file and list-comprehension filters; `goldlabel-tune` shows `open("prompt.md").read()` and an `assert` snippet; `goldlabel-search-terms` writes `seeds.csv` with polars. No skill says "write nothing that is not a goldlabel call unless the user asks".
-- **Possible library gaps that push agents to write caches.** The library already caches model calls (`evaluate`, `classify`) and writes `.goldlabel/candidates.jsonl` for seed searches. But keyword and whole-corpus candidates are written only when `out=` is passed, so re-running a notebook re-reads the corpus; `Candidates.read` exists but no skill teaches it (only the README mentions it); and `Evaluation` has `write` but no `read` (the same results can only be recovered by re-running `evaluate`, or from `gl.eval_log()`, which keeps metrics, not the disagreements).
-- **Drift tests cover names, not order.** `tests/test_skills.py` checks that code blocks use real names and the gold rule is verbatim. Nothing checks that every stage skill has an entry check, a numbered procedure, an exit check and a next step, or that the chain connect -> run is unbroken.
+**The skills do not enforce an order.**
+- `goldlabel/SKILL.md` says "a guide to idioms, not a procedure: do what the user asks for, in the order that fits"; `references/workflow.md` says "Skip, repeat or reorder".
+- Stage skills have a prose "Goal" and a `## Next` on only three of six (connect, search-terms, candidates). None has an entry check, a numbered procedure (except two inner loops) or an exit check. Spec Kit's skills end with a "Done When" list and a completion report naming the next command.
+- `tests/test_skills.py` checks names and the gold rule, not order.
+- The Somali notebook shows the cost. Gold rows were drawn from two different candidate lists (the whole corpus at `df889478`, then a regex list at `34f13a79`, after the first evaluation), the full classification ran on the whole-corpus list (`ba3d9405`), and the test fold came after the full run (`95a5ba63`). Candidates were changed after tuning began and the run happened before the test split was settled.
+
+**Agents write code that is not goldlabel, and most of it is a guard or a cache.** What the notebooks contain:
+- *A cache of the input data* (all three): fetch the data, `if not RAW.exists(): ... write_parquet(RAW)`, then read it back (`36198549`, `66e7afaa`, `6d8fee58`), with a comment "Snapshot, so every rerun reads the same segments". `gl.Table` already takes a DataFrame, so the parquet round trip and the exists-check are not needed to use the library.
+- *Guards that stand in for a cache of gold and evaluation results*: `if not gold.all.rows: gold.draw(...)` (`4ba5c4fb`, `df889478`, `d093f22d`), a second draw guard that reloads `gl.Gold()` (`aee728ab`), and "evaluate the test split at most once" built from `gl.eval_log()` (`3307d71c`) that prints the recorded row instead of calling `evaluate`.
+- *Hand-written helpers and long constants*: a fetch function with SSM and psycopg (`36198549`); about 60 lines of regex constants plus `near()` and `after()` helpers (`d41bea31`); about 100 lines of shingle/Jaccard deduplication written twice, once more for the three-month run (`297a582b`, `76e7fe02`, `4605d4b0`, `c4cac451`).
+- *Prompt edited in the notebook by string replacement* (`e8e475d0`), although the skills say to keep the prompt in `prompt.md`.
+- *Housekeeping and decoration*: `os.chdir` to find `pyproject.toml`, `load_dotenv` from another repository's `.env` (the library itself never loads a `.env`), repeated imports, `assert MAX_COST is not None`, a chart cell pasted twice.
+- *Analysis after the classifier*: weekly aggregates, Altair charts, an f-string "fact-check" section with asserts, CSV export (Somali notebook, `acec2f33` onward). Whether the user asked for these is not visible in the notebook; they are outside what goldlabel does.
+
+**What the skills say about it.** Nothing forbids any of the above. `goldlabel-connect` teaches a polars transform that writes a file; `goldlabel-taxonomy` suggests a notes file; `goldlabel-tune` shows `open("prompt.md").read()` and an `assert`. No skill says "write only goldlabel calls".
+
+**Not a library gap, as far as these notebooks show.** The library already caches model calls, so re-running `evaluate` or `classify` costs nothing, and it writes seed candidates. An earlier draft of this spec proposed new library calls (`Evaluation.read`, saving keyword lists by default). The notebooks give no evidence they are needed, so they are out. The one real tension is in the open question below.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -41,38 +52,24 @@ A user asks an agent to analyse a corpus with goldlabel. The agent starts at `go
 
 ### User Story 2 - The agent writes only goldlabel calls (Priority: P1)
 
-A user watches an agent build the analysis in a notebook or script. The cells contain goldlabel calls (and the plain file reads the library asks for, such as the path of a seeds file) and nothing else. The agent does not write caching of input data, caching or saving of evaluation results, helper functions, wrapper classes or data-reshaping code. When something seems to need non-goldlabel code, the agent stops, says what it would write and why, and asks; it writes it only when the user says yes.
+A user watches an agent build the analysis in a notebook or script. The cells contain goldlabel calls and nothing else the library does not need. The agent does not write a snapshot or cache of the input data, a guard that skips a library call because it was already run, helper functions, long constants, string-replacement of the prompt, environment loading, or analysis after the classifier. When something seems to need non-goldlabel code, the agent stops, shows what it would write and why, and writes it only when the user says yes.
 
-**Why this priority**: the user's second complaint. Every extra line is something a reader has to trust, and the library already caches.
+**Why this priority**: the user's second complaint. Every extra line is something a reader has to trust, and in all three notebooks the largest blocks were not goldlabel.
 
-**Independent Test**: take each stage skill's examples and count the lines that are not a goldlabel call or a documented library read; the count is zero outside the sections the user directs. Then run a reviewer (human or agent) over the notebook an agent produced for the sample corpus and list any line that is not a goldlabel call.
-
-**Acceptance Scenarios**:
-
-1. **Given** any stage skill, **When** an agent follows it, **Then** every code block it shows is made of goldlabel calls only, and the overview and each stage state the rule "write only goldlabel calls; anything else needs the user's yes".
-2. **Given** a notebook is re-run, **When** the agent wants to avoid repeating work (a corpus read, an evaluation), **Then** the skill tells it to use the library's own persistence (the file the library writes, and its `read`), not to write its own cache.
-3. **Given** data that the library cannot read, **When** the agent proposes a transform, **Then** it shows it, says why the library cannot do it, and runs it only on the user's yes (this exists today in `goldlabel-connect`; it stays, but behind the rule).
-4. **Given** a task the skills do not cover, **When** the agent would otherwise write a helper, **Then** it asks the user instead.
-
----
-
-### User Story 3 - The library covers what agents were hand-rolling (Priority: P2)
-
-A user re-opens a notebook the next day. The candidates they made, and the evaluation they scored, come back with one library call each, with no code of the agent's own. Anything an agent had to write to get that is closed in the library.
-
-**Why this priority**: telling agents not to write caches only works if the library does not leave them a reason. P2 because the skill text (stories 1 and 2) delivers most of the value alone.
-
-**Independent Test**: in a temporary directory, run a candidate search of each kind (seeds, keywords, whole corpus) and an evaluation, start a fresh process, and bring each result back with one library call; check the result equals the original.
+**Independent Test**: take each stage skill's code blocks and the sample walkthrough and count the lines that are not goldlabel calls or the short list of allowed constructs (FR-007); the count is zero. Then give an agent the Somali, Trump and email briefs on the sample corpus and list any line in its notebook that is not a goldlabel call and was not approved.
 
 **Acceptance Scenarios**:
 
-1. **Given** keywords or a whole-corpus candidate list was made, **When** the user re-runs the notebook, **Then** it can be re-loaded with one library call without re-reading the corpus [NEEDS CLARIFICATION: should keyword and whole-corpus lists be written to `.goldlabel/candidates.jsonl` by default like seed lists, or stay opt-in with `out=` and only be taught better?].
-2. **Given** an evaluation was run, **When** the user starts a fresh session, **Then** the evaluation (metrics, disagreements) is available again with one library call and no model call.
-3. **Given** the skills teach a reload call, **When** the drift test runs, **Then** every call shown exists with that name.
+1. **Given** any stage skill, **When** an agent follows it, **Then** every code block is goldlabel calls plus the allowed constructs, and the skill states "write only goldlabel calls; anything else needs the user's yes, shown first".
+2. **Given** the data must be fetched from a database or service the library cannot read directly, **When** the agent writes the query, **Then** it is the single approved non-goldlabel step, its result goes straight into `gl.Table(df, ...)`, and no snapshot file or exists-check is written unless the user asks for one.
+3. **Given** a notebook is re-run, **When** the agent would add a guard around `draw`, `evaluate` or a fetch, **Then** the skills tell it not to, and what to say to the user instead (see the open question).
+4. **Given** the prompt, **When** it is more than a line, **Then** it lives in `prompt.md` and a change is an edit to that file followed by `with_prompt`, never a `.replace` chain in the notebook.
+5. **Given** the classified output exists, **When** `goldlabel-run` finishes, **Then** the agent stops and names the optional follow-ups; charts, deduplication, aggregates, fact-check cells and exports are written only if the user asks for them.
+6. **Given** a task the skills do not cover, **When** the agent would write a helper, **Then** it asks instead.
 
 ---
 
-### User Story 4 - A drift test keeps the order and the rule from rotting (Priority: P2)
+### User Story 3 - A drift test keeps the order and the rule from rotting (Priority: P2)
 
 When anyone edits a stage skill, a test fails if the stage loses its entry check, numbered procedure, exit check, closing next step, or its link to the next skill, or if a skill shows a code line that is not a goldlabel call outside a marked section.
 
@@ -107,10 +104,11 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - **FR-004**: Each stage skill MUST say, for a repeat of that stage, which later stages must be re-run.
 - **FR-005**: Optional steps MUST be marked as optional in the stage where they belong (for example the corpus `where=` filter, the band sample, saving and reusing a classifier, folding the test split) and MUST say which stage they sit inside; none becomes a stage of its own.
 - **FR-006**: The overview and every stage skill MUST state the minimal-code rule: write only goldlabel calls (plus the few documented non-library constructs); any other code, including caches of input data or evaluation results, helpers and reshaping, only when the user directs it, shown first.
-- **FR-007**: Every code block in the skills MUST consist of goldlabel calls and the documented non-library constructs, except in sections marked as user-directed; the skills MUST NOT teach writing a cache, a helper function or a class.
-- **FR-008**: The skills MUST teach the library's own persistence for re-loading work (`Candidates.read`, the evaluation reload from FR-009, `Taxonomy.read`, `Classifier.load`) wherever an agent might otherwise write its own.
-- **FR-009**: The library MUST let an evaluation written by the library be read back with one call and no model call.
-- **FR-010**: The library MUST let a keyword or whole-corpus candidate list be reloaded with one call without re-reading the corpus (the mechanism is decided in the clarification under Story 3).
+- **FR-007**: Every code block in the skills MUST consist of goldlabel calls and a short list of allowed constructs (a polars expression for `where=`, a path to a seeds or prompt file and its read, the corpus-fetch step of FR-008), except in sections marked as user-directed; the skills MUST NOT teach writing a snapshot or cache, a guard around a library call, a helper function, a class or a transform that is not user-directed.
+- **FR-008**: When the data cannot be read by a goldlabel corpus, the skills MUST allow one fetch step, written only after the user agrees, whose result is passed directly to `gl.Table`; they MUST NOT have it write and re-read a snapshot file unless the user asks.
+- **FR-009**: The skills MUST say how to handle a notebook being re-run without writing guards [NEEDS CLARIFICATION: see the open question].
+- **FR-010**: The skills MUST keep a prompt longer than a line in `prompt.md` and change it by editing that file.
+- **FR-010a**: The skills MUST say that nothing is done after `goldlabel-run` except what the user asks (charts, deduplication, aggregates, exports, fact-check cells), and that `.env` files are not loaded by the agent: keys are expected in the environment.
 - **FR-011**: The gold rule text in every skill MUST stay verbatim as today; this change MUST NOT alter `gold_rule.md` or any way a gold label is set.
 - **FR-012**: A test MUST fail when a stage skill lacks any part named in FR-002, when the chain of closing lines is broken, or when a code block breaks FR-007.
 - **FR-013**: `docs/agent-instructions.md`, the README block that equals it, the Kiro steering file and the README MUST state the order and the minimal-code rule in the same words as the overview, and the existing drift tests MUST pass with them.
@@ -130,7 +128,7 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - **SC-002**: 0 code lines in the skills, outside user-directed sections, that are not goldlabel calls or the listed non-library constructs.
 - **SC-003**: Following the skills over the sample corpus, a reviewer finds the notebook the agent wrote contains 0 lines of non-goldlabel code that the user did not ask for.
 - **SC-004**: In a trial of the same request given to a fresh agent in each of Claude Code and one other agent, 2 of 2 start at the first stage, announce the next stage at the end of each stage they complete, and refuse (offer the earlier stage) when asked to skip ahead.
-- **SC-005**: An evaluation and a candidate list of every kind are brought back in a fresh process with one library call each, equal to the originals, with 0 model calls.
+- **SC-005**: Re-running the sample walkthrough from the top a second time makes 0 model calls and writes no file that is not the library's own, with no guard code in the notebook (subject to the open question).
 - **SC-006**: Ruff, ty and pytest pass; the gold rule drift tests pass unchanged.
 
 ## Deliberately skipped
@@ -139,6 +137,8 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - A new top-level stage, or a runner that executes the stages (Spec Kit's `workflow.yml` equivalent).
 - New skills for the optional steps; they stay inside the stage they belong to.
 - A linter that parses notebooks an agent produced; the check is the skills' own text and the trial.
+- New library calls to reload candidates or evaluations (the notebooks show no need).
+- Making `gold.draw` or `evaluate` safe to re-run, unless the user chooses that in the open question.
 - Changing the gold rule, the labelling page, `fold_test`, metrics or any search backend.
 - Splitting or renaming the six skills, or changing `goldlabel install`.
 - Hooks that stop an agent writing non-goldlabel code; the rule is text plus a trial.
@@ -149,8 +149,14 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - Strict means refuse-and-offer by default, with the user able to override in words; it is not a hard block.
 - The minimal-code rule is carried in skill text and a trial, because skills cannot be enforced by the library.
 - The list of non-library constructs allowed is short: a `where=` polars expression, a path to a seeds file, the text of a prompt read from a file, and the documented reads.
-- The assessment above comes from the repository only. I have not seen the agents' notebooks.
+- The three supplied notebooks are representative; which lines the user disliked is inferred from the user's description (caches of input data and of gold evaluation results, and verbose code), not told cell by cell.
 
 ## Open question for the user
 
-- Which non-goldlabel code have you actually seen agents write (caches of the corpus, of candidates, of evaluation results, something else)? Pasting one or two notebooks would let us close the exact gap instead of the ones I inferred.
+Agents add guards because a re-run cell has side effects: `gold.draw(...)` adds another 50 pending rows, and a second `evaluate` on the test split adds a second test entry to the evaluation log. What should the skills tell an agent to do?
+
+- **A. Tell the agent to write no guard**, and to tell the user which cells are run-once (draw, test evaluation). Smallest; the user owns the re-run risk.
+- **B. Change the library so a second `draw` of the same split and a second test `evaluate` are safe.** The notebooks stay clean; it is a library change with its own spec, and it touches the "test split is evaluated once" rule.
+- **C. Tell the agent to put run-once cells in a separate marked cell with a comment**, no code guard.
+
+My recommendation is A, then B only if A proves irritating.

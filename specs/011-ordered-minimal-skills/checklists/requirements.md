@@ -8,7 +8,7 @@
 - [x] Mandatory sections completed
 
 ## Requirement Completeness
-- [ ] No [NEEDS CLARIFICATION] markers remain (1 open: candidates persistence default)
+- [ ] No [NEEDS CLARIFICATION] markers remain (1 open: how to handle re-run guards, FR-009)
 - [x] Requirements are testable
 - [x] Success criteria are measurable
 - [x] Edge cases identified
@@ -16,4 +16,4 @@
 - [x] Assumptions identified
 
 ## Notes
-- The "Open question" about which code agents really wrote is an input to `/speckit-clarify`, not a blocker.
+- Revised after three user-supplied notebooks; the earlier library-gap story was dropped.
