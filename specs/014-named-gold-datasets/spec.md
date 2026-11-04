@@ -54,7 +54,7 @@ Rows come in an order fixed by their ids and the dataset's name. There is no see
 - `draw_sample("test-2")` adds 50 more, in neither.
 - `draw_sample("dev", n=80)` adds 30; `draw_sample("dev", n=30)` then adds none.
 - A fresh `Gold` over the same candidates in another folder draws the same "dev" ids.
-- Adding candidates and drawing on a fresh file keeps every previously drawn id that is still present.
+- Adding candidates and rerunning `draw_sample("dev")` on the same file draws nothing and leaves the drawn rows as they were; on a fresh file, the candidates the two lists share keep their relative order.
 
 **Acceptance Scenarios**:
 
