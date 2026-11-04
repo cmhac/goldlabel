@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Named samples, rerun-safe seedless draws, evaluations on the classifier, and named gold datasets
+# Specification Quality Checklist: Named samples, one rerun-safe draw, evaluations on the classifier, and named gold datasets
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-11-04
@@ -32,6 +32,11 @@
 ## Notes
 
 - Ponytail skill applied before drafting; the spec carries a "Deliberately skipped" list.
-- The user's decisions are listed in order at the top of the spec. The constitution was amended to 1.3.0 for decision 8.
-- Judgement calls for the user to overturn: `gold["name"]` replaces `gold.dev`/`gold.test`; a spent test sample refuses new rows and a second prompt; an identical evaluation is not logged twice, a new `target` is; the band check writes no log line; `out=`, `cache=` and the bundle paths are left for a follow-up spec.
+- The user's final decisions are listed at the top of the spec. The constitution was amended to 1.3.0 for them (Principle VI: fold by combining samples, always-logged evaluations, the library does not police samples, test discipline for agents).
+- Judgement calls for the user to overturn:
+  - `gold["name"]` is the read-only accessor.
+  - A new `target` on the same evaluation writes a line but is not a new prompt.
+  - The band check writes no log line.
+  - The row field keeps the name `split` in the file.
+  - `out=`, `cache=` and the bundle paths are left for a follow-up spec.
 - `/ponytail-review` of spec, plan and tasks is still required before `/speckit-implement`.

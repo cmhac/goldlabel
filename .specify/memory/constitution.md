@@ -132,14 +132,14 @@ when the price is unknown. A full classification MUST NOT run before the estimat
 user says yes. Every evaluation is logged in `evals.jsonl` (append-only, in the storage folder),
 with no way to switch the log off or send it elsewhere; an identical rerun of an evaluation (same
 gold rows and labels, prompt and model) is not a second look and is not logged twice. A gold
-dataset holds named samples, each a dev or a test sample. Tuning uses dev samples. A test sample
-is evaluated on its own once, at the end, and MUST NOT guide edits; once evaluated it is spent, and
-it MUST NOT be evaluated on its own again under another prompt or model, nor before every one of
-its rows is labelled. If the user wants to keep tuning after a disappointing test score, they MAY
-say yes to combining the spent test sample into the set they tune on (`tuning = dev + test`), which
-writes nothing to the gold file and changes no label; people then label a fresh, separately named
-test sample (`gold.draw_test("test-2")`). An agent MUST NOT combine a test sample into a tuning set
-without the user's explicit yes in the conversation. Decisions the user owns (the brief, the seeds,
+dataset holds samples the user names (for example `dev`, `test`, `test-2`); the library reports
+how many times each sample was evaluated and with how many prompts, and does not police them.
+The test discipline is a rule for agents: the sample the user holds out as the test set is
+evaluated once, at the end, only when every one of its rows is labelled, and MUST NOT guide edits;
+once evaluated it is spent. An agent MUST NOT evaluate a spent test sample again under another
+prompt or model, and MUST NOT combine it into the set it tunes on (`tuning = dev + test`) without
+the user's explicit yes in the conversation; after such a yes, people label a fresh, separately
+named test sample (`gold.draw_sample("test-2")`). Decisions the user owns (the brief, the seeds,
 `single` or `multi` labels, label descriptions, the similarity cutoff, the target score, whether to
 spend money, whether to combine a spent test sample into the tuning set) MUST be asked, not decided
 by an agent.
