@@ -17,15 +17,7 @@ from goldlabel.candidates import (
 )
 from goldlabel.classifier import Classifier, CostLimit, Estimate, Predictions
 from goldlabel.cost import Cost, cost
-from goldlabel.evaluation import (
-    BandReport,
-    EvalLog,
-    Evaluation,
-    aevaluate,
-    band_sample,
-    eval_log,
-    evaluate,
-)
+from goldlabel.evaluation import BandReport, Evaluation
 from goldlabel.gold import Gold, GoldSet, Sample
 from goldlabel.search import PgCorpus, S3Corpus, Table
 from goldlabel.settings import settings
@@ -45,7 +37,6 @@ __all__ = [
     "Cost",
     "CostLimit",
     "Estimate",
-    "EvalLog",
     "Evaluation",
     "Gold",
     "GoldError",
@@ -57,12 +48,8 @@ __all__ = [
     "Table",
     "Taxonomy",
     "__version__",
-    "aevaluate",
     "aget_candidates",
-    "band_sample",
     "cost",
-    "eval_log",
-    "evaluate",
     "get_candidates",
     "label",
     "read_seeds",

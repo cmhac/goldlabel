@@ -57,9 +57,7 @@ gold.import_rows(rows, "dev")
 4. Evaluate on dev and read the disagreements.
 
 ```python
-ev = gl.evaluate(
-    clf, dev, target=0.80
-)  # classifies the dev rows (cached) and scores them
+ev = clf.evaluate(dev, target=0.80)  # classifies the dev rows (cached) and scores them
 ev  # metrics, per-label table, where the labels came from, the disagreements
 df = ev.disagreements_to_polars()  # id, text, gold, predicted, reasoning
 ```
@@ -69,8 +67,8 @@ df = ev.disagreements_to_polars()  # id, text, gold, predicted, reasoning
 
 ```python
 clf_v2 = clf.with_prompt(prompt_v2)  # prompt_v2 is the edited string
-ev2 = gl.evaluate(clf_v2, dev, target=0.80)
-gl.eval_log()  # every evaluation so far, with the prompt it used
+ev2 = clf_v2.evaluate(dev, target=0.80)
+dev  # its summary says how often it was evaluated, with how many prompts
 ```
 
    Before you add a worked example to the prompt, check it is not a row of the gold set: scoring the classifier on an item its prompt quotes measures nothing. Look the ids up with `gold.all.to_polars()`.
@@ -80,7 +78,7 @@ gl.eval_log()  # every evaluation so far, with the prompt it used
 ```python
 test = gold.draw_sample("test")  # pending; people label them
 gl.label(test, taxonomy)
-final = gl.evaluate(clf, test)
+final = clf.evaluate(test)
 ```
 
    Report the number as it is. If it meets the target, go to the exit check.
@@ -99,7 +97,7 @@ The target score, each prompt or description change, whether to run a large live
 ## Exit check
 
 - The dev score meets the target, or the user decided to stop; you showed them the remaining disagreements.
-- The user said the prompt is final, the test split was labelled by people and evaluated once, and you reported `final` with its split, `n`, who labelled the rows (`final.sources`) and how often the test split was evaluated (`gl.eval_log()`).
+- The user said the prompt is final, the test split was labelled by people and evaluated once, and you reported `final` with its split, `n`, who labelled the rows (`final.sources`) and how often the held-out sample was evaluated (its summary, `test`).
 
 If this stage is repeated (a new prompt or labels), the test split is spent: say so, and offer step 9 rather than evaluating it again. Re-run `goldlabel-run`.
 

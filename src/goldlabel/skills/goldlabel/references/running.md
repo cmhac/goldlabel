@@ -5,7 +5,7 @@
 The similarity cutoff decides which candidates are classified. Sample each band and look at how much of it is off-topic:
 
 ```python
-report = gl.band_sample(clf, candidates, per_band=30, seed=1)
+report = clf.band_sample(candidates, per_band=30)
 report  # per band: n, off_topic, rate; and the cost
 report.to_polars()
 ```

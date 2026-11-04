@@ -167,18 +167,18 @@ def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     assert fake.calls == 0  # labelling never calls a model
 
     # 4. first evaluate: one live call per dev item; layoff-3 is wrong, so 2 of 3
-    ev1 = gl.evaluate(clf, dev, target=0.9)
+    ev1 = clf.evaluate(dev, target=0.9)
     assert fake.calls == 3
     assert ev1.score() == pytest.approx(2 / 3)
     assert [d["id"] for d in ev1.disagreements] == ["layoff-3"]
 
-    # 5. identical re-evaluate: all cached, zero calls
-    gl.evaluate(clf, dev)
+    # 5. identical re-evaluate: all cached, zero calls, and no second log line
+    clf.evaluate(dev, target=0.9)
     assert fake.calls == 3
 
     # 6. a changed prompt: one call per item again, and it now agrees with the humans
     clf2 = clf.with_prompt("Label the post. Rumours count as layoffs.")
-    ev2 = gl.evaluate(clf2, dev, target=0.9)
+    ev2 = clf2.evaluate(dev, target=0.9)
     assert fake.calls == 6
     assert ev2.score() == pytest.approx(1.0)
     assert ev2.digest != ev1.digest
@@ -187,12 +187,12 @@ def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     test = gold.draw_sample("test", n=1)
     gl.label(test, taxonomy)
     humans.pop().join(timeout=10)
-    final = gl.evaluate(clf2, test)
+    final = clf2.evaluate(test)
     assert fake.calls == 7
     assert final.score() == pytest.approx(1.0)
 
     # 8. the band sample classifies the one candidate nobody has seen yet, live
-    report = gl.band_sample(clf2, candidates, per_band=30, seed=0)
+    report = clf2.band_sample(candidates, per_band=30)
     assert fake.calls == 8
     assert sum(r["n"] for r in report.rows) == 5
 
@@ -232,20 +232,37 @@ def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     }
     assert {x["run"] for x in lines} == {clf2.digest}
 
-    # 11. the evaluation log: one line per evaluate call, with the prompt of each
-    log = [
-        json.loads(x) for x in Path(".goldlabel/evals.jsonl").read_text().splitlines()
+    # 11. the evaluation log: one line per distinct evaluation, with the prompt of each
+    log_file = Path(".goldlabel/evals.jsonl")
+    log = [json.loads(x) for x in log_file.read_text().splitlines()]
+    assert [(x["samples"], x["n"]) for x in log] == [
+        (["dev"], 3),
+        (["dev"], 3),
+        (["test"], 1),
     ]
-    assert [(x["split"], x["n"]) for x in log] == [
-        ("dev", 3),
-        ("dev", 3),
-        ("dev", 3),
-        ("test", 1),
-    ]
-    assert [x["live_calls"] for x in log] == [3, 0, 3, 1]
+    assert [x["live_calls"] for x in log] == [3, 3, 1]
     assert log[0]["prompt"] == "Label the post."
-    assert log[2]["prompt"] == "Label the post. Rumours count as layoffs."
-    assert "test split evaluated 1 times (1 distinct prompts)" in repr(gl.eval_log())
+    assert log[1]["prompt"] == "Label the post. Rumours count as layoffs."
+    assert repr(test).splitlines()[0].endswith("; evaluated 1 time (1 prompt)")
+
+    # 12. rerunning the whole gold section changes nothing and calls no model (SC-001)
+    gold_bytes, log_bytes, calls = (
+        gold.path.read_bytes(),
+        log_file.read_bytes(),
+        fake.calls,
+    )
+    gold = gl.Gold(candidates, name="layoffs", sample_size=3)
+    dev = gold.draw_sample("dev")
+    gl.label(dev, taxonomy)  # nothing pending: prints one line, opens no page
+    clf.evaluate(dev, target=0.9)
+    clf.evaluate(dev, target=0.9)
+    clf2.evaluate(dev, target=0.9)
+    test = gold.draw_sample("test", n=1)
+    gl.label(test, taxonomy)
+    clf2.evaluate(test)
+    assert (dev.drawn, test.drawn) == (0, 0) and not humans
+    assert gold.path.read_bytes() == gold_bytes and log_file.read_bytes() == log_bytes
+    assert fake.calls == calls
 
 
 def test_a_spent_test_sample_joins_tuning_and_a_fresh_one_is_labelled_by_people(
@@ -280,7 +297,7 @@ def test_a_spent_test_sample_joins_tuning_and_a_fresh_one_is_labelled_by_people(
         humans.pop().join(timeout=10)
     spent = {r.id for r in test.rows}
     assert len(spent) == 2 and len(dev.rows) == 2
-    gl.evaluate(clf, test)
+    clf.evaluate(test)
 
     before = gold.path.read_bytes()
     tuning = dev + test  # the user said yes: the spent test rows join the tuning set
@@ -293,9 +310,9 @@ def test_a_spent_test_sample_joins_tuning_and_a_fresh_one_is_labelled_by_people(
     assert fresh.id not in {r.id for r in tuning.rows} and fresh.labels is None
     gl.label(test_2, taxonomy)
     humans.pop().join(timeout=10)
-    gl.evaluate(clf, tuning)
-    gl.evaluate(clf, test_2)
+    clf.evaluate(tuning)
+    clf.evaluate(test_2)
     log = [
         json.loads(x) for x in Path(".goldlabel/evals.jsonl").read_text().splitlines()
     ]
-    assert [x["split"] for x in log] == ["test", "dev + test", "test-2"]
+    assert [x["samples"] for x in log] == [["test"], ["dev", "test"], ["test-2"]]

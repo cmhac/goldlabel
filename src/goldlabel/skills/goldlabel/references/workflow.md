@@ -39,13 +39,13 @@ clf = gl.Classifier("anthropic:claude-haiku-5-5", taxonomy, prompt=prompt)
 gold = gl.Gold(candidates)  # 50 rows per sample by default
 dev = gold.draw_sample("dev")  # safe to rerun: draws only what is missing
 gl.label(dev, taxonomy)
-ev = gl.evaluate(clf, dev, target=0.80)
+ev = clf.evaluate(dev, target=0.80)
 ev
 
 # stage 5, last: the held-out test sample, once
 test = gold.draw_sample("test")
 gl.label(test, taxonomy)
-final = gl.evaluate(clf, test)  # run-once
+final = clf.evaluate(test)  # run-once
 
 # stage 6: estimate, then (after the user's yes) run
 est = clf.estimate(candidates)

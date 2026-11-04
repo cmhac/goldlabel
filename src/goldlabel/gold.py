@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from goldlabel import _frame, _html
 from goldlabel._gold_rule import GOLD_RULE_SHORT, GoldError, GoldTypeError
 from goldlabel.candidates import order_by_id
+from goldlabel.evaluation import _counts, _history
 from goldlabel.settings import resolve
 from goldlabel.taxonomy import Taxonomy
 
@@ -171,7 +172,15 @@ class Sample:
         )
         if len(self.names) == 1:
             line += f"; drew {self.drawn} now" if self.drawn else "; nothing drawn"
-        return line
+        n, prompts = _counts(
+            _history(self.path.parent / "evals.jsonl", self.path), self.names
+        )
+        if not n:
+            return line + "; not evaluated"
+        return (
+            f"{line}; evaluated {n} time{'s' if n != 1 else ''} "
+            f"({prompts} prompt{'s' if prompts != 1 else ''})"
+        )
 
     def _repr_html_(self) -> str:
         return _html.line(self._summary()) + _rows_table(self.rows)

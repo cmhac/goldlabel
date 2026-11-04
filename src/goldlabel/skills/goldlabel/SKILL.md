@@ -51,11 +51,11 @@ Use a Jupyter notebook (`.ipynb`) for the analysis. Write a `# %%` script only i
 
 ## Where files go
 
-`.goldlabel/` in the current directory by default (`gl.settings.root`, or the environment variable `GOLDLABEL_DIR`): `candidates.jsonl`, `gold.jsonl`, `evals.jsonl` (every evaluation, kept as a history) and `cache/` (model calls and the cost ledger). Every function takes a path to move its file; `cache=False` or `out=False` writes nothing. Commit the notebook; the library never runs git.
+`.goldlabel/` in the current directory by default (`gl.settings.root`, or the environment variable `GOLDLABEL_DIR`): `candidates.jsonl`, `gold.jsonl`, `evals.jsonl` (every evaluation, kept as a history) and `cache/` (model calls and the cost ledger). The gold files and `evals.jsonl` always live there: there is no option to move them or to switch the log off. Candidates, results and the cache take a path to move their file; `cache=False` or `out=False` writes nothing. Commit the notebook; the library never runs git.
 
 ## References (load the one you need)
 
 - `references/workflow.md`: the whole chain as the cells of one notebook, in order.
-- `references/tuning.md`: reading `ev.disagreements`, changing one thing at a time, when to stop, the test split, `gl.eval_log()`.
+- `references/tuning.md`: reading `ev.disagreements`, changing one thing at a time, when to stop, the held-out test sample, the evaluation history.
 - `references/running.md`: estimate, cost, `max_cost`, resuming, keys and database URLs, the band sample and the cutoff.
 - `references/reuse.md`: saving a classifier bundle, importing it in a pipeline, recording the evaluation.

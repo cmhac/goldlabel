@@ -8,7 +8,6 @@ from pydantic_ai.messages import ModelResponse, ToolCallPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from goldlabel.classifier import Classifier
-from goldlabel.evaluation import evaluate
 from goldlabel.gold import Gold
 from goldlabel.settings import settings
 from goldlabel.taxonomy import Label, Taxonomy
@@ -54,7 +53,7 @@ def evaluation(c):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(r) + "\n" for r in rows))
     c = replace(c, model=answering({"t1": ["a"], "t2": ["b"], "t3": ["a"]}))
-    return evaluate(c, Gold()["dev"], log=False)
+    return c.evaluate(Gold()["dev"])
 
 
 def test_save_writes_the_files_with_trailing_newlines(tmp_path):
@@ -94,9 +93,9 @@ def test_evaluation_is_written_and_read_back(tmp_path):
     data = json.loads((tmp_path / "b" / "evaluation.json").read_text())
     assert (tmp_path / "b" / "evaluation.json").read_text().endswith("\n")
     assert set(data) == {
-        "split", "n", "score", "metric", "metrics", "digest", "date", "sources",
+        "samples", "n", "score", "metric", "metrics", "digest", "date", "sources",
     }  # fmt: skip
-    assert (data["split"], data["n"], data["metric"]) == ("dev", 3, "accuracy")
+    assert (data["samples"], data["n"], data["metric"]) == (["dev"], 3, "accuracy")
     assert data["score"] == pytest.approx(2 / 3)
     assert data["metrics"]["exact_match"] == pytest.approx(2 / 3)
     assert data["digest"] == c.digest

@@ -280,10 +280,12 @@ def test_sample_counts_len_and_frames(tmp_path):
 def test_sample_repr_says_what_was_drawn_and_html_escapes(tmp_path):
     g = Gold(cands(60))
     assert repr(g.draw_sample("dev")).splitlines()[0] == (
-        'Sample "dev" of default: 50 rows (0 labelled, 50 pending); drew 50 now'
+        'Sample "dev" of default: 50 rows (0 labelled, 50 pending); drew 50 now; '
+        "not evaluated"
     )
     assert repr(g["dev"]).splitlines()[0] == (
-        'Sample "dev" of default: 50 rows (0 labelled, 50 pending); nothing drawn'
+        'Sample "dev" of default: 50 rows (0 labelled, 50 pending); nothing drawn; '
+        "not evaluated"
     )
     b = Gold(cands(5), name="corpus-b", sample_size=1).draw_sample("test")
     assert repr(b).startswith(
@@ -302,7 +304,8 @@ def test_adding_samples_gives_the_union_and_writes_nothing(tmp_path):
     assert isinstance(both, Sample) and both.names == ("dev", "test")
     assert len(both) == 100
     assert repr(both).splitlines()[0] == (
-        'Sample "dev" + "test" of default: 100 rows (0 labelled, 100 pending)'
+        'Sample "dev" + "test" of default: 100 rows (0 labelled, 100 pending); '
+        "not evaluated"
     )
     assert len(dev + dev) == 50 and len(both + test) == 100
     assert (tmp_path / "gold.jsonl").read_bytes() == before

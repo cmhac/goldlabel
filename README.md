@@ -86,17 +86,17 @@ dev = gold.draw_sample("dev")  # safe to rerun: it draws only what is missing
 gl.label(dev, taxonomy)
 
 # 4. Evaluate, read the disagreements, tune the prompt, evaluate again
-ev = gl.evaluate(clf, dev, target=0.9)
+ev = clf.evaluate(dev, target=0.9)
 ev.disagreements_to_polars()
 clf = clf.with_prompt(
     "Choose the one label that fits the post best. Rumoured redundancies count as layoff."
 )
-ev = gl.evaluate(clf, dev, target=0.9)
+ev = clf.evaluate(dev, target=0.9)
 
 # 5. Label and evaluate a held-out test sample, once
 test = gold.draw_sample("test")
 gl.label(test, taxonomy)
-gl.evaluate(clf, test, target=0.9)
+clf.evaluate(test, target=0.9)
 
 # 6. Classify everything: the estimate calls no model, and max_cost refuses to overspend
 clf.estimate(candidates)

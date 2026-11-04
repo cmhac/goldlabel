@@ -100,7 +100,7 @@ gl.label(dev, taxonomy)
 # Every evaluation is also appended to `.goldlabel/evals.jsonl`.
 
 # %%
-ev = gl.evaluate(clf, dev, target=0.9)
+ev = clf.evaluate(dev, target=0.9)
 ev
 
 # %%
@@ -116,7 +116,7 @@ clf2 = clf.with_prompt(
     "Read the post and choose the one label that fits it best. "
     "A post about rumoured redundancies counts as layoff."
 )
-ev2 = gl.evaluate(clf2, dev, target=0.9)
+ev2 = clf2.evaluate(dev, target=0.9)
 ev2
 
 # %% [markdown]
@@ -131,11 +131,11 @@ test = gold.draw_sample("test", n=2)
 gl.label(test, taxonomy)
 
 # %%
-final = gl.evaluate(clf2, test, target=0.9)
+final = clf2.evaluate(test, target=0.9)
 final
 
 # %%
-gl.eval_log()  # every evaluation so far, with how often the test split was used
+test  # its summary says how often this held-out sample was evaluated
 
 # %% [markdown]
 # ## 7. Pick a cutoff, price the run, run it
@@ -144,7 +144,7 @@ gl.eval_log()  # every evaluation so far, with how often the test split was used
 # You choose the cutoff. `estimate` calls no model; `unknown` cost shows as `?`, never as `$0`.
 
 # %%
-report = gl.band_sample(clf2, candidates, per_band=5)
+report = clf2.band_sample(candidates, per_band=5)
 report
 
 # %%

@@ -7,7 +7,7 @@ Tune against the **dev** sample. The gold rule applies throughout: you may read 
 1. Evaluate and read the disagreements:
 
 ```python
-ev = gl.evaluate(clf, dev, target=0.80)
+ev = clf.evaluate(dev, target=0.80)
 df = ev.disagreements_to_polars()  # id, text, gold, predicted, reasoning
 df.filter(df["predicted"].is_not_null()).head(10)
 ev.metrics.per_label  # which label is weak: precision or recall?
@@ -19,19 +19,20 @@ ev.metrics.per_label  # which label is weak: precision or recall?
 
 ```python
 clf_v2 = clf.with_prompt(prompt_v2)  # prompt_v2 is the edited prompt string
-ev2 = gl.evaluate(clf_v2, dev, target=0.80)
+ev2 = clf_v2.evaluate(dev, target=0.80)
 ```
 
    An unchanged prompt costs nothing to re-evaluate (cached). A changed prompt makes one live call per dev item, so say that before you run it on a large dev split.
 
 3. Compare `ev.score()` with `ev2.score()` and look at which rows flipped. A change that fixes three rows and breaks four is not progress.
 
-4. `gl.eval_log()` shows every evaluation so far, with the prompt it used:
+4. Every evaluation so far is in `.goldlabel/evals.jsonl`, with the prompt it used; each sample's summary says how often it was evaluated:
 
 ```python
-log = gl.eval_log()
-log  # time, split, n, score, short digest, model; and how often the test split was used
-log.to_polars()
+dev  # '... evaluated 3 times (2 prompts)'
+pl.read_ndjson(
+    ".goldlabel/evals.jsonl"
+)  # time, samples, n, score, digest, model, prompt
 ```
 
 ## When to stop
@@ -45,7 +46,7 @@ The test sample exists to report an honest number once. Do not evaluate it to de
 ```python
 test = gold.draw_sample("test")  # pending; people label them
 gl.label(test, taxonomy)
-final = gl.evaluate(clf, test)
+final = clf.evaluate(test)
 ```
 
 If the result is disappointing, report it as it is and ask the user what they want. The test rows are now spent: changing the prompt after seeing the score makes them a second dev set. If the user wants to keep tuning, there is one honest way, and it needs their **explicit yes** after you have said what it does: add the spent test sample to the tuning set (`tuning = dev + test`, which writes nothing and changes no label), draw a fresh, separately named test sample (`test_2 = gold.draw_sample("test-2")`), have people label it, tune on `tuning`, and evaluate `test_2` once. Never combine without that yes. The `goldlabel-tune` skill has the steps.

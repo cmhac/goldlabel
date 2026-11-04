@@ -128,7 +128,7 @@ Each task's grep is the check that none are missed.
 
 **Independent test**: US3's and US4's independent tests in `spec.md`, and quickstart items 4, 5, 7 and 8.
 
-- [ ] T003 [US3] [US4] Move evaluation and the band check onto the classifier, always logged, in `src/goldlabel/evaluation.py`, `src/goldlabel/classifier.py` and `src/goldlabel/gold.py`.
+- [X] T003 [US3] [US4] Move evaluation and the band check onto the classifier, always logged, in `src/goldlabel/evaluation.py`, `src/goldlabel/classifier.py` and `src/goldlabel/gold.py`.
 
   **Tests first (red).** Put these in `tests/test_evaluation.py` unless noted. Each test counts `FunctionModel` calls and reads the log from `tmp_path / "evals.jsonl"`.
   - **What is scored.**
