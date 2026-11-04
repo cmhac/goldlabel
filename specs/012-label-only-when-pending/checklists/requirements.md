@@ -13,7 +13,7 @@
 - [x] Success criteria are measurable
 - [x] Acceptance scenarios and edge cases defined
 - [x] Scope bounded ("Deliberately skipped")
-- [x] Assumptions identified (option name `force_open_review`, `block=False` return)
+- [x] Assumptions identified (option name `force_open_ui`, `block` removed (breaking))
 
 ## Notes
 - Gold rule untouched: the skip path writes nothing.

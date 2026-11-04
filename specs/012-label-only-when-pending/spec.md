@@ -1,4 +1,4 @@
-# Feature Specification: Open the labelling page only when rows are pending
+# Feature Specification: Open the labelling page only when rows are pending, and always wait for it
 
 **Feature Branch**: `claude/sharp-galileo-vi4k0k` (the assigned branch; the spec directory name is independent of it)
 
@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: User description: "Drawing a gold dataset should only run the data entry server if there are actually more rows to label. If all rows have been labeled, it should just print a statement that all rows are labeled and skip data entry, unless an explicit option is passed."
+**Input**: User description: "Drawing a gold dataset should only run the data entry server if there are actually more rows to label. If all rows have been labeled, it should just print a statement that all rows are labeled and skip data entry, unless an explicit option is passed." Follow-up from the user: drop the `block` parameter so `gl.label` only ever blocks until **Done**.
 
 ## Where things are today
 
@@ -52,7 +52,6 @@ A user wants to go back over rows that are already labelled (to fix a label, or 
 
 ### Edge Cases
 
-- `block=False` with nothing pending and no option: there is no server and so no handle to return. The call returns the labelled rows like the blocking form; the caller who needs a handle passes the option. This is stated in the docstring.
 - Labels whose names are no longer in the taxonomy (orphans) still produce today's notice, in the skip case too, because they are rows the user may want to review.
 - Nothing about who may write a label changes: only the labelling server and `Gold.import_rows` write labels, and the skip path writes nothing.
 - A second process holding the labelling lock: in the skip case no lock is taken, so there is nothing to wait for.
@@ -64,10 +63,11 @@ A user wants to go back over rows that are already labelled (to fix a label, or 
 - **FR-001**: `gl.label` MUST count the pending rows in the chosen scope (`split`, or both) before starting anything.
 - **FR-002**: When that count is zero and the explicit option is not given, `gl.label` MUST NOT start the server, open a browser or take the labelling lock, MUST print one statement that every row in scope is labelled (or that there are no rows to label), and MUST return the labelled rows of the scope as it does after **Done**.
 - **FR-003**: When the count is above zero, `gl.label` MUST behave as today, including its output and its return value.
-- **FR-004**: `gl.label` MUST accept one explicit keyword option, `force_open_review`, that starts the page even when nothing is pending, defaulting to off.
+- **FR-004**: `gl.label` MUST accept one explicit keyword option, `force_open_ui`, that starts the page even when nothing is pending, defaulting to off.
+- **FR-004a**: `gl.label` MUST NOT have a `block` parameter: it always waits until **Done** (or returns at once in the skip case) and always returns the labelled rows of the scope. A caller passing `block=` gets Python's normal unexpected-keyword error.
 - **FR-005**: An invalid `split` MUST still raise the same error as today, before the count is made.
-- **FR-006**: The README, the docstring, the agent skills that mention `gl.label` (`goldlabel-tune`, the `goldlabel` references and the walkthrough text) and the Kiro steering file MUST describe the new behaviour and the option, and the existing drift tests MUST pass.
-- **FR-007**: The gold rule text, `Gold`, `serve` and the page MUST NOT change.
+- **FR-006**: The README, the docstring, the agent skills that mention `gl.label` (`goldlabel-tune`, the `goldlabel` references and the walkthrough text), including removing the README sentence that describes `block=False` and its handle, and the Kiro steering file MUST describe the new behaviour and the option, and the existing drift tests MUST pass.
+- **FR-007**: The gold rule text, `Gold`, `serve` (still available as `goldlabel._label.serve`, not exported, returning a handle) and the page MUST NOT change.
 
 ### Key Entities
 
@@ -78,7 +78,7 @@ A user wants to go back over rows that are already labelled (to fix a label, or 
 ### Measurable Outcomes
 
 - **SC-001**: With every row labelled, `gl.label` returns in under one second, opens 0 ports and 0 browser windows, and prints exactly one statement.
-- **SC-002**: With one pending row, the behaviour and the tests of today pass unchanged (0 existing label-server tests modified).
+- **SC-002**: With one pending row, behaviour is unchanged, and the existing label-server tests pass unchanged except the three that used `block=False` (`test_label_page.py` twice, `test_gold_rule.py` once), which must reach the server another way because the parameter is gone.
 - **SC-003**: Re-running the sample walkthrough from the top a second time never opens the labelling page.
 - **SC-004**: Ruff, ty and pytest pass; the gold rule drift tests pass unchanged.
 
@@ -88,10 +88,11 @@ A user wants to go back over rows that are already labelled (to fix a label, or 
 - A prompt asking the user whether to review; the option is explicit and off by default.
 - Any change to the page, the token, the port or the labelling lock.
 - A separate "review" function or mode on the page.
+- A non-blocking mode for `gl.label`, removed at the user's request; code that needs a handle uses `goldlabel._label.serve`, which is not part of the public API.
 - Making `draw` or evaluation safe to re-run (that is the open question in spec 011).
 
 ## Assumptions
 
-- The option is called `force_open_review` (`gl.label(gold, taxonomy, force_open_review=True)`), the name the user chose.
+- The option is called `force_open_ui` (`gl.label(gold, taxonomy, force_open_ui=True)`), the name the user chose.
 - "Rows in scope" follows the existing `split` argument; no new scoping is added.
-- In the skip case with `block=False` the labelled rows are returned instead of a handle (see Edge Cases).
+- Removing `block` is a breaking change to a public function. Pre-1.0 and used only blocking in the supplied notebooks, so no deprecation period is added; the user may say otherwise.
