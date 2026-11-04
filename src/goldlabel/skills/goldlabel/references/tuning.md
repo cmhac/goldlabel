@@ -44,7 +44,7 @@ The test sample exists to report an honest number once. Do not evaluate it to de
 
 ```python
 test = gold.draw_sample("test")  # pending; people label them
-gl.label(gold, taxonomy, split="test")
+gl.label(test, taxonomy)
 final = gl.evaluate(clf, test)
 ```
 

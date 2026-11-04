@@ -91,7 +91,7 @@ gold = gl.Gold(candidates)
 dev = gold.draw_sample("dev", n=3)
 
 # %%
-gl.label(gold, taxonomy, split="dev")
+gl.label(dev, taxonomy)
 
 # %% [markdown]
 # ## 4. Evaluate on the dev split
@@ -128,7 +128,7 @@ ev2
 test = gold.draw_sample("test", n=2)
 
 # %%
-gl.label(gold, taxonomy, split="test")
+gl.label(test, taxonomy)
 
 # %%
 final = gl.evaluate(clf2, test, target=0.9)

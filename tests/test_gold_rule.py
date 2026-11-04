@@ -155,7 +155,7 @@ def test_html_reprs_do_not_carry_the_rule(tmp_path):
 
 
 def test_label_prints_the_rule(tmp_path, press_done_on_open, capsys):
-    goldlabel.label(gold_file(tmp_path), taxonomy())
+    goldlabel.label(gold_file(tmp_path)["dev"], taxonomy())
     assert SHORT in capsys.readouterr().out
 
 
@@ -187,12 +187,12 @@ def test_error_types_stay_compatible(tmp_path):
 def test_label_lock_and_split_errors_carry_the_rule(tmp_path):
     g = gold_file(tmp_path)
     with pytest.raises(ValueError) as e:
-        _label.serve(g, taxonomy(), split="X")
+        _label.serve(g, taxonomy())
     assert SHORT in str(e.value)
-    h = _label.serve(g, taxonomy())
+    h = _label.serve(g["dev"], taxonomy())
     try:
         with pytest.raises(RuntimeError, match="already being labelled") as e:
-            _label.serve(g, taxonomy())
+            _label.serve(g["dev"], taxonomy())
         assert isinstance(e.value, goldlabel.GoldError) and SHORT in str(e.value)
     finally:
         h.stop()
@@ -202,7 +202,7 @@ def test_http_error_bodies_do_not_carry_the_rule(tmp_path):
     import http.client
     from urllib.parse import urlparse
 
-    h = _label.serve(gold_file(tmp_path), taxonomy())
+    h = _label.serve(gold_file(tmp_path)["dev"], taxonomy())
     try:
         u = urlparse(h.url)
         c = http.client.HTTPConnection("127.0.0.1", u.port)

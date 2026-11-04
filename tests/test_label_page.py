@@ -11,7 +11,7 @@ import pytest
 
 import goldlabel
 from goldlabel import _label
-from goldlabel.gold import Gold
+from goldlabel.gold import Gold, Sample
 from goldlabel.settings import settings
 from goldlabel.taxonomy import Label, Taxonomy
 
@@ -68,7 +68,7 @@ def post(url, path, body=None):
 
 @pytest.fixture
 def handle(gold_path):
-    h = _label.serve(Gold(), taxonomy())
+    h = _label.serve(Gold()["dev"], taxonomy())
     yield h
     h.stop()
 
@@ -199,10 +199,14 @@ def test_label_is_exported():
 def test_label_opens_the_page_and_returns_when_done(
     gold_path, press_done_on_open, capsys
 ):
-    result = goldlabel.label(Gold(), taxonomy())
+    result = goldlabel.label(Gold()["dev"], taxonomy())
     (url,) = press_done_on_open
     assert url in capsys.readouterr().out
-    assert result.rows == []  # nothing was labelled before Done
+    assert isinstance(result, Sample) and result.names == ("dev",)
+    assert [r.labels for r in result.rows] == [
+        None,
+        None,
+    ]  # nothing labelled before Done
 
 
 def test_label_blocks_until_done_and_returns_the_labelled_rows(
@@ -212,7 +216,7 @@ def test_label_blocks_until_done_and_returns_the_labelled_rows(
     monkeypatch.setattr("webbrowser.open", urls.append)
     result = []
     t = threading.Thread(
-        target=lambda: result.append(goldlabel.label(Gold(), taxonomy())),
+        target=lambda: result.append(goldlabel.label(Gold()["dev"], taxonomy())),
         daemon=True,
     )
     t.start()
@@ -244,7 +248,7 @@ def test_label_reports_orphans_and_continues(tmp_path, press_done_on_open, capsy
         + json.dumps({"id": "2", "text": "t", "labels": None, "sample": "dev"})
         + "\n"
     )
-    goldlabel.label(Gold(), taxonomy())
+    goldlabel.label(Gold()["dev"], taxonomy())
     assert "1 labelled row" in capsys.readouterr().out
     assert len(press_done_on_open) == 1  # the page was still served
 
@@ -254,7 +258,7 @@ def test_label_stops_the_server_if_interrupted(gold_path, monkeypatch):
         _label.Handle, "wait", lambda self: (_ for _ in ()).throw(KeyboardInterrupt)
     )
     with pytest.raises(KeyboardInterrupt):
-        goldlabel.label(Gold(), taxonomy(), open_browser=False)
+        goldlabel.label(Gold()["dev"], taxonomy(), open_browser=False)
     assert not gold_path.with_name("gold.jsonl.lock").exists()
 
 
@@ -283,12 +287,12 @@ def no_page(monkeypatch):
 
 def test_label_skips_the_page_when_every_row_is_labelled(tmp_path, no_page, capsys):
     p = write_rows(tmp_path / "gold.jsonl", [row("1", ["a"]), row("2", ["b"])])
-    result = goldlabel.label(Gold(), taxonomy())
+    result = goldlabel.label(Gold()["dev"], taxonomy())
     out = capsys.readouterr().out
     assert [(r.id, r.labels) for r in result.rows] == [("1", ["a"]), ("2", ["b"])]
     assert out.splitlines() == [
         (
-            "All 2 rows in all are labelled; nothing to label. "
+            "All 2 rows in dev are labelled; nothing to label. "
             "Pass force_open_ui=True to review or relabel."
         )
     ]
@@ -299,23 +303,23 @@ def test_label_skips_a_split_that_is_fully_labelled(tmp_path, no_page, capsys):
     write_rows(
         tmp_path / "gold.jsonl", [row("1", ["a"]), row("t1", None, split="test")]
     )
-    result = goldlabel.label(Gold(), taxonomy(), split="dev")
+    result = goldlabel.label(Gold()["dev"], taxonomy())
     assert [r.id for r in result.rows] == ["1"]
     assert "All 1 rows in dev are labelled" in capsys.readouterr().out
 
 
-def test_label_serves_when_the_other_split_is_pending(tmp_path, press_done_on_open):
+def test_label_serves_a_sample_with_a_pending_row(tmp_path, press_done_on_open):
     write_rows(
         tmp_path / "gold.jsonl", [row("1", ["a"]), row("t1", None, split="test")]
     )
-    result = goldlabel.label(Gold(), taxonomy())
+    result = goldlabel.label(Gold()["test"], taxonomy())
     assert len(press_done_on_open) == 1
-    assert [r.id for r in result.rows] == ["1"]
+    assert [r.id for r in result.rows] == ["t1"]
 
 
-def test_label_says_so_when_the_split_has_no_rows(tmp_path, no_page, capsys):
+def test_label_says_so_when_the_sample_has_no_rows(tmp_path, no_page, capsys):
     write_rows(tmp_path / "gold.jsonl", [row("1", ["a"])])
-    result = goldlabel.label(Gold(), taxonomy(), split="test")
+    result = goldlabel.label(Sample(Gold(), ("test",)), taxonomy())
     assert result.rows == []
     assert capsys.readouterr().out.splitlines() == [
         "No rows to label in test: draw some first (gold.draw_sample)."
@@ -323,7 +327,7 @@ def test_label_says_so_when_the_split_has_no_rows(tmp_path, no_page, capsys):
 
 
 def test_label_with_no_gold_file_says_so(tmp_path, no_page, capsys):
-    assert goldlabel.label(Gold(), taxonomy()).rows == []
+    assert goldlabel.label(Sample(Gold(), ("dev",)), taxonomy()).rows == []
     assert "No rows to label" in capsys.readouterr().out
 
 
@@ -331,23 +335,31 @@ def test_force_open_ui_serves_even_when_everything_is_labelled(
     tmp_path, press_done_on_open
 ):
     write_rows(tmp_path / "gold.jsonl", [row("1", ["a"])])
-    result = goldlabel.label(Gold(), taxonomy(), force_open_ui=True)
+    result = goldlabel.label(Gold()["dev"], taxonomy(), force_open_ui=True)
     assert len(press_done_on_open) == 1
     assert [r.id for r in result.rows] == ["1"]
 
 
 def test_skip_still_reports_orphans(tmp_path, no_page, capsys):
     write_rows(tmp_path / "gold.jsonl", [row("1", ["gone"])])
-    goldlabel.label(Gold(), taxonomy())
+    goldlabel.label(Gold()["dev"], taxonomy())
     assert "1 labelled row" in capsys.readouterr().out
 
 
 def test_label_has_no_block_parameter(gold_path):
     with pytest.raises(TypeError):
-        goldlabel.label(Gold(), taxonomy(), block=False)  # ty: ignore[unknown-argument]
+        goldlabel.label(Gold()["dev"], taxonomy(), block=False)  # ty: ignore[unknown-argument]
 
 
-def test_a_bad_split_is_refused_even_when_everything_is_labelled(tmp_path, no_page):
+def test_label_takes_only_a_sample(tmp_path, no_page):
     write_rows(tmp_path / "gold.jsonl", [row("1", ["a"])])
-    with pytest.raises(goldlabel.GoldError):
-        goldlabel.label(Gold(), taxonomy(), split="Nope")
+    for bad in (Gold(), Gold().all):
+        with pytest.raises(goldlabel.GoldError, match=r'gold\.draw_sample\("dev"\)'):
+            goldlabel.label(bad, taxonomy())  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError):
+        goldlabel.label(Gold()["dev"], taxonomy(), split="dev")  # ty: ignore[unknown-argument]
+
+
+def test_the_page_names_the_sample():
+    js = packaged("app.js")
+    assert '" in " + state.sample' in js

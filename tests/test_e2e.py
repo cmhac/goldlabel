@@ -160,9 +160,7 @@ def test_readme_chain_end_to_end(tmp_path, monkeypatch):
     assert dev.drawn == 3 and all(r.labels is None for r in dev.rows)
     dev_ids = {r.id for r in dev.rows}
     assert "layoff-3" in dev_ids  # the item the first prompt gets wrong (see FakeModel)
-    gl.label(
-        gold, taxonomy, split="dev"
-    )  # blocks until the simulated human presses Done
+    gl.label(dev, taxonomy)  # blocks until the simulated human presses Done
     humans.pop().join(timeout=10)
     assert len(dev.rows) == 3 and not gold.pending.rows
     assert {r.labelled_by for r in dev.rows} == {"goldlabel-ui"}
@@ -187,7 +185,7 @@ def test_readme_chain_end_to_end(tmp_path, monkeypatch):
 
     # 7. the test split is drawn, labelled and evaluated once
     test = gold.draw_sample("test", n=1)
-    gl.label(gold, taxonomy, split="test")
+    gl.label(test, taxonomy)
     humans.pop().join(timeout=10)
     final = gl.evaluate(clf2, test)
     assert fake.calls == 7
@@ -277,8 +275,9 @@ def test_a_spent_test_sample_joins_tuning_and_a_fresh_one_is_labelled_by_people(
     clf = gl.Classifier(fake.model, taxonomy, prompt="Label the post.")
     gold = gl.Gold(candidates, sample_size=2)
     dev, test = gold.draw_sample("dev"), gold.draw_sample("test")
-    gl.label(gold, taxonomy)
-    humans.pop().join(timeout=10)
+    for sample in (dev, test):
+        gl.label(sample, taxonomy)
+        humans.pop().join(timeout=10)
     spent = {r.id for r in test.rows}
     assert len(spent) == 2 and len(dev.rows) == 2
     gl.evaluate(clf, test)
@@ -292,7 +291,7 @@ def test_a_spent_test_sample_joins_tuning_and_a_fresh_one_is_labelled_by_people(
     test_2 = gold.draw_sample("test-2", n=1)  # the fifth item, never seen
     (fresh,) = test_2.rows
     assert fresh.id not in {r.id for r in tuning.rows} and fresh.labels is None
-    gl.label(gold, taxonomy, split="test-2")
+    gl.label(test_2, taxonomy)
     humans.pop().join(timeout=10)
     gl.evaluate(clf, tuning)
     gl.evaluate(clf, test_2)

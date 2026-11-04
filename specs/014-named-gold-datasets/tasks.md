@@ -97,7 +97,7 @@ Each task's grep is the check that none are missed.
 
 **Independent test**: US2's independent test in `spec.md`.
 
-- [ ] T002 [US2] Make `serve` and `gl.label` take a Sample in `src/goldlabel/_label.py`, and name the sample in `src/goldlabel/web/app.js`.
+- [X] T002 [US2] Make `serve` and `gl.label` take a Sample in `src/goldlabel/_label.py`, and name the sample in `src/goldlabel/web/app.js`.
 
   **Tests first (red).**
   - In `tests/test_label_server.py`, start from a hand-built file of 50 labelled "dev" rows and 50 pending "test" rows. `serve(gold["test"], taxonomy)` must then behave as follows:

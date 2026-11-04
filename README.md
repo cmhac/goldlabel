@@ -83,7 +83,7 @@ clf = gl.Classifier(
 # 3. Label a dev sample: opens the web app, returns when you press Done
 gold = gl.Gold(candidates)  # .goldlabel/gold.jsonl, 50 rows per sample by default
 dev = gold.draw_sample("dev")  # safe to rerun: it draws only what is missing
-gl.label(gold, taxonomy, split="dev")
+gl.label(dev, taxonomy)
 
 # 4. Evaluate, read the disagreements, tune the prompt, evaluate again
 ev = gl.evaluate(clf, dev, target=0.9)
@@ -95,7 +95,7 @@ ev = gl.evaluate(clf, dev, target=0.9)
 
 # 5. Label and evaluate a held-out test sample, once
 test = gold.draw_sample("test")
-gl.label(gold, taxonomy, split="test")
+gl.label(test, taxonomy)
 gl.evaluate(clf, test, target=0.9)
 
 # 6. Classify everything: the estimate calls no model, and max_cost refuses to overspend

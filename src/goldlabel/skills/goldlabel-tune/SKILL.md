@@ -37,10 +37,10 @@ dev = gold.draw_sample("dev")  # pending rows with no labels; safe to rerun
 dev.counts(taxonomy)  # rows per label
 ```
 
-3. People label. `gl.label` opens the page, waits until the person presses Done, and returns the labelled rows. If every row in the split is already labelled it prints that and returns at once; pass `force_open_ui=True` to open the page anyway, to review or relabel. Tell the user to expect the page in their browser and do not run it when they are not there. The page never shows a model's prediction.
+3. People label. `gl.label(dev, taxonomy)` opens the page on the rows of that sample that are still pending (only those: the page never shows another sample), waits until the person presses Done, and returns the sample. If every row in it is already labelled it prints that and returns at once; pass `force_open_ui=True` to open the page on every row of the sample anyway, to review or relabel. Tell the user to expect the page in their browser and do not run it when they are not there. The page never shows a model's prediction.
 
 ```python
-gl.label(gold, taxonomy, split="dev")
+gl.label(dev, taxonomy)
 gold.orphaned(taxonomy)  # rows whose label is no longer in the taxonomy
 ```
 
@@ -79,7 +79,7 @@ gl.eval_log()  # every evaluation so far, with the prompt it used
 
 ```python
 test = gold.draw_sample("test")  # pending; people label them
-gl.label(gold, taxonomy, split="test")
+gl.label(test, taxonomy)
 final = gl.evaluate(clf, test)
 ```
 
@@ -89,7 +89,7 @@ final = gl.evaluate(clf, test)
 ```python
 tuning = dev + test  # only after the user's explicit yes
 test_2 = gold.draw_sample("test-2")
-gl.label(gold, taxonomy, split="test-2")  # people label the fresh sample
+gl.label(test_2, taxonomy)  # people label the fresh sample
 ```
 
 ## Ask, do not decide
