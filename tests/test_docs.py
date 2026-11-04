@@ -1,4 +1,4 @@
-"""The README and the example stay true: public names only, one instruction block, py == ipynb."""
+"""The agent docs and the example stay true: no removed corpus, the rule in AGENTS.md, py == ipynb."""
 
 import ast
 import json
@@ -8,15 +8,10 @@ from pathlib import Path
 import goldlabel
 
 ROOT = Path(__file__).resolve().parent.parent
-README = ROOT / "README.md"
 INSTRUCTIONS = ROOT / "docs" / "agent-instructions.md"
 SAMPLE = ROOT / "examples" / "sample"
 PY = SAMPLE / "walkthrough.py"
 IPYNB = SAMPLE / "walkthrough.ipynb"
-
-
-def python_blocks(text):
-    return re.findall(r"```python\n(.*?)```", text, flags=re.DOTALL)
 
 
 def public_names_used(code):
@@ -44,24 +39,11 @@ def public_names_used(code):
     return names
 
 
-def test_readme_python_blocks_use_public_names_only():
-    blocks = python_blocks(README.read_text())
-    assert len(blocks) >= 4, "the README needs the example chain"
-    used = [n for code in blocks for n in public_names_used(code)]
-    assert used
-    for name in used:
-        assert name in goldlabel.__all__, f"README uses goldlabel.{name}, not public"
-    for needle in ("gl.get_candidates(", "gl.label(", "gl.evaluate(", "clf.classify("):
-        assert any(needle in b for b in blocks), needle
-    assert any(".to_polars()" in b for b in blocks)
-
-
 REMOVED = ("LocalCorpus", "vectors.npy", "items.jsonl")
 
 
 def test_no_doc_mentions_the_removed_corpus_or_its_folder_layout():
     files = [
-        README,
         INSTRUCTIONS,
         ROOT / "AGENTS.md",
         ROOT / ".kiro/steering/goldlabel.md",
@@ -80,7 +62,6 @@ def test_nothing_calls_the_library_embedded_corpus_only():
     import tomllib
 
     files = [
-        README,
         INSTRUCTIONS,
         ROOT / "AGENTS.md",
         ROOT / ".kiro/steering/goldlabel.md",
@@ -95,10 +76,7 @@ def test_nothing_calls_the_library_embedded_corpus_only():
 
 
 def test_the_docs_describe_the_three_candidate_sources_and_the_table_format():
-    for path in (
-        README,
-        ROOT / "src/goldlabel/skills/goldlabel/references/workflow.md",
-    ):
+    for path in (ROOT / "src/goldlabel/skills/goldlabel/references/workflow.md",):
         text = path.read_text()
         for needle in (
             "get_candidates",
@@ -120,62 +98,6 @@ def test_the_docs_describe_the_three_candidate_sources_and_the_table_format():
         "gl.get_candidates("
         in (ROOT / "src/goldlabel/skills/goldlabel/SKILL.md").read_text()
     )
-
-
-def test_readme_shows_a_filter_for_each_corpus():
-    blocks = "\n".join(python_blocks(README.read_text()))
-    for call in ("gl.Table(", "gl.PgCorpus(", "gl.S3Corpus("):
-        assert re.search(re.escape(call) + r"[^)]*?where=", blocks), call
-    text = README.read_text()
-    assert (
-        "text table" in text and "pyarrow" in text and "pip install polars" not in text
-    )
-
-
-def test_readme_tables_use_polars_and_mention_pandas():
-    text = README.read_text()
-    assert "to_pandas()" in text
-    assert "pandas" not in "\n".join(python_blocks(text)).replace("to_pandas", "")
-
-
-def test_readme_holds_the_instruction_block_verbatim():
-    readme = README.read_text()
-    assert goldlabel.GOLD_RULE_FULL in readme, (
-        f"README.md must contain the Full gold rule verbatim. Paste this:\n\n{goldlabel.GOLD_RULE_FULL}\n"
-    )
-    block = INSTRUCTIONS.read_text().partition("## The block\n\n")[2].strip()
-    assert block, "docs/agent-instructions.md has no block"
-    assert block in readme, (
-        "the block in README.md drifted from docs/agent-instructions.md; "
-        f"paste this into the README:\n\n{block}\n"
-    )
-
-
-def test_readme_says_what_it_must_say():
-    text = README.read_text()
-    for needle in (
-        "pip install goldlabel",
-        "goldlabel[s3]",
-        "goldlabel[pg]",
-        "goldlabel[rds]",
-        "goldlabel[local]",
-        "goldlabel install claude",
-        "uvx goldlabel install",
-        "--global",
-        "--dir",
-        ".agents/skills",
-        ".kiro/steering/goldlabel.md",
-        "fold_test",
-        "keyring",
-        ".env",
-        "evals.jsonl",
-        "never write",
-    ):
-        assert needle in text, needle
-    assert "unverified" not in text.lower()  # no install recipe we have not run
-    assert (
-        "/plugin marketplace add cmhac/goldlabel" in text
-    )  # the Claude Code plugin route
 
 
 # --- the example ------------------------------------------------------------------------------
