@@ -28,7 +28,7 @@ There is no new module, no new dependency and no new gold-row field. Details and
 
 **Primary Dependencies**: none new (`hashlib` and `re` from the standard library).
 
-**Storage**: the existing JSONL files. `GoldRow.split` now holds any sample name. Evaluation lines gain `samples` and `rows_digest`.
+**Storage**: the existing JSONL files. `GoldRow.sample` replaces `split` (file key `sample`; older files are not read). Evaluation lines replace `split` with `samples` and gain `rows_digest`.
 
 **Testing**: pytest, with:
 - `FunctionModel` call counts;
@@ -83,7 +83,7 @@ Docs and tests:
   - Pass.
 - **II Ponytail**: the skill was invoked before the spec and again before this plan.
   - The design adds one new class (`Sample`, which delegates to `GoldSet`) and one helper.
-  - No field is added, because the sample name reuses `split`.
+  - One field is renamed (`split` to `sample`) and none is added; no compatibility code, at the user's direction.
   - There is no base class or registry, and no option beyond what the user asked for (`name`, `sample_size`, `n`, `+`).
   - Lazy imports are used instead of moving code (R6).
   - Eight public names and methods are deleted.
@@ -130,15 +130,15 @@ def order_by_id(rows, salt: str = "") -> list[dict]:
 ### `gold.py`
 
 ```python
-NAME = re.compile(r"[A-Za-z0-9_-]+")
+NAME = re.compile(r"[a-z0-9_-]+")
 
 class GoldRow(BaseModel):
     ...
-    split: str                           # the sample name; validated against NAME
+    sample: str                          # replaces split; validated against NAME
 
 class Sample:                            # live, read-only view of named samples
     def __init__(self, gold, names, drawn=0): ...
-    rows   -> [r for r in gold._read() if r.split in names]   # property
+    rows   -> [r for r in gold._read() if r.sample in names]  # property
     __add__(other) -> Sample             # same gold.path, union of names
     __len__, counts, to_polars, to_pandas, __repr__, _repr_html_   # rows via GoldSet; counts via R5
 
@@ -156,7 +156,7 @@ class Gold:
 
 - Add `_history(log_path, gold_path)` and `_counts(history, names)` (R5).
 - `_aevaluate(clf, sample, *, metric, target)`:
-  - The log line gains `samples` and `rows_digest`, and `split` becomes `" + ".join(names)`.
+  - The log line replaces `split` with `samples` and gains `rows_digest`; `Evaluation.split` becomes `Evaluation.samples`, and `Classifier.save` writes `samples` in `evaluation.json`.
   - The line is appended to `sample.path.parent / "evals.jsonl"` unless an identical line exists.
 - `_aband_sample(clf, candidates, *, per_band)` uses `order_by_id` in each band and calls `aclassify`.
 - Deleted: `evaluate`, `aevaluate`, `band_sample`, `eval_log`, `EvalLog` and the `log` argument.
@@ -201,7 +201,7 @@ A new drift check in `tests/test_skills.py` and `tests/test_docs.py` fails when 
 - `Gold(path`
 - `gl.label(gold`
 
-`AGENTS.md` "Current state" gets the 014 line and the human checks from `quickstart.md`. Its 009 line is left as history.
+`AGENTS.md` "Current state" gets the 014 line and the human checks from `quickstart.md`. Its 009 line is left as history. Its testing note on `tests/fixtures/pre006/` no longer claims gold compatibility.
 
 ### Tests
 
@@ -212,7 +212,8 @@ A new drift check in `tests/test_skills.py` and `tests/test_docs.py` fails when 
 | `tests/test_label_page.py` | `gl.label(sample, ...)`, non-Sample refusal, 012's lines, served `app.js` names the sample |
 | `tests/test_evaluation.py` | `clf.evaluate`/`aevaluate`, always logged, identical rerun not logged, new target logged, counts per sample and per gold file, old log lines, non-Sample refused, `band_sample`/`aband_sample` with no seed |
 | `tests/test_e2e.py` | the README chain with the new calls and the fold by `+`, then a full second run: byte-identical files, zero model calls |
-| `tests/test_bundle.py`, `test_pre006_fixtures.py`, `test_public_api.py`, `test_gold_rule.py`, `test_skills.py`, `test_docs.py` | new calls, export list, drift checks |
+| `tests/test_pre006_fixtures.py`, `tests/fixtures/pre006/` | the gold check and the pre-006 gold file are removed (no compatibility); the cache, candidates and ledger checks stay |
+| `tests/test_bundle.py`, `test_public_api.py`, `test_gold_rule.py`, `test_skills.py`, `test_docs.py` | new calls, export list, drift checks |
 
 ## Project Structure
 
@@ -251,9 +252,9 @@ tests/…                          # see the table above
 
 ## Risks the user should know
 
-- **Breaking release.** Every removed name stops working, with no alias, so existing notebooks need edits. Gold files and logs need none. The version bump is yours.
+- **Breaking release.** Every removed name stops working, with no alias, so existing notebooks need edits.
+- **Old files stop loading.** Gold files, logs and classifier bundles written before 014 are not read (no compatibility, at the user's direction). A gold file with `split` rows fails with "not a gold row"; a project has to start a fresh `.goldlabel/`. The version bump is yours.
 - **Nothing in code protects a test set.** A user or agent can rescore a held-out sample as often as they like. The Sample summary shows the count, and the skills tell agents not to, but the library will not stop it. That is the choice made in the spec.
-- **Old rows keep their order.** Rows drawn by the old seeded code stay where they are; only new top-ups use the id order. A file started before 014 and the same notebook started fresh after it will hold different rows.
 - **The branch disagrees with itself until implementation lands.** Until 014 is implemented, the shipped skills and code still name `fold_test` and `gl.eval_log`. Constitution 1.3.0 is on this branch with the spec, so the two land together.
 
 ## Complexity Tracking

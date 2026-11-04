@@ -14,20 +14,22 @@ Every decision below was checked against the code on this branch: `src/goldlabel
   - `candidates.py` imports neither `gold.py` nor `evaluation.py`, so both can import the helper without a cycle.
 - **Alternatives**: `random.Random(seed)` over the remaining pool, as today, changes whenever the pool changes and needs a seed. Storing an order in the file is stored state.
 
-## R2. The sample name is the row's `split`
+## R2. The sample name is the row's `sample` field (clarified)
 
-- **Decision**: `GoldRow.split` changes from `Literal["dev", "test"]` to `str`, validated against `[A-Za-z0-9_-]+`, and holds the sample name. No new field, and no `SPLITS` constant.
-  - Every pre-014 row already says "dev" or "test", so old files hold those two samples unchanged.
-  - Rows that `fold_test` moved are "dev" rows.
+- **Decision**: `GoldRow.split: Literal["dev", "test"]` is replaced by `GoldRow.sample: str`, validated against `NAME = [a-z0-9_-]+`, and the file key is `sample`. There is no `SPLITS` constant.
   - Draws write the name; `import_rows(rows, name)` writes the name it is given.
-- **Rationale**: the least change. One field means one rule, and old files need no migration.
-- **Alternatives**: a second `sample` field next to `split` would mean two things to keep consistent, and the user removed the dev/test kinds that would have justified it.
+  - Every table, summary and the `GoldSet` repr column say `sample`.
+- **No compatibility** (clarified: early alpha). A pre-014 row has `split` and no `sample`, so `GoldRow` validation fails and `Gold._read` raises its existing "not a gold row" `GoldError`. There is no fallback, alias or migration.
+  - `tests/test_pre006_fixtures.py` drops its gold check, and `tests/fixtures/pre006/` drops its gold file.
+  - AGENTS.md's testing note that compatibility is checked against those files is narrowed: they no longer cover gold.
+- **Rationale**: one field, one name, the same everywhere; the user chose clarity over compatibility.
+- **Alternatives**: keep `split` in the file with a `sample` alias in Python (rejected by the user); read both keys (a compatibility shim, rejected).
 
 ## R3. What a Sample is
 
 - **Decision**: `class Sample` in `gold.py`, constructed as `Sample(gold, names, drawn=0)`.
   - `names` is a tuple: one name, or several for a combination.
-  - `rows` is a property: the rows of `gold._read()` whose `split` is in `names`.
+  - `rows` is a property: the rows of `gold._read()` whose `sample` is in `names`.
   - `path` is `gold.path`.
   - `counts`, `to_polars`, `to_pandas`, `__len__` and the row part of the summary delegate to a `GoldSet` built on the fly.
   - `__add__` refuses a different `gold.path` and otherwise returns `Sample(gold, names + new names)`.
@@ -38,24 +40,23 @@ Every decision below was checked against the code on this branch: `src/goldlabel
 
 - **Decision**: `need = n - len(rows of the sample)`.
   - When `need <= 0`, return the Sample and write nothing.
-  - Otherwise pick `need` candidates as in R1.
+  - Otherwise pick `need` candidates as in R1, skipping every id in the file and every id in the dataset's `.removed.jsonl` (clarified: a removed row is never drawn again; with an id-fixed order it would otherwise be the first one picked).
   - Fewer available: refuse with both numbers.
   - No candidates given: refuse, naming `gl.Gold(candidates)`.
   - `n` and `sample_size` must be an `int` (not a `bool`) of at least 1.
   - A draw with no shortfall needs no candidates.
-- **Rationale**: this is FR-003. A removed row has moved to `.removed.jsonl` and is no longer in the file, so a rerun replaces it.
+- **Rationale**: this is FR-003. A removed row has moved to `.removed.jsonl`, so a rerun replaces it with a different candidate.
 
 ## R5. Files, the log and the counts
 
 - **Decision**: `Gold(candidates=None, *, name=None, sample_size=50)` sets `self.path = settings.root / ("gold.jsonl" if name is None else f"gold-{name}.jsonl")`, fixed when the `Gold` is made.
   - A dataset's log is `gold.path.parent / "evals.jsonl"`. That is in the storage folder, and it stays the same file for that dataset even if `gl.settings.root` changes later.
   - Lock, temp and removed files are derived from the path as today.
-- **Log lines** gain `"samples": [names]` and `"rows_digest"`, the `sha256` of the JSON of `sorted((id, sorted(labels)) for labelled rows)`. `"split"` keeps a string, `" + ".join(names)`, and so does `Evaluation.split`. That way `Classifier.save`'s `evaluation.json` and older readers still get a string.
+- **Log lines** replace `"split"` with `"samples": [names]` and gain `"rows_digest"`, the `sha256` of the JSON of `sorted((id, sorted(labels)) for labelled rows)`. `Evaluation.split` becomes `Evaluation.samples` (a tuple of names), and `Classifier.save`'s `evaluation.json` writes `samples`. No compatibility: older readers and older lines are not handled.
 - **Helpers in `evaluation.py`**:
   - `_history(log_path, gold_path)` returns the evaluation lines whose `gold` resolves to `gold_path` (compared with `Path(x).resolve()`).
-    - A line with no `samples` is read as `[split]`.
-    - `test_folded` events are skipped.
-  - `_counts(history, names)` returns the number of lines whose `samples` equals `list(names)`, and the number of distinct `digest`s among them.
+    - Only lines with a `samples` key count; older lines and `test_folded` events match no sample and are simply not counted.
+  - `_counts(history, names)` returns the number of lines whose `samples` equals `list(names)` exactly, and the number of distinct `digest`s among them (clarified: a combination's evaluations never count toward its parts).
   - Identical means a line already exists with the same `samples`, `rows_digest`, `digest`, `model`, `metric` and `target`. Then no line is appended, but the `Evaluation` is still built and returned; the predictions are cached, so no model call is made.
 - `gold.py` imports `_history` and `_counts` from `evaluation.py`, the direction it already imports in today. `evaluation.py` does not import `gold.py`.
 - **Callers to change**, anything that passes `Gold` a path, positionally or as `path=`:

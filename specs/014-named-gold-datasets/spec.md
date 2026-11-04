@@ -26,6 +26,7 @@ Decisions from the user in the conversation of 2026-11-04 (the final ones; earli
 - Q: What is a gold row's sample name called in the gold file and in the Python and table views? → A: `sample` everywhere (file key, `row.sample`, the `sample` column), replacing `split`; goldlabel is early alpha, so nothing written before this feature (gold files, logs, bundles) is read or kept compatible, and there are no aliases or shims.
 - Q: Should drawing, importing and removing rows be refused while a labelling page is open on the same dataset? → A: No; there is no check, as today, and the user takes care not to write to a dataset from another process while it is being labelled.
 - Q: Should a sample's "evaluated N times" count also include evaluations of combinations that contain it? → A: No; a sample's count covers only evaluations of exactly that sample, and a combination has its own count.
+- Q: Should dataset and sample names be limited to lowercase letters, digits, `-` and `_`? → A: Yes, for both: `[a-z0-9_-]+`, so two dataset names can never share a file on a case-insensitive disk.
 
 ## Where things are today
 
@@ -61,7 +62,7 @@ Rows come in an order fixed by their ids and the dataset's name. There is no see
 2. **Given** "dev" holds 50 rows, **When** `draw_sample("dev")` is called again, **Then** nothing is written and the Sample says "nothing drawn".
 3. **Given** "dev" holds 50, **When** `draw_sample("dev", n=80)` is called, **Then** 30 more are drawn and `sample_size` stays 50; **Given** it holds 80, **When** `draw_sample("dev", n=30)` is called, **Then** nothing is drawn or removed.
 4. **Given** "test" exists, **When** `draw_sample("test-2")` is called, **Then** a separate sample of 50 is drawn from candidates in no sample, and "test" is unchanged.
-5. **Given** a sample name that is empty or has characters other than letters, digits, `-` and `_`, or no name, **Then** the call is refused and nothing is written.
+5. **Given** a sample name that is empty or has characters other than lowercase letters, digits, `-` and `_`, or no name, **Then** the call is refused and nothing is written.
 6. **Given** two fresh datasets with the same name over the same candidates, **Then** they draw the same ids; different dataset names give different orders.
 7. **Given** rows of a sample were removed with `gold.remove(ids)`, **When** its draw is rerun, **Then** it draws replacements from candidates that are in no sample and not in the dataset's removed-rows file, and says how many; a removed row is never drawn again.
 8. **Given** fewer unused candidates than the shortfall, **Then** the draw writes nothing and fails with both numbers; **Given** `sample_size` or `n` that is not a whole number of at least 1, **Then** it is refused.
@@ -218,7 +219,7 @@ The skills also give a second corpus its own named `Gold`, and say the evaluatio
 ### Functional Requirements
 
 - **FR-001**: The constructor MUST be `Gold(candidates=None, *, name=None, sample_size=50)`. The file is `<root>/gold.jsonl` with no name, or `<root>/gold-<name>.jsonl`. There MUST be no path argument. `sample_size` MUST be a whole number of at least 1.
-- **FR-002**: Every row MUST belong to exactly one sample, the name in its `sample` field, which replaces `split` in the file, on `GoldRow` and in every table and summary. Names MUST match `[A-Za-z0-9_-]+`. The library MUST treat no sample name specially.
+- **FR-002**: Every row MUST belong to exactly one sample, the name in its `sample` field, which replaces `split` in the file, on `GoldRow` and in every table and summary. Sample names and dataset names MUST match `[a-z0-9_-]+` (lowercase only, so dataset files cannot collide on a case-insensitive disk). The library MUST treat no sample name specially.
 - **FR-003**: `gold.draw_sample(name, n=None)` MUST make the sample `name` (required) hold at least `n` rows (default `sample_size`). It MUST:
   - draw only the shortfall, from candidates that are in no sample of the file and not in its removed-rows file;
   - never remove rows;

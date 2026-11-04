@@ -5,7 +5,7 @@
 | Attribute | Type | Rule |
 |---|---|---|
 | `candidates` | `Candidates \| None` | needed only when a draw has a shortfall |
-| `name` | `str \| None` | `[A-Za-z0-9_-]+`; `None` is the default dataset |
+| `name` | `str \| None` | `[a-z0-9_-]+`; `None` is the default dataset |
 | `path` | `Path` | `<root>/gold.jsonl` or `<root>/gold-<name>.jsonl`, fixed at creation |
 | `sample_size` | `int` | `>= 1`, default 50 |
 
@@ -21,13 +21,14 @@ The draw order key is `sha256(f"{name or ''}\0{id}")`. It is not stored.
 
 ## Gold row (`GoldRow`)
 
-The fields are as today: `id`, `text`, `labels`, `split`, `labelled_by`, `labelled_at` and `note`, and extra keys are kept. One field changes:
+The fields are `id`, `text`, `labels`, `sample`, `labelled_by`, `labelled_at` and `note`; extra keys are kept. One field changes:
 
 | Field | Was | Now |
 |---|---|---|
-| `split` | `"dev" \| "test"` | the sample name, any `[A-Za-z0-9_-]+` |
+| `split` (`"dev" \| "test"`) | removed | — |
+| `sample` | — | the sample name, `[a-z0-9_-]+`; file key `sample` |
 
-Old files are valid unchanged.
+Files written before 014 (rows with `split`) do not load: no compatibility, early alpha.
 
 ## Sample
 
@@ -58,6 +59,6 @@ Evaluation lines gain two keys:
 - `"samples"`: the list of names;
 - `"rows_digest"`.
 
-`"split"` becomes `" + ".join(names)`.
+`"split"` is removed. `Evaluation.samples` and the bundle's `evaluation.json` carry the names too.
 
-Older lines without `"samples"` count for the sample named in their `split`, and are never "identical" to a new line. Old `test_folded` events are ignored.
+Lines without `"samples"` (written before 014) are not counted for any sample and are never "identical" to a new line.

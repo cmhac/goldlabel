@@ -6,7 +6,8 @@
 
 - Added: `Sample`.
 - Removed: `evaluate`, `aevaluate`, `band_sample`, `eval_log` and `EvalLog`.
-- Unchanged: `Gold`, `GoldSet`, `label`, `Evaluation`, `BandReport` and the rest.
+- Changed: `GoldRow.split` is replaced by `GoldRow.sample` (file key `sample`, `sample` column in `to_polars()`/`to_pandas()`); `Evaluation.split` is replaced by `Evaluation.samples` (a tuple of names), also in a saved bundle's `evaluation.json`. Files from before 014 are not read.
+- Unchanged: `Gold`, `GoldSet`, `label`, `BandReport` and the rest.
 
 ## `gl.Gold`
 
@@ -24,7 +25,7 @@ Removed: `path=`, `gold.draw(...)`, `gold.dev`, `gold.test` and `gold.fold_test(
 
 These raise `GoldError` and write nothing:
 
-- a dataset or sample name that is bad or missing;
+- a dataset or sample name that is missing or not `[a-z0-9_-]+` (lowercase only);
 - a `sample_size` or `n` that is not an `int` of at least 1;
 - a shortfall when no candidates were given;
 - fewer unused candidates than the shortfall.
