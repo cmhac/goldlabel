@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Named gold datasets, and a labelling page that keeps dev and test apart
+# Specification Quality Checklist: A simpler gold API: candidates and sample size on `Gold`, a required split, named datasets
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-11-04
@@ -32,5 +32,6 @@
 ## Notes
 
 - Ponytail skill applied before drafting; the spec carries a "Deliberately skipped" list.
-- Judgement calls made as defaults, for the user to overturn in `/speckit-clarify`: (1) `gl.label` with no split refuses when both splits have pending rows instead of picking dev; (2) a name maps to a file beside the default, with no registry; (3) per-dataset evaluation counts are derived from the gold path already on each log line.
+- Decisions from the user (2026-11-04): required `split` on `gl.label`; the page shows only the rows pending in the pass; `Gold` takes the candidates and a `sample_size` (default 50, per split); `draw` becomes `draw_sample(split)` with `draw_dev`/`draw_test` shortcuts.
+- Judgement calls made as defaults, for the user to overturn: candidates optional on `Gold` (needed only to draw); `Gold(candidates=None, *, name=None, path=None, sample_size=50)` breaks positional `Gold(path)`; no `draw` alias; no `n=` override; a name is only a file name; per-dataset log counts reuse the gold path already on each log line.
 - `/ponytail-review` of spec, plan and tasks is still required before `/speckit-implement`.
