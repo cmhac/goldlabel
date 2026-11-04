@@ -59,4 +59,47 @@ harnesses.
 
 ## Example workflow
 
-TKTKTK
+```python
+import goldlabel as gl
+
+# 1. Candidates: keyword search over a table (seeds= does semantic search if your rows have embeddings)
+corpus = gl.Table("posts.csv", text_column="body", id_column="post_id")
+candidates = gl.get_candidates(corpus, keywords=["laid off", "layoffs"])
+
+# 2. Taxonomy and classifier (set ANTHROPIC_API_KEY in your environment first)
+taxonomy = gl.Taxonomy(
+    mode="single",
+    labels={
+        "layoff": "The author lost their job, or expects to.",
+        "burnout": "The author is worn out by their work.",
+    },
+)
+clf = gl.Classifier(
+    "anthropic:claude-haiku-4-5",
+    taxonomy,
+    prompt="Choose the one label that fits the post best.",
+)
+
+# 3. Label a dev dataset: opens the web app, returns when you press Done
+gold = gl.Gold()
+gold.draw(candidates, n=50, split="dev")
+gl.label(gold, taxonomy)
+
+# 4. Evaluate, read the disagreements, tune the prompt, evaluate again
+ev = gl.evaluate(clf, gold.dev, target=0.9)
+ev.disagreements_to_polars()
+clf = clf.with_prompt(
+    "Choose the one label that fits the post best. Rumoured redundancies count as layoff."
+)
+ev = gl.evaluate(clf, gold.dev, target=0.9)
+
+# 5. Label and evaluate a test dataset, once
+gold.draw(candidates, n=50, split="test")
+gl.label(gold, taxonomy)
+gl.evaluate(clf, gold.test, target=0.9)
+
+# 6. Classify everything: the estimate calls no model, and max_cost refuses to overspend
+clf.estimate(candidates)
+results = clf.classify(candidates, out="results.jsonl", max_cost=25.0)
+results.to_polars()
+```
