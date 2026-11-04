@@ -137,6 +137,27 @@ def test_page_is_mobile_first_and_has_the_controls():
         assert needle in html or needle in packaged("app.js")
 
 
+def test_page_has_the_split_layout_status_line_and_note_field():
+    js, css = packaged("app.js"), packaged("app.css")
+    assert "lg:grid-cols-" in js and "lg:sticky" in js  # text left, controls right
+    assert "lg\\:grid-cols-" in css and "lg\\:sticky" in css  # and the CSS was rebuilt
+    assert 'role: "status"' in js and 'role: "alert"' in js
+    assert '"textarea"' in js and 'for: "note"' in js  # a labelled note field
+    assert "aria-pressed" in js and '"fieldset"' in js
+    assert re.search(
+        r'"/api/label",\s*\{[^}]*\bnote\b', js
+    )  # the note travels with the label
+
+
+def test_page_key_map_and_guards():
+    js = packaged("app.js")
+    assert "e.repeat" in js  # a held-down key must not label the next rows
+    for key in ('"Escape"', '"s"', '"n"', '"ArrowLeft"', '"Enter"'):
+        assert key in js
+    assert "e.ctrlKey || e.metaKey" in js  # Ctrl/Cmd+Enter saves from the note
+    assert "typing()" in js  # plain keys are paused while the note has focus
+
+
 def test_web_files_are_in_the_wheel(tmp_path):
     import shutil
     import subprocess
