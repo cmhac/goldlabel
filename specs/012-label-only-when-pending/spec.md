@@ -79,7 +79,7 @@ A user wants to go back over rows that are already labelled (to fix a label, or 
 
 - **SC-001**: With every row labelled, `gl.label` returns in under one second, opens 0 ports and 0 browser windows, and prints exactly one statement.
 - **SC-002**: With one pending row, behaviour is unchanged, and the existing label-server tests pass unchanged except the three that used `block=False` (`test_label_page.py` twice, `test_gold_rule.py` once), which are updated as part of this change (confirmed by the user) to reach the server another way because the parameter is gone.
-- **SC-003**: Re-running the sample walkthrough from the top a second time never opens the labelling page.
+- **SC-003**: Calling `gl.label` a second time, with nothing drawn since the first call returned, never opens the labelling page.
 - **SC-004**: Ruff, ty and pytest pass; the gold rule drift tests pass unchanged.
 
 ## Deliberately skipped

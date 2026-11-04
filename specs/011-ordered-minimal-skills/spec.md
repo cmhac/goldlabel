@@ -107,7 +107,7 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - **FR-004**: Each stage skill MUST say, for a repeat of that stage, which later stages must be re-run.
 - **FR-005**: Optional steps MUST be marked as optional in the stage where they belong (for example the corpus `where=` filter, the band sample, saving and reusing a classifier, folding the test split) and MUST say which stage they sit inside; none becomes a stage of its own.
 - **FR-006**: The overview and every stage skill MUST state the minimal-code rule: write only goldlabel calls (plus the few documented non-library constructs); any other code, including caches of input data or evaluation results, helpers and reshaping, only when the user directs it, shown first.
-- **FR-007**: Every code block in the skills MUST consist of goldlabel calls and a short list of allowed constructs (a polars expression for `where=`, a path to a seeds or prompt file and its read, the corpus-fetch step of FR-008), except in sections marked as user-directed; the skills MUST NOT teach writing a snapshot or cache, a guard around a library call, a helper function, a class or a transform that is not user-directed.
+- **FR-007**: Every code block in the skills MUST consist of goldlabel calls and a short list of allowed constructs (a polars expression for `where=` and the corpus-fetch step of FR-008), except in sections marked as user-directed; the skills MUST NOT teach writing a snapshot or cache, a guard around a library call, a helper function, a class or a transform that is not user-directed.
 - **FR-008**: When the data cannot be read by a goldlabel corpus, the skills MUST allow one fetch step, written only after the user agrees, whose result is passed directly to `gl.Table`; they MUST NOT have it write and re-read a snapshot file unless the user asks.
 - **FR-009**: The skills MUST tell the agent not to wrap `draw`, `evaluate` or the labelling call in guards, and to tell the user which cells are run-once (drawing a split, evaluating the test split) so the user does not re-run them. (Decision A below; the labelling cell is safe to re-run once spec 012 lands.)
 - **FR-010**: The skills MUST have the agent define the taxonomy (`gl.Taxonomy(...)`), the prompt (a string) and the seed or keyword list (a list) as code in the notebook or script, and MUST NOT tell it to create, write or read `taxonomy.yaml`, `prompt.md`, `seeds.csv` or a notes file. A prompt is changed by editing its string in place.
@@ -134,7 +134,7 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - **SC-002**: 0 code lines in the skills, outside user-directed sections, that are not goldlabel calls or the listed non-library constructs.
 - **SC-003**: Following the skills over the sample corpus, a reviewer finds the notebook the agent wrote contains 0 lines of non-goldlabel code that the user did not ask for.
 - **SC-004**: In a trial of the same request given to a fresh agent in each of Claude Code and one other agent, 2 of 2 start at the first stage, announce the next stage at the end of each stage they complete, and refuse (offer the earlier stage) when asked to skip ahead.
-- **SC-005**: Re-running the sample walkthrough from the top a second time makes 0 model calls and writes no file that is not the library's own, with no guard code in the notebook (the run-once cells excepted, FR-009).
+- **SC-005**: The skills' code blocks and the walkthrough contain 0 guard constructs (`if`, `assert`, exists-checks) around `draw`, `evaluate`, `classify` or `label`; the run-once cells are named in words (FR-009).
 - **SC-006**: Ruff, ty and pytest pass; the gold rule drift tests pass unchanged.
 
 ## Deliberately skipped
@@ -157,7 +157,7 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - The minimal-code rule is carried in skill text and a trial, because skills cannot be enforced by the library.
 - The fallback for agents that cannot edit `.ipynb` files is dropped at the user's request.
 - The notebook is the record, so a diff of the notebook is what shows a changed prompt; the user accepts that over per-file diffs.
-- The list of non-library constructs allowed is short: a `where=` polars expression, a path to a seeds file, the text of a prompt read from a file, and the documented reads.
+- The list of non-library constructs allowed is short: a `where=` polars expression and the single approved corpus-fetch step. Nothing reads a seeds or prompt file.
 - The three supplied notebooks are representative; which lines the user disliked is inferred from the user's description (caches of input data and of gold evaluation results, and verbose code), not told cell by cell.
 
 ## Decision on re-run guards
