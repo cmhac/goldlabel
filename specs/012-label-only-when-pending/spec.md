@@ -64,7 +64,7 @@ A user wants to go back over rows that are already labelled (to fix a label, or 
 - **FR-001**: `gl.label` MUST count the pending rows in the chosen scope (`split`, or both) before starting anything.
 - **FR-002**: When that count is zero and the explicit option is not given, `gl.label` MUST NOT start the server, open a browser or take the labelling lock, MUST print one statement that every row in scope is labelled (or that there are no rows to label), and MUST return the labelled rows of the scope as it does after **Done**.
 - **FR-003**: When the count is above zero, `gl.label` MUST behave as today, including its output and its return value.
-- **FR-004**: `gl.label` MUST accept one explicit keyword option that starts the page even when nothing is pending, defaulting to off.
+- **FR-004**: `gl.label` MUST accept one explicit keyword option, `force_open_review`, that starts the page even when nothing is pending, defaulting to off.
 - **FR-005**: An invalid `split` MUST still raise the same error as today, before the count is made.
 - **FR-006**: The README, the docstring, the agent skills that mention `gl.label` (`goldlabel-tune`, the `goldlabel` references and the walkthrough text) and the Kiro steering file MUST describe the new behaviour and the option, and the existing drift tests MUST pass.
 - **FR-007**: The gold rule text, `Gold`, `serve` and the page MUST NOT change.
@@ -92,6 +92,6 @@ A user wants to go back over rows that are already labelled (to fix a label, or 
 
 ## Assumptions
 
-- The option is called `review` (`gl.label(gold, taxonomy, review=True)`). This is the only naming decision and the user may rename it.
+- The option is called `force_open_review` (`gl.label(gold, taxonomy, force_open_review=True)`), the name the user chose.
 - "Rows in scope" follows the existing `split` argument; no new scoping is added.
 - In the skip case with `block=False` the labelled rows are returned instead of a handle (see Edge Cases).
