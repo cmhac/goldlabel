@@ -236,7 +236,7 @@ Each task's grep is the check that none are missed.
     - the "Current state" paragraph: 014 implemented, with a one-line summary of the API;
     - the human checks from `quickstart.md`: the page for a dev and a test Sample in a real browser, and the walkthrough run twice in real Jupyter;
     - the testing note on `tests/fixtures/pre006/`, which no longer covers gold;
-    - the "Layout" line for `gold.py`, which now has `Sample` and `draw_sample` and no `draw`, `GoldSet`-only views or `import_rows` changes.
+    - the "Layout" line for `gold.py`, which should list `Gold`, `Sample`, `GoldSet`, `draw_sample` and `import_rows`, and no longer `draw`.
   - Report the Ponytail line and the human checks.
 
 ## Dependencies
