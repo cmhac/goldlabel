@@ -10,15 +10,15 @@
 
 ## Where things are today
 
-- **#23 is not a bug in `draw`.** `gold.draw(candidates, n=50)` writes exactly 50 rows. The user then drew a second 50 with `split="test"` into the same file, and `gl.label(gold, taxonomy)` (no `split`) scopes the page to *every* row in the file, labelled or not, in both splits. The page's counter ("x of 100") counts dev and test together. The README, the walkthrough and the stage skills all call `gl.label(gold, taxonomy)` with no split after drawing the test split, so the confusing behaviour is the documented one. Nothing on the page says which split a row belongs to.
+- **#23 is not a bug in `draw`.** The user's own notebook (`2026-11-04-trump-on-the-ballot-v2.ipynb`) confirms it: `gl.label(gold, taxonomy)` right after `draw(n=50, split="dev")` opened a page of 100 items, and the printed result after both passes was "GoldSet all: 100 rows". The intended behaviour, in the user's words: *the UI only shows the items being labelled in that pass.* `gold.draw(candidates, n=50)` writes exactly 50 rows. The user then drew a second 50 with `split="test"` into the same file, and `gl.label(gold, taxonomy)` (no `split`) scopes the page to *every* row in the file, labelled or not, in both splits. The page's counter ("x of 100") counts dev and test together. The README, the walkthrough and the stage skills all call `gl.label(gold, taxonomy)` with no split after drawing the test split, so the confusing behaviour is the documented one. Nothing on the page says which split a row belongs to.
 - **#22.** A `Gold` is one file (`gold.jsonl` under the root, or any path passed in). A second corpus can already get its own file by passing a path, but nothing in the docs or skills says so, the file is not "named" anywhere a reader sees, and the evaluation log is shared: "the test split was evaluated N times" and `fold_test`'s "evaluated since the last fold" check count test evaluations from *every* gold file together (the log line records the gold file, but those two checks ignore it). So scoring dataset B's test split would let dataset A's spent test rows be folded without ever having been evaluated, and would add to A's evaluation count.
 - Every gold row must carry `split` of `dev` or `test`, and a dataset that only has a test split is allowed already. The workflow "draw dev, tune, draw test, evaluate once" is advice in the skills, not a requirement of the library.
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - The labelling page shows one split, and says which (Priority: P1)
+### User Story 1 - The labelling page shows only the rows of this pass (Priority: P1)
 
-A user draws 50 dev rows, labels them, draws 50 test rows and runs `gl.label(gold, taxonomy)`. The page shows the 50 test rows: "x of 50", with the split named on the page. It never mixes the two. A user who asks for `split="dev"` or `split="test"` gets that split. If both splits have pending rows and the user did not say which, the call does not guess: it refuses with a message that names the two splits and how many rows are pending in each.
+A user draws 50 dev rows and runs `gl.label(gold, taxonomy)`. The page shows exactly those 50 pending rows: "x of 50", the split named on the page. Rows that are already labelled (an earlier pass, or the other split) are not counted and are not paged. Later, the user draws 50 test rows and runs it again: the page shows those 50, not 100. A pass is the set of rows pending when `gl.label` is called (within the chosen split); the total stays fixed for the pass, and **Back** can return to rows labelled earlier in the same pass. A user who asks for `split="dev"` or `split="test"` gets that split's pending rows. If both splits have pending rows and the user did not say which, the call does not guess: it refuses with a message that names the two splits and how many rows are pending in each. `force_open_ui=True` is the one way to page already-labelled rows (to review or relabel), and it needs a split.
 
 **Why this priority**: this is issue #23. The count the user saw was the single most visible symptom, and the fix changes what every notebook in the repo prints.
 
@@ -26,12 +26,13 @@ A user draws 50 dev rows, labels them, draws 50 test rows and runs `gl.label(gol
 
 **Acceptance Scenarios**:
 
-1. **Given** 50 labelled dev rows and 50 pending test rows, **When** `gl.label(gold, taxonomy)` is called with no split, **Then** the page's total is 50, its position and progress count only test rows, and it shows the word "test".
+1. **Given** 50 labelled dev rows and 50 pending test rows, **When** `gl.label(gold, taxonomy)` is called with no split, **Then** the page's total is 50, its position and progress count only those test rows, and it shows the word "test". **Given** 50 pending dev rows and nothing else, the total is 50 and every row is a dev row.
+   1a. **Given** a pass of 50 pending rows of which 20 are labelled, **When** the page is reloaded or the call is made again, **Then** the new pass is the 30 still pending, with total 30.
 2. **Given** pending rows in only one split, **When** `gl.label` is called with no split, **Then** that split is chosen, and the printed line says which one.
 3. **Given** pending rows in both splits, **When** `gl.label` is called with no split, **Then** it raises a `GoldError` that says "dev: N pending, test: M pending; pass split='dev' or split='test'" and starts no server.
 4. **Given** no pending rows in either split and no `force_open_ui`, **When** `gl.label` is called with no split, **Then** it prints one line that nothing is pending (as 012 does) and returns the labelled rows of both splits as before.
 5. **Given** `split="dev"` or `split="test"`, **When** `gl.label` is called, **Then** only that split is paged, counted and returned, as today.
-6. **Given** `force_open_ui=True` and no split, **When** both splits are fully labelled, **Then** the call is refused the same way as scenario 3 but listing the labelled counts, because "review everything at once" is the mix this feature removes.
+6. **Given** `force_open_ui=True` and no split, **When** both splits have rows, **Then** the call is refused the same way as scenario 3 but listing each split's row count, because "review everything at once" is the mix this feature removes. **Given** `force_open_ui=True, split="dev"`, **Then** the pass is all dev rows, labelled or not, as 012 intended.
 
 ---
 
@@ -94,16 +95,17 @@ An agent following `goldlabel-tune` after this ships never writes a bare `gl.lab
 - The default dataset and a dataset someone named "gold" must not collide: the name is mapped to a distinct file name, and `gold.jsonl` stays the default.
 - Two named datasets with the same row id are fine; ids are unique per dataset only.
 - `remove` writes `<file>.removed.jsonl` per dataset, so removed rows from B never land in A's file.
-- A `force_open_ui=True` run on one split of a fully labelled dataset still lets a person relabel, as 012 intended.
+- A `force_open_ui=True, split=...` run on a fully labelled split still lets a person relabel, as 012 intended; that is the only pass that includes labelled rows.
+- A row drawn into the file by another process after the pass began is not added to that pass.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: `gl.label` with no `split` MUST page, count and return only one split: the single split that has pending rows, never rows of both.
+- **FR-001**: A `gl.label` pass MUST page and count only the rows that were pending in its split when the call was made, never already-labelled rows and never rows of the other split; the total is fixed for the pass. With no `split`, the split is the single one that has pending rows. The rows it returns stay as today (the labelled rows of that split).
 - **FR-002**: `gl.label` with no `split` and pending rows in both splits MUST refuse with a `GoldError` that gives each split's pending count and tells the user to pass `split="dev"` or `split="test"`, and MUST start no server.
 - **FR-003**: When nothing is pending anywhere and no `split` is given, `gl.label` MUST keep 012's behaviour (one printed line, no server, labelled rows returned); with `force_open_ui=True` and no `split` and rows in both splits it MUST refuse as in FR-002.
-- **FR-004**: The labelling page MUST show which split it is labelling, and its "x of N" MUST count only that split.
+- **FR-004**: The labelling page MUST show which split it is labelling, and its "x of N" MUST count only the rows of this pass.
 - **FR-005**: A user MUST be able to create a gold dataset by name; the name selects a file beside the default one, and the unnamed `Gold()` MUST remain the existing default file so no current notebook changes.
 - **FR-006**: A dataset name MUST be refused if it is empty or contains anything other than letters, digits, `-` and `_`, so it cannot escape the root or collide with the default file or its `.lock`, `.tmp` or `.removed.jsonl` companions.
 - **FR-007**: Each dataset MUST have its own rows, its own lock, its own removed-rows file and its own labelling session; the "id is not already in the file" rules of `draw` and `import_rows` MUST apply per dataset.
@@ -123,7 +125,7 @@ An agent following `goldlabel-tune` after this ships never writes a bare `gl.lab
 
 ### Measurable Outcomes
 
-- **SC-001**: A user who draws 50 dev rows, labels them, draws 50 test rows and opens the labelling page sees "of 50" (not 100) and sees no dev row, in 100% of the test cases covering that flow.
+- **SC-001**: A user who draws 50 dev rows and opens the labelling page sees "of 50", and after labelling them and drawing 50 test rows sees "of 50" again (not 100) with no dev row, in 100% of the test cases covering that flow, including the rerun of a notebook whose gold file already holds both splits.
 - **SC-002**: With pending rows in both splits and no split passed, the user gets a refusal that names both counts and the fix, and no page is opened, in 100% of tests.
 - **SC-003**: A user can create a second dataset, draw 50 test rows from a different corpus, label them and score them, without editing or even reading the first dataset's file, and the first dataset's counts, evaluation count and fold eligibility are identical before and after.
 - **SC-004**: Every gold file written before this feature loads and behaves identically (the pre-006 fixtures and the existing tests pass unchanged apart from the split now named on the page).
@@ -135,6 +137,7 @@ An agent following `goldlabel-tune` after this ships never writes a bare `gl.lab
 - The name is a file-name suffix beside the default (for example `gold.jsonl` and one file per name); the exact pattern is a plan decision, but it must keep the default untouched.
 - A user who wants dev and test for a second corpus gets them the same way as today, inside the second named dataset; nothing forces test-only.
 - The page names the split in its existing header or status text; no redesign (013 stays as built).
+- "This pass" means the rows pending at the call, which matches the user's wording and needs no record of which draw created a row (no draw ids, no stored state).
 - Pending rows in both splits is rare in the documented flow (dev is labelled before test is drawn), so refusing instead of guessing costs little and avoids another surprise.
 - Datasets are not merged, copied or compared; if a user wants to move rows between them, that is a new request.
 
