@@ -158,7 +158,7 @@ def test_unknown_path_is_404(start):
 
 def test_state_shows_first_pending_row_and_counts(start):
     s = Client(start()).state()
-    assert s["item"] == {"id": "1", "text": "text 1", "labels": None}
+    assert s["item"] == {"id": "1", "text": "text 1", "labels": None, "note": None}
     assert s["position"] == 1
     assert (s["done"], s["total"]) == (0, 4)
     assert s["mode"] == "multi"
@@ -306,7 +306,12 @@ def test_back_then_relabel_changes_stored_label(start, gold_path):
     c.label("1", ["a"])
     c.label("2", ["a"])
     status, s, _ = c.call("POST", "/api/back")
-    assert status == 200 and s["item"] == {"id": "2", "text": "text 2", "labels": ["a"]}
+    assert status == 200 and s["item"] == {
+        "id": "2",
+        "text": "text 2",
+        "labels": ["a"],
+        "note": None,
+    }
     status, s = c.label("2", ["b"])
     assert on_disk(gold_path)[1]["labels"] == ["b"]
     assert s["item"]["id"] == "3"
@@ -443,3 +448,44 @@ def test_nothing_public_beyond_serve():
         and getattr(v, "__module__", None) == "goldlabel._label"
     }
     assert public == {"serve", "label", "Handle"}
+
+
+# --- notes (013) ----------------------------------------------------------------------------
+
+
+def label_with(c, id_, labels, **extra):
+    return c.call("POST", "/api/label", {"id": id_, "labels": labels, **extra})[:2]
+
+
+def test_a_note_is_stored_trimmed_and_the_state_carries_it(start, gold_path):
+    c = Client(start())
+    status, _ = label_with(c, "1", ["a"], note="  two policies in one sentence \n")
+    assert status == 200
+    saved = on_disk(gold_path)[0]
+    assert saved["note"] == "two policies in one sentence"
+    assert saved["labelled_by"] == "goldlabel-ui"
+    c.call("POST", "/api/back")
+    assert c.state()["item"]["note"] == "two policies in one sentence"
+
+
+def test_an_unlabelled_row_has_a_null_note_in_the_state(start):
+    assert Client(start()).state()["item"]["note"] is None
+
+
+def test_an_empty_note_removes_the_key_and_a_missing_note_keeps_it(start, gold_path):
+    c = Client(start())
+    label_with(c, "1", ["a"], note="keep me")
+    label_with(c, "1", ["b"])  # an older client sends no note
+    assert on_disk(gold_path)[0]["note"] == "keep me"
+    label_with(c, "1", ["b"], note="   ")
+    assert "note" not in on_disk(gold_path)[0]
+
+
+def test_a_note_that_is_not_a_string_is_refused_and_nothing_is_written(
+    start, gold_path
+):
+    c = Client(start())
+    before = gold_path.read_text()
+    status, body = label_with(c, "1", ["a"], note=5)
+    assert status == 400 and "note" in body["error"]
+    assert gold_path.read_text() == before

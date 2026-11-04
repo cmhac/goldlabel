@@ -27,10 +27,13 @@ class GoldRow(BaseModel):
     split: Literal["dev", "test"]
     labelled_by: str | None = None  # "goldlabel-ui", "imported" or absent
     labelled_at: str | None = None
+    note: str | None = (
+        None  # a person's comment on the row, written by the labelling page
+    )
 
     def dump(self) -> dict:
         d = self.model_dump()
-        for key in ("labelled_by", "labelled_at"):
+        for key in ("labelled_by", "labelled_at", "note"):
             if d[key] is None:
                 del d[key]
         return d

@@ -64,7 +64,7 @@ ev  # metrics, per-label table, where the labels came from, the disagreements
 df = ev.disagreements_to_polars()  # id, text, gold, predicted, reasoning
 ```
 
-5. Group the disagreements: a missing label (low recall), an over-used label (low precision), two near labels confused, or one kind of text the model cannot handle. The `reasoning` column says why the model chose what it chose.
+5. Group the disagreements: a missing label (low recall), an over-used label (low precision), two near labels confused, or one kind of text the model cannot handle. The `reasoning` column says why the model chose what it chose. Gold rows may carry a person's `note` (a `note` column in `gold.dev.to_polars()`): read the dev ones for the edge cases people flagged. Never write or change a note; it is a person's comment, like a label.
 6. Change **one** thing with the user's agreement: edit a sentence of the prompt string in its cell, a label description (which changes the taxonomy), or add one example. Say what you expect it to fix. Re-evaluate and compare which rows flipped; a change that fixes three and breaks four is not progress. An unchanged prompt costs nothing to re-evaluate (cached); a changed one makes one live call per dev item, so say that, and the size of the dev set, before you run it on a large one.
 
 ```python

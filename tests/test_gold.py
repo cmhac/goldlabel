@@ -491,3 +491,36 @@ def test_fold_test_cannot_run_twice_and_a_fresh_split_starts_pending(tmp_path):
     assert fresh.id not in {"d1", "t1", "t2"} and fresh.labels is None
     with pytest.raises(GoldError, match="finish labelling"):
         g.fold_test(log=log)
+
+
+# --- notes (013) ----------------------------------------------------------------------------
+
+
+def test_a_note_round_trips_and_an_unset_note_writes_no_key(tmp_path):
+    p = write(
+        tmp_path / "g.jsonl",
+        row("1", ["a"], note="two policies in one sentence"),
+        row("2", ["a"]),
+    )
+    g = Gold(p)
+    assert [r.note for r in g.all.rows] == ["two policies in one sentence", None]
+    g._write(g._read())
+    assert [("note" in r, r.get("note")) for r in lines(p)] == [
+        (True, "two policies in one sentence"),
+        (False, None),
+    ]
+
+
+def test_import_rows_keeps_a_note_key_as_given(tmp_path):
+    g = Gold(tmp_path / "g.jsonl")
+    g.import_rows(
+        [{"id": "1", "text": "t", "labels": ["a"], "note": "sarcasm"}], split="dev"
+    )
+    assert lines(g.path)[0]["note"] == "sarcasm"
+    assert lines(g.path)[0]["labelled_by"] == "imported"
+
+
+def test_gold_frames_carry_the_note_column(tmp_path):
+    g = Gold(write(tmp_path / "g.jsonl", row("1", ["a"], note="n"), row("2", ["b"])))
+    assert g.all.to_polars()["note"].to_list() == ["n", None]
+    assert g.all.to_pandas()["note"].tolist() == ["n", None]
