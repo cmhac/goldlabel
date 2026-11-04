@@ -25,6 +25,7 @@ Decisions from the user in the conversation of 2026-11-04 (the final ones; earli
 
 - Q: What is a gold row's sample name called in the gold file and in the Python and table views? → A: `sample` everywhere (file key, `row.sample`, the `sample` column), replacing `split`; goldlabel is early alpha, so nothing written before this feature (gold files, logs, bundles) is read or kept compatible, and there are no aliases or shims.
 - Q: Should drawing, importing and removing rows be refused while a labelling page is open on the same dataset? → A: No; there is no check, as today, and the user takes care not to write to a dataset from another process while it is being labelled.
+- Q: Should a sample's "evaluated N times" count also include evaluations of combinations that contain it? → A: No; a sample's count covers only evaluations of exactly that sample, and a combination has its own count.
 
 ## Where things are today
 
@@ -226,7 +227,7 @@ The skills also give a second corpus its own named `Gold`, and say the evaluatio
 
   `gold[name]` MUST return a sample without drawing. `draw`, the `dev`/`test` properties and `fold_test` MUST be removed.
 - **FR-004**: The draw order MUST be fixed by each candidate's id and the dataset's name, the same on every machine. There MUST be no seed argument.
-- **FR-005**: A Sample MUST be a live, read-only view of its rows: it reads the file when used and stores no labels. Its summary MUST name the dataset and sample(s) and give rows, labelled, pending, how many the call that made it drew, and how many times it was evaluated with how many prompts. It MUST export `to_polars()` and `to_pandas()`.
+- **FR-005**: A Sample MUST be a live, read-only view of its rows: it reads the file when used and stores no labels. Its summary MUST name the dataset and sample(s) and give rows, labelled, pending, how many the call that made it drew, and how many times exactly that sample (or exactly that combination) was evaluated, with how many distinct prompts; evaluations of a combination never count toward its parts. It MUST export `to_polars()` and `to_pandas()`.
 - **FR-006**: `sample + sample` MUST return a combined Sample over the union of their rows. It MUST refuse Samples of different datasets and MUST write nothing. It MUST NOT check which samples are combined.
 - **FR-007**: `gl.label(sample, taxonomy, *, force_open_ui=False, open_browser=True, port=None)` MUST take a Sample and refuse anything else.
   - It MUST page only the rows pending in the Sample at the call, or every row with `force_open_ui=True`, with a total fixed for the pass.
