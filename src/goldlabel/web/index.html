@@ -8,8 +8,13 @@
 <link rel="stylesheet" href="app.css?token=__TOKEN__">
 </head>
 <body class="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-<main id="app" class="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-4">
-  <p class="text-zinc-600 dark:text-zinc-400">Loading...</p>
+<main class="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-4">
+  <div id="head" class="flex flex-col gap-4"></div>
+  <!-- created once, so screen readers announce its text changes; render() only edits its text -->
+  <p id="status" role="status" hidden class="flex min-h-11 items-center rounded-lg border border-blue-200 bg-blue-50 px-3 text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-100"></p>
+  <div id="app" class="flex flex-col gap-4">
+    <p class="text-zinc-600 dark:text-zinc-400">Loading...</p>
+  </div>
 </main>
 <script src="app.js?token=__TOKEN__"></script>
 </body>

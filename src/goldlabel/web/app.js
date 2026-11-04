@@ -2,9 +2,12 @@
 // validates labels, picks the next item and writes the file.
 const token = new URLSearchParams(location.search).get("token") || "";
 const app = document.getElementById("app");
+const head = document.getElementById("head");
+const statusEl = document.getElementById("status");
 let state = null;
 let shown = null; // id of the item the selection and the note belong to
 let selected = [];
+// shortcut: the draft lives only until the row changes (Skip or Back drops it), keep drafts per row if people ask.
 let note = ""; // the draft note for the shown item; survives a re-render
 let saved = null; // {id, labels} of the last save, for the status line
 let busy = false; // a request is in flight
@@ -81,6 +84,8 @@ const save = () => {
 };
 const done = async () => {
   if (await call("POST", "/api/done")) {
+    head.replaceChildren();
+    statusEl.hidden = true;
     app.replaceChildren(
       el("h1", "text-xl font-semibold", "All saved"),
       el("p", MUTED, "The labelling session has ended. You can close this tab."),
@@ -111,8 +116,8 @@ function statusText() {
 }
 
 function setStatus() {
-  const s = document.getElementById("status");
-  if (s) s.textContent = statusText();
+  const text = statusText();
+  if (statusEl.textContent !== text) statusEl.textContent = text; // same text: no repeat announcement
 }
 
 function header() {
@@ -120,23 +125,13 @@ function header() {
   const fill = el("div", "h-2 bg-zinc-900 dark:bg-zinc-100");
   fill.style.width = (state.total ? (100 * state.done) / state.total : 0) + "%";
   bar.append(fill);
-  const head = el("div", "flex flex-wrap items-center gap-x-8 gap-y-2");
+  const line = el("div", "flex flex-wrap items-center gap-x-8 gap-y-2");
   const title = el("h1", "text-lg font-semibold", "Label");
   title.prepend(el("span", "font-normal " + MUTED, "goldlabel / "));
   const progress = el("div", "flex min-w-64 flex-1 items-center gap-3");
   progress.append(bar, el("p", "whitespace-nowrap tabular-nums " + MUTED, state.done + " / " + state.total + " labelled"));
-  head.append(title, progress);
-  return head;
-}
-
-function status() {
-  return el(
-    "p",
-    "flex min-h-11 items-center rounded-lg border border-blue-200 bg-blue-50 px-3 text-blue-900 " +
-      "dark:border-blue-900 dark:bg-blue-950 dark:text-blue-100",
-    statusText(),
-    { id: "status", role: "status" },
-  );
+  line.append(title, progress);
+  return line;
 }
 
 function counts() {
@@ -210,7 +205,7 @@ function noteField() {
   t.value = note;
   t.oninput = () => (note = t.value);
   t.onfocus = t.onblur = setStatus;
-  box.append(t, el("p", "text-sm " + MUTED, "Saved with the label. Skipping a row does not keep its note."));
+  box.append(t, el("p", "text-sm " + MUTED, "Saved with the label. Skipping or going back does not keep an unsaved note."));
   return box;
 }
 
@@ -251,7 +246,10 @@ function render() {
     selected = state.item.labels || [];
     note = state.item.note || "";
   }
-  const parts = [header(), status()];
+  head.replaceChildren(header());
+  statusEl.hidden = false;
+  setStatus();
+  const parts = [];
   if (error) parts.push(el("p", "rounded-lg border border-red-700 p-3 text-red-800 dark:border-red-400 dark:text-red-300", "Error: " + error, { role: "alert" }));
   if (state.finished) parts.push(finished());
   else {

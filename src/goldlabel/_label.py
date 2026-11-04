@@ -178,6 +178,7 @@ class Handle:
                 "labelled_by": "goldlabel-ui",
                 "labelled_at": datetime.now(UTC).isoformat(),
             }
+            # shortcut: no note length limit beyond MAX_BODY, add one if gold files grow huge notes.
             if note is not None:  # None: an older client, keep the row's note
                 stamp["note"] = note.strip() or None
             self.gold._write(

@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-04
 
-**Status**: Draft
+**Status**: Implemented (human checks listed in AGENTS.md)
 
 **Input**: GitHub issue [cmhac/goldlabel#18](https://github.com/cmhac/goldlabel/issues/18), "Better layout and keyboard shortcuts for gold dataset UI": "on large enough screens, should put text on left and data entry controls on right. clicking an option should auto-advance. and we need keyboard shortcuts so that users don't have to take their hands off keyboard while labeling. In addition, gold datasets should have the ability to store notes for individual records, to help with tuning edge cases." Follow-up from the user: build the redesign mocked up in the Claude Design canvas (<https://claude.ai/artifact/DJitbNLavrtJ7A6fUVaCgk>, boards: desktop single-label, desktop multi-label with a note, phone dark) and replace the current page with it.
 

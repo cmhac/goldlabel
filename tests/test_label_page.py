@@ -141,7 +141,9 @@ def test_page_has_the_split_layout_status_line_and_note_field():
     js, css = packaged("app.js"), packaged("app.css")
     assert "lg:grid-cols-" in js and "lg:sticky" in js  # text left, controls right
     assert "lg\\:grid-cols-" in css and "lg\\:sticky" in css  # and the CSS was rebuilt
-    assert 'role: "status"' in js and 'role: "alert"' in js
+    # the live region exists before its text changes, so screen readers announce it
+    assert 'id="status" role="status"' in packaged("index.html")
+    assert 'role: "alert"' in js and "role: " + '"status"' not in js
     assert '"textarea"' in js and 'for: "note"' in js  # a labelled note field
     assert "aria-pressed" in js and '"fieldset"' in js
     assert re.search(

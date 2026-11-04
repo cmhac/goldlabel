@@ -13,7 +13,7 @@
 ## Phase 3: Text and close
 
 - [X] T003 Update the text: README "The labelling page" (layout, auto-advance, the keys, the note, where it is stored), `src/goldlabel/skills/goldlabel-tune/SKILL.md` (one sentence: rows may carry a person's `note`, read it when reading disagreements, never write one), and `grep -rn "Enter to move on\|number keys" README.md src/goldlabel/skills .kiro docs` for other old key text. Run `tests/test_skills.py tests/test_docs.py tests/test_gold_rule.py -n0`: green.
-- [ ] T004 Run `uv run ruff check`, `uv run ruff format --check`, `uv run ty check`, `uv run pytest`; run `/ponytail-review` on the diff and `/ponytail-debt`; set `spec.md` Status, update the AGENTS.md "Current state" paragraph (013 implemented; human checks: the page in a real browser at both widths, now including keyboard use and notes). Fix findings.
+- [X] T004 Run `uv run ruff check`, `uv run ruff format --check`, `uv run ty check`, `uv run pytest`; run `/ponytail-review` on the diff and `/ponytail-debt`; set `spec.md` Status, update the AGENTS.md "Current state" paragraph (013 implemented; human checks: the page in a real browser at both widths, now including keyboard use and notes). Fix findings.
 
 ## Dependencies
 
