@@ -78,7 +78,7 @@ A user wants to go back over rows that are already labelled (to fix a label, or 
 ### Measurable Outcomes
 
 - **SC-001**: With every row labelled, `gl.label` returns in under one second, opens 0 ports and 0 browser windows, and prints exactly one statement.
-- **SC-002**: With one pending row, behaviour is unchanged, and the existing label-server tests pass unchanged except the three that used `block=False` (`test_label_page.py` twice, `test_gold_rule.py` once), which must reach the server another way because the parameter is gone.
+- **SC-002**: With one pending row, behaviour is unchanged, and the existing label-server tests pass unchanged except the three that used `block=False` (`test_label_page.py` twice, `test_gold_rule.py` once), which are updated as part of this change (confirmed by the user) to reach the server another way because the parameter is gone.
 - **SC-003**: Re-running the sample walkthrough from the top a second time never opens the labelling page.
 - **SC-004**: Ruff, ty and pytest pass; the gold rule drift tests pass unchanged.
 
@@ -95,4 +95,4 @@ A user wants to go back over rows that are already labelled (to fix a label, or 
 
 - The option is called `force_open_ui` (`gl.label(gold, taxonomy, force_open_ui=True)`), the name the user chose.
 - "Rows in scope" follows the existing `split` argument; no new scoping is added.
-- Removing `block` is a breaking change to a public function. Pre-1.0 and used only blocking in the supplied notebooks, so no deprecation period is added; the user may say otherwise.
+- Removing `block` is a breaking change to a public function. Confirmed by the user: the library is early and unstable, so there is no deprecation period and no warning release.
