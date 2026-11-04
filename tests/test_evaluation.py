@@ -459,3 +459,11 @@ def test_a_note_on_a_gold_row_never_reaches_the_model():
         "t1",
         "t2",
     ]  # items run concurrently: arrival order is not fixed
+
+
+@pytest.mark.parametrize("bad", [0, -1, 1.5, True])
+def test_band_sample_refuses_a_per_band_below_one(bad):
+    model, calls = answering(BAND_ANSWERS)
+    with pytest.raises(ValueError, match="per_band"):
+        clf(model).band_sample(banded(), per_band=bad)
+    assert calls == []

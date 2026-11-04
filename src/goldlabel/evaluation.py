@@ -290,6 +290,10 @@ async def _aband_sample(clf: Classifier, candidates, *, per_band=30) -> BandRepo
     The rows of a band are picked in the id-fixed order (`order_by_id`), so a rerun picks the same
     ones. Off-topic means the predicted labels are exactly `{off_topic}`. Nothing is written.
     """
+    if isinstance(per_band, bool) or not isinstance(per_band, int) or per_band < 1:
+        raise ValueError(
+            f"per_band must be a whole number of at least 1, not {per_band!r}"
+        )
     if candidates.source != "seeds":
         raise ValueError(
             f"band_sample needs similarity scores, but this list was built from "

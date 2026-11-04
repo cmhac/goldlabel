@@ -91,9 +91,9 @@ def _need_sample(sample) -> None:
 class Handle:
     """One labelling pass: `ids` are the rows it pages, fixed when it starts."""
 
-    def __init__(self, sample: Sample, taxonomy: Taxonomy, ids: set[str]):
+    def __init__(self, sample: Sample, taxonomy: Taxonomy, ids: set[str], review=False):
         self.sample, self.gold, self.taxonomy = sample, sample.gold, taxonomy
-        self.ids = ids
+        self.ids, self.review = ids, review
         self.token = secrets.token_urlsafe(32)
         self.lock = self.gold.path.with_name(self.gold.path.name + ".lock")
         self._mutex = threading.Lock()
@@ -131,9 +131,12 @@ class Handle:
         return [r for r in self.gold._read() if r.id in self.ids]
 
     def _after(self, rows, id_):
-        """The next pending row after `id_` in file order, else the first pending one."""
+        """The next pending row after `id_` in file order, else the first pending one. A review
+        pass (`force_open_ui`) walks every row once, in file order, then finishes."""
         ids = [r.id for r in rows]
         start = ids.index(id_) + 1 if id_ in ids else 0
+        if self.review:
+            return ids[start] if start < len(ids) else None
         for r in rows[start:] + rows[:start]:
             if not r.labels:
                 return r.id
@@ -308,12 +311,10 @@ def serve(
     that are pending now (every row with `force_open_ui=True`); it starts at the first of them."""
     _need_sample(sample)
     ids = {r.id for r in sample.rows if force_open_ui or not r.labels}
-    handle = Handle(sample, taxonomy, ids)
+    handle = Handle(sample, taxonomy, ids, review=force_open_ui)
     _acquire(handle.lock)
     try:
-        scope = handle._scope()
-        # nothing pending (force_open_ui): start at the pass's first row so it can be reviewed
-        handle.current = handle._after(scope, "") or (scope[0].id if scope else None)
+        handle.current = handle._after(handle._scope(), "")
         request = type("Request", (_Request,), {"session": handle})
         handle.server = ThreadingHTTPServer(("127.0.0.1", port or 0), request)
         threading.Thread(target=handle.server.serve_forever, daemon=True).start()

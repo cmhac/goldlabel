@@ -228,7 +228,7 @@ Each task's grep is the check that none are missed.
 
 ## Phase 5: Close
 
-- [ ] T005 Close the feature in `specs/014-named-gold-datasets/spec.md` and `AGENTS.md`.
+- [X] T005 Close the feature in `specs/014-named-gold-datasets/spec.md` and `AGENTS.md`.
   - Run `uv run ruff check`, `uv run ruff format --check`, `uv run ty check` and `uv run pytest`, and report the real output summaries.
   - Run `/ponytail-review` on the diff since the specs commit and `/ponytail-debt`, and fix what they find.
   - Set the spec's Status to "Implemented".

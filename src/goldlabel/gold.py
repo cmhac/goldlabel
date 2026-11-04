@@ -17,7 +17,7 @@ from goldlabel.taxonomy import Taxonomy
 NAME = re.compile(r"[a-z0-9_-]+")  # lowercase: dataset names become file names
 
 
-def check_name(name, what: str = "sample") -> str:
+def _check_name(name, what: str = "sample") -> str:
     if not isinstance(name, str) or not NAME.fullmatch(name):
         raise GoldError(
             f"a {what} name is lowercase letters, digits, '-' and '_', not {name!r}"
@@ -25,7 +25,7 @@ def check_name(name, what: str = "sample") -> str:
     return name
 
 
-def check_size(n, what: str) -> int:
+def _check_size(n, what: str) -> int:
     if isinstance(n, bool) or not isinstance(n, int) or n < 1:
         raise GoldError(f"{what} must be a whole number of at least 1, not {n!r}")
     return n
@@ -197,9 +197,9 @@ class Gold:
 
     def __init__(self, candidates=None, *, name=None, sample_size=50):
         if name is not None:
-            check_name(name, "dataset")
+            _check_name(name, "dataset")
         self.candidates, self.name = candidates, name
-        self.sample_size = check_size(sample_size, "sample_size")
+        self.sample_size = _check_size(sample_size, "sample_size")
         self.path = resolve(
             None, "gold.jsonl" if name is None else f"gold-{name}.jsonl"
         )
@@ -283,8 +283,8 @@ class Gold:
         Rerunning draws nothing once the sample is full. Never removes rows; never draws an id that
         is already in the file or was removed from it.
         """
-        check_name(name)
-        n = self.sample_size if n is None else check_size(n, "n")
+        _check_name(name)
+        n = self.sample_size if n is None else _check_size(n, "n")
         rows = self._read()
         need = n - sum(1 for r in rows if r.sample == name)
         if need <= 0:
@@ -322,7 +322,7 @@ class Gold:
         """Add rows people already labelled (dicts with `id`, `text`, `labels`) to the sample
         `name`, stamped `imported`. Labels are not checked against a taxonomy here; evaluation does that.
         """
-        check_name(name)
+        _check_name(name)
         existing = self._read()
         seen = {r.id for r in existing}
         now = datetime.now(UTC).isoformat()

@@ -543,8 +543,6 @@ def test_only_import_rows_can_set_a_label():
         "GoldRow",
         "GoldSet",
         "Sample",
-        "check_name",
-        "check_size",
     }
     read_only = {"rows", "name", "path", "counts", "to_polars", "to_pandas"}
     assert not {n for n in dir(GoldSet) if not n.startswith("_")} - read_only

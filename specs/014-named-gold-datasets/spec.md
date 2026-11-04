@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-04
 
-**Status**: Draft (constitution amended to 1.3.0 for it)
+**Status**: Implemented (constitution 1.3.0; human checks listed in AGENTS.md)
 
 **Input**: User description: "Fix issues #22 and #23 and improve how gold labelling works." Issue #22, *Multiple gold datasets/separate evals*: "Users may want to set up multiple gold datasets for evaluation. For example, you might tune a prompt on one corpus, then want to apply it to another and just create a test set there without going through the dev/test workflow. Test is often sufficient in such cases. Need to be able to create separate, named golden datasets." Issue #23, *gold labeling not respecting draw's n parameter*: "I just ran a gold.draw with n=50, and the UI is showing 100. There's also a test draw in the notebook with another n=50, but not sure why the gold dataset is not treating those as separate."
 

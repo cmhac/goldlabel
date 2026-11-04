@@ -585,3 +585,20 @@ def test_a_row_outside_the_pass_cannot_be_labelled(fifty_and_fifty):
     finally:
         h.stop()
     assert fifty_and_fifty.read_bytes() == before
+
+
+def test_a_review_pass_walks_every_row_in_file_order(fifty_and_fifty):
+    h = serve("dev", force_open_ui=True)
+    try:
+        c = Client(h)
+        s = c.label("d0", ["b"])[1]
+        assert (s["item"]["id"], s["position"]) == ("d1", 2)
+        s = c.call("POST", "/api/skip")[1]
+        assert s["item"]["id"] == "d2"
+        for i in range(2, 49):
+            s = c.label(f"d{i}", ["a"])[1]
+        assert s["item"]["id"] == "d49"
+        s = c.label("d49", ["a"])[1]
+        assert s["finished"] is True and s["item"] is None
+    finally:
+        h.stop()
