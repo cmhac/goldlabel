@@ -25,3 +25,4 @@ When working with the `goldlabel` library (content analysis over a corpus: candi
 - Never run a full classification without showing `clf.estimate(...)` (calls, cost, time) and getting a yes from the user.
 - Never put API keys or database URLs in a notebook, script or file; they come from environment variables.
 - Never evaluate the held-out test sample to guide edits, and never combine a spent test sample into the tuning set (`dev + test`) without the user's explicit yes.
+- A second corpus gets its own named gold dataset (`name="corpus-b"`), usually just a held-out test sample, labelled by people and evaluated once.

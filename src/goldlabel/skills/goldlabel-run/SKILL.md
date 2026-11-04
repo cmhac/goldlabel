@@ -54,6 +54,17 @@ results.errors  # items that failed; returned, never raised
 clf.save("classifiers/my-topic/", evaluation=final)  # final is the one test evaluation
 ```
 
+6. (optional) Before running the classifier on a different corpus, check it there: give that corpus its own named gold dataset with a held-out test sample, have people label it and evaluate it once (`goldlabel-tune` step 10). Report that score with the other one; never fold that corpus's rows into the first dataset.
+
+```python
+gold_b = gl.Gold(
+    candidates_b, name="corpus-b"
+)  # its own file: .goldlabel/gold-corpus-b.jsonl
+test_b = gold_b.draw_sample("test", n=30)  # pending; people label them
+gl.label(test_b, taxonomy)
+final_b = clf.evaluate(test_b)  # once, as for any held-out sample
+```
+
 More detail is in `references/running.md` and `references/reuse.md` of the `goldlabel` skill.
 
 ## Ask, do not decide

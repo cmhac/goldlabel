@@ -195,7 +195,7 @@ Each task's grep is the check that none are missed.
 
 **Independent test**: US6's independent test in `spec.md`.
 
-- [ ] T004 [US6] Teach the test discipline, combining and the second-corpus case in `src/goldlabel/skills/goldlabel-tune/SKILL.md`, `src/goldlabel/skills/goldlabel/references/tuning.md` and `src/goldlabel/skills/goldlabel-run/SKILL.md`, and add a removed-name guard to `tests/test_skills.py`.
+- [X] T004 [US6] Teach the test discipline, combining and the second-corpus case in `src/goldlabel/skills/goldlabel-tune/SKILL.md`, `src/goldlabel/skills/goldlabel/references/tuning.md` and `src/goldlabel/skills/goldlabel-run/SKILL.md`, and add a removed-name guard to `tests/test_skills.py`.
 
   **Tests first (red).** In `tests/test_skills.py`:
   - **A removed-name guard** over the docs (all of them, including the README and both walkthrough files). It fails on any of these:

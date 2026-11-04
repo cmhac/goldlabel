@@ -137,6 +137,21 @@ def test_walkthrough_is_honest_about_gold_and_keys():
     assert not (SAMPLE / ".goldlabel" / "config.toml").exists()
 
 
+def test_walkthrough_uses_no_removed_name():
+    code = PY.read_text()
+    for pattern in (
+        r"\.draw\(",
+        r"\bfold_test\b",
+        r"\bgl\.a?evaluate\(",
+        r"\bgl\.band_sample\(",
+        r"\bgl\.eval_log\(",
+        r"\blog=",
+        r"\bgl\.label\(\s*gold\b",
+        r"draw_sample\([^)]*seed=",
+    ):
+        assert not re.search(pattern, code), pattern
+
+
 def test_agents_md_holds_the_rule_and_claude_md_is_its_symlink():
     agents = ROOT / "AGENTS.md"
     assert goldlabel.GOLD_RULE_FULL in agents.read_text(), (

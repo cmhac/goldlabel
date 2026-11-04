@@ -41,7 +41,7 @@ Stop when the score reaches the target the user set, or when the remaining disag
 
 ## Never tune on the test sample
 
-The test sample exists to report an honest number once. Do not evaluate it to decide what to change, do not read its disagreements to write the prompt, and do not draw more rows into it. Evaluate it when the user says the prompt is final:
+The test sample is held out: it exists to report an honest number once, at the end, when every row in it is labelled. goldlabel records every evaluation but does not stop a second one, so keeping it held out is your rule; its summary says how often it was evaluated. Do not evaluate it to decide what to change, do not read its disagreements to write the prompt, and do not draw more rows into it. Evaluate it when the user says the prompt is final:
 
 ```python
 test = gold.draw_sample("test")  # pending; people label them

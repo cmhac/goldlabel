@@ -423,3 +423,53 @@ def test_connect_skill_table_filter_example_runs(tmp_path, monkeypatch):
         "several": ["1", "2", "4"],  # politics or opinion
         "since": ["2", "3", "4"],  # year 2024 on, cast from CSV text
     }
+
+
+# --- 014: removed names, the test discipline, a second corpus -----------------------------------
+
+REMOVED = [
+    r"\.draw\(",
+    r"\bdraw_dev\b",
+    r"\bdraw_test\b",
+    r"\bfold_test\b",
+    r"\bgl\.a?evaluate\(",
+    r"\bgl\.band_sample\(",
+    r"\bgl\.eval_log\(",
+    r"\bEvalLog\b",
+    r"\blog=",
+    r"\bGold\(\s*path",
+    r"\bgl\.label\(\s*gold\b",
+    r"draw_sample\([^)]*seed=",
+]
+
+
+@pytest.mark.parametrize(
+    "path", [*DOCS, INSTRUCTIONS, STEERING], ids=lambda p: f"{p.parent.name}/{p.name}"
+)
+def test_no_agent_doc_uses_a_removed_name(path):
+    text = path.read_text()
+    for pattern in REMOVED:
+        assert not re.search(pattern, text), f"{path.name} still uses {pattern}"
+
+
+def test_the_tune_skill_and_the_tuning_reference_state_the_test_discipline():
+    for path in (
+        SKILLS / "goldlabel-tune" / "SKILL.md",
+        SKILL_DIR / "references" / "tuning.md",
+    ):
+        text = path.read_text()
+        for needle in (
+            "held out",
+            "once",
+            "explicit yes",
+            "tuning = dev + test",
+            'draw_sample("test-2")',
+        ):
+            assert needle in text, f"{path.name} does not say {needle!r}"
+
+
+def test_the_tune_and_run_skills_give_a_second_corpus_its_own_dataset():
+    for name in ("goldlabel-tune", "goldlabel-run"):
+        text = (SKILLS / name / "SKILL.md").read_text()
+        assert re.search(r'gl\.Gold\([^)]*name="', text), name
+        assert 'draw_sample("test"' in text, name

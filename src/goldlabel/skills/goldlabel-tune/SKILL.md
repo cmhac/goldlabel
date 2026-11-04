@@ -73,7 +73,7 @@ dev  # its summary says how often it was evaluated, with how many prompts
 
    Before you add a worked example to the prompt, check it is not a row of the gold set: scoring the classifier on an item its prompt quotes measures nothing. Look the ids up with `gold.all.to_polars()`.
 7. Stop at the target, or when what remains looks like label noise or genuinely ambiguous items (show a few), or when changes stop moving the score.
-8. The held-out test sample: evaluate once. Never evaluate it to guide edits and never read its disagreements to write the prompt. When the user says the prompt is final, draw it, have people label it, and evaluate it (run-once).
+8. The test sample is held out: it is evaluated once, at the end, only when every row in it is labelled, and it never guides an edit. goldlabel does not stop a second evaluation, so this rule is yours to keep: never evaluate it to guide edits, never read its disagreements to write the prompt, and never evaluate it again under another prompt or model. Its summary (`test`) says how often it was evaluated; that number goes in the report. When the user says the prompt is final, draw it, have people label it, and evaluate it (run-once).
 
 ```python
 test = gold.draw_sample("test")  # pending; people label them
@@ -88,6 +88,17 @@ final = clf.evaluate(test)
 tuning = dev + test  # only after the user's explicit yes
 test_2 = gold.draw_sample("test-2")
 gl.label(test_2, taxonomy)  # people label the fresh sample
+```
+
+10. (optional) The user wants the tuned prompt on a different corpus too. Give that corpus its own gold dataset, by name, rather than drawing its rows into this one: a held-out test sample is usually enough there (no dev sample, no tuning), drawn from that corpus's candidates, labelled by people and evaluated once. The first dataset is not touched, and each dataset's evaluation counts are its own.
+
+```python
+gold_b = gl.Gold(
+    candidates_b, name="corpus-b"
+)  # its own file: .goldlabel/gold-corpus-b.jsonl
+test_b = gold_b.draw_sample("test", n=30)  # pending; people label them
+gl.label(test_b, taxonomy)
+final_b = clf.evaluate(test_b)  # once, as for any held-out sample
 ```
 
 ## Ask, do not decide
