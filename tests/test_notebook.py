@@ -385,7 +385,15 @@ def test_numbers_and_types_candidates_and_gold():
     b = candidates().to_pandas()
     assert b["max_similarity"].dtype == "float64"
     g = gold_set().to_polars()
-    assert g.columns == ["id", "text", "labels", "split", "labelled_by", "labelled_at"]
+    assert g.columns == [
+        "id",
+        "text",
+        "labels",
+        "split",
+        "labelled_by",
+        "labelled_at",
+        "note",
+    ]
     assert g["labels"].to_list() == [["a"], None]
     assert g["labelled_by"].to_list() == ["imported", None]
     assert gold_set().to_pandas().to_dict("records") == g.to_dicts()
