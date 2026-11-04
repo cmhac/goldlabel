@@ -178,8 +178,7 @@ async def aevaluate(
     sources = {"goldlabel-ui": 0, "imported": 0, "unstamped": 0}
     for r in rows:
         sources[r.labelled_by if r.labelled_by in sources else "unstamped"] += 1
-    splits = {r.split for r in rows}
-    split = "mixed" if len(splits) > 1 else (splits.pop() if splits else gold_set.name)
+    split = " + ".join(sorted({r.sample for r in rows}))
     evaluation = Evaluation(
         metrics=metrics,
         metric=metric,

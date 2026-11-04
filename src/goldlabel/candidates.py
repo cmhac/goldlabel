@@ -66,6 +66,13 @@ def _band_name(i: int) -> str:
 CAPPED_WARNING = "results were capped, so some items above the floor may be missing"
 
 
+def order_by_id(rows, salt: str = "") -> list[dict]:
+    """Rows in an order fixed by each id (and `salt`): the same on every machine, unmoved by other rows."""
+    return sorted(
+        rows, key=lambda r: hashlib.sha256(f"{salt}\0{r['id']}".encode()).hexdigest()
+    )
+
+
 def band_counts(candidates: list[dict]) -> list[int]:
     counts = [0] * len(BANDS)
     for c in candidates:

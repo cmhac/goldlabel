@@ -10,19 +10,25 @@ from urllib.parse import urlparse
 import pytest
 
 from goldlabel import _label
+from goldlabel.settings import settings
 from goldlabel.taxonomy import Label, Taxonomy
 
 
 def rows(*specs):
     """specs: (id, labels-or-None, split)."""
     return [
-        {"id": i, "text": f"text {i}", "labels": labels, "split": split}
+        {"id": i, "text": f"text {i}", "labels": labels, "sample": split}
         for i, labels, split in specs
     ]
 
 
 def write_gold(path, rows_):
     path.write_text("".join(json.dumps(r) + "\n" for r in rows_))
+
+
+@pytest.fixture(autouse=True)
+def root(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "root", tmp_path)
 
 
 def taxonomy(mode="multi"):
@@ -52,7 +58,7 @@ def start(gold_path):
     handles = []
 
     def go(mode="multi", **kw):
-        h = _label.serve(_label.Gold(gold_path), taxonomy(mode), **kw)
+        h = _label.serve(_label.Gold(), taxonomy(mode), **kw)
         handles.append(h)
         return h
 
@@ -181,12 +187,12 @@ def test_split_restricts_rows(start):
 
 
 def test_bad_split_is_refused(gold_path):
-    with pytest.raises(ValueError, match="split"):
-        _label.serve(_label.Gold(gold_path), taxonomy(), split="train")
+    with pytest.raises(ValueError, match="lowercase"):
+        _label.serve(_label.Gold(), taxonomy(), split="Train")
 
 
 def test_already_labelled_rows_are_skipped_and_counted(tmp_path):
-    p = tmp_path / "g.jsonl"
+    p = tmp_path / "gold.jsonl"
     write_gold(
         p,
         rows(
@@ -196,7 +202,7 @@ def test_already_labelled_rows_are_skipped_and_counted(tmp_path):
             ("4", [], "dev"),
         ),
     )
-    h = _label.serve(_label.Gold(p), taxonomy())
+    h = _label.serve(_label.Gold(), taxonomy())
     try:
         s = Client(h).state()
         assert s["item"]["id"] == "3"
@@ -260,7 +266,7 @@ def test_label_writes_and_stamps_and_leaves_other_rows_identical(start, gold_pat
     assert row["labels"] == ["b"]
     assert row["labelled_by"] == "goldlabel-ui"
     datetime.fromisoformat(row["labelled_at"])
-    assert (row["id"], row["text"], row["split"]) == ("2", "text 2", "dev")
+    assert (row["id"], row["text"], row["sample"]) == ("2", "text 2", "dev")
     assert s["counts"]["b"] == 1
     assert not list(gold_path.parent.glob("*.tmp"))
 
@@ -277,12 +283,14 @@ def test_label_advances_in_file_order_then_finishes(start):
 
 
 def test_extra_keys_survive_labelling(tmp_path):
-    p = tmp_path / "g.jsonl"
+    p = tmp_path / "gold.jsonl"
     p.write_text(
-        json.dumps({"id": "1", "text": "t", "labels": None, "split": "dev", "src": "x"})
+        json.dumps(
+            {"id": "1", "text": "t", "labels": None, "sample": "dev", "src": "x"}
+        )
         + "\n"
     )
-    h = _label.serve(_label.Gold(p), taxonomy())
+    h = _label.serve(_label.Gold(), taxonomy())
     try:
         Client(h).label("1", ["a"])
     finally:
@@ -404,7 +412,7 @@ def test_garbage_lock_counts_as_stale(start, gold_path):
 
 def test_failed_start_leaves_no_lock(gold_path):
     with pytest.raises(ValueError):
-        _label.serve(_label.Gold(gold_path), taxonomy(), split="x")
+        _label.serve(_label.Gold(), taxonomy(), split="X")
     assert not gold_path.with_name("gold.jsonl.lock").exists()
 
 

@@ -26,7 +26,7 @@ from goldlabel.evaluation import (
     eval_log,
     evaluate,
 )
-from goldlabel.gold import Gold, GoldSet
+from goldlabel.gold import Gold, GoldSet, Sample
 from goldlabel.search import PgCorpus, S3Corpus, Table
 from goldlabel.settings import settings
 from goldlabel.taxonomy import Taxonomy
@@ -53,6 +53,7 @@ __all__ = [
     "PgCorpus",
     "Predictions",
     "S3Corpus",
+    "Sample",
     "Table",
     "Taxonomy",
     "__version__",

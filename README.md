@@ -80,23 +80,23 @@ clf = gl.Classifier(
     prompt="Choose the one label that fits the post best.",
 )
 
-# 3. Label a dev dataset: opens the web app, returns when you press Done
-gold = gl.Gold()
-gold.draw(candidates, n=50, split="dev")
-gl.label(gold, taxonomy)
+# 3. Label a dev sample: opens the web app, returns when you press Done
+gold = gl.Gold(candidates)  # .goldlabel/gold.jsonl, 50 rows per sample by default
+dev = gold.draw_sample("dev")  # safe to rerun: it draws only what is missing
+gl.label(gold, taxonomy, split="dev")
 
 # 4. Evaluate, read the disagreements, tune the prompt, evaluate again
-ev = gl.evaluate(clf, gold.dev, target=0.9)
+ev = gl.evaluate(clf, dev, target=0.9)
 ev.disagreements_to_polars()
 clf = clf.with_prompt(
     "Choose the one label that fits the post best. Rumoured redundancies count as layoff."
 )
-ev = gl.evaluate(clf, gold.dev, target=0.9)
+ev = gl.evaluate(clf, dev, target=0.9)
 
-# 5. Label and evaluate a test dataset, once
-gold.draw(candidates, n=50, split="test")
-gl.label(gold, taxonomy)
-gl.evaluate(clf, gold.test, target=0.9)
+# 5. Label and evaluate a held-out test sample, once
+test = gold.draw_sample("test")
+gl.label(gold, taxonomy, split="test")
+gl.evaluate(clf, test, target=0.9)
 
 # 6. Classify everything: the estimate calls no model, and max_cost refuses to overspend
 clf.estimate(candidates)

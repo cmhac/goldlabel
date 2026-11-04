@@ -12,7 +12,7 @@ Generated at commit `345c4ff63d7e23bc56e690dc8c21b0bd2878fd3a`.
 - `cache/<key>.json`: one entry from `classifier.classify` (multi mode, two labels, one-line prompt, one text) and one from `candidates.embed_seeds`; `cost.json` as `cost.record` / `record_timing` wrote it (unknown prices are `null`).
 - `seeds.csv`, `taxonomy.yaml`, `prompt.md`: written by `files.write_text` / `write_taxonomy`.
 - `candidates.jsonl`, `candidates.meta.json`: written by `candidates.build_candidates` against `corpus/`.
-- `gold.jsonl`: `files.write_gold`; two dev rows, two test rows, one of them with `labels: []` (the old format's pending-looking row).
+- `gold.jsonl` was removed in 014: the gold format changed (`sample` replaced `split`) and goldlabel no longer reads gold files from before it.
 - `results.jsonl`: one row with `run`, one without (a row from before 004).
 - `corpus.jsonl`: 4 items with a 3-dimensional `embedding` column (model `fake-embed`). The pre-006 code wrote this as a `corpus/` folder; it was converted to one table file when that corpus kind was removed (007), with the same ids, texts and numbers. Every other file here is unchanged pre-006 output.
 - `expected.json`: the exact `system_prompt`, `cache_key`, `run_digest`, the seed-embedding cache key and vector, and one local search (query `[1, 0.2, 0]`, floor 0.60) with ids and similarities.

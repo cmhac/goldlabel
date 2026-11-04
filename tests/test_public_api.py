@@ -21,6 +21,7 @@ PUBLIC = [
     "CostLimit",
     "Gold",
     "GoldSet",
+    "Sample",
     "evaluate",
     "aevaluate",
     "Evaluation",

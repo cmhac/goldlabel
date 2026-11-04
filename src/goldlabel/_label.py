@@ -18,8 +18,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from urllib.parse import parse_qs, urlparse
 
-from goldlabel._gold_rule import GOLD_RULE_SHORT, GoldError, GoldRuntimeError
-from goldlabel.gold import SPLITS, Gold, GoldSet
+from goldlabel._gold_rule import GOLD_RULE_SHORT, GoldRuntimeError
+from goldlabel.gold import Gold, GoldSet, check_name
 from goldlabel.taxonomy import OFF_TOPIC, Taxonomy, validate_labels
 
 OFF_TOPIC_DESCRIPTION = "the item matches none of the labels above"
@@ -117,7 +117,7 @@ class Handle:
     # --- state; the caller holds self._mutex ------------------------------------------------
 
     def _scope(self):
-        return [r for r in self.gold._read() if self.split in (None, r.split)]
+        return [r for r in self.gold._read() if self.split in (None, r.sample)]
 
     def _after(self, rows, id_):
         """The next pending row after `id_` in file order, else the first pending one."""
@@ -169,7 +169,7 @@ class Handle:
         validate_labels(labels, self.taxonomy)
         with self._mutex:
             all_rows = self.gold._read()
-            rows = [r for r in all_rows if self.split in (None, r.split)]
+            rows = [r for r in all_rows if self.split in (None, r.sample)]
             target = next((r for r in all_rows if r.id == id_ and r in rows), None)
             if target is None:
                 raise KeyError(id_)
@@ -291,8 +291,8 @@ class _Request(BaseHTTPRequestHandler):
 def serve(gold: Gold, taxonomy: Taxonomy, *, split=None, port=None) -> Handle:
     """Start the labelling server on 127.0.0.1 and return at once; it resumes at the first
     unlabelled row (file order) of `split` (`dev`, `test` or both)."""
-    if split is not None and split not in SPLITS:
-        raise GoldError(f"split must be 'dev', 'test' or None, not {split!r}")
+    if split is not None:
+        check_name(split)
     handle = Handle(gold, taxonomy, split)
     _acquire(handle.lock)
     try:
@@ -319,21 +319,21 @@ def label(
     """Open the labelling page and wait for **Done**; returns the labelled rows. Resumes at the
     first unlabelled row; every click is saved at once. If no row in `split` is pending it prints
     one line and returns at once, unless `force_open_ui=True` (to review or relabel)."""
-    if split is not None and split not in SPLITS:
-        raise GoldError(f"split must be 'dev', 'test' or None, not {split!r}")
+    if split is not None:
+        check_name(split)
     orphans = len(gold.orphaned(taxonomy))
     if orphans:
         print(
             f"{orphans} labelled row(s) in {gold.path} use labels that are not in this "
             "taxonomy; continuing."
         )
-    scope = [r for r in gold._read() if split in (None, r.split)]
+    scope = [r for r in gold._read() if split in (None, r.sample)]
     if not force_open_ui and all(r.labels for r in scope):
         print(
             f"All {len(scope)} rows in {split or 'all'} are labelled; nothing to label. "
             "Pass force_open_ui=True to review or relabel."
             if scope
-            else f"No rows to label in {split or 'all'}: draw some first (gold.draw)."
+            else f"No rows to label in {split or 'all'}: draw some first (gold.draw_sample)."
         )
         return GoldSet(scope, split or "all", gold.path)
     handle = serve(gold, taxonomy, split=split, port=port)
@@ -349,5 +349,5 @@ def label(
     except BaseException:
         handle.stop()
         raise
-    rows = [r for r in gold._read() if r.labels and split in (None, r.split)]
+    rows = [r for r in gold._read() if r.labels and split in (None, r.sample)]
     return GoldSet(rows, split or "all", gold.path)

@@ -158,6 +158,10 @@ DOCS = [
 VARS = {
     "clf": goldlabel.Classifier,
     "gold": goldlabel.Gold,
+    "dev": goldlabel.Sample,
+    "test": goldlabel.Sample,
+    "tuning": goldlabel.Sample,
+    "test_2": goldlabel.Sample,
     "ev": goldlabel.Evaluation,
     "final": goldlabel.Evaluation,
     "candidates": goldlabel.Candidates,
@@ -221,7 +225,8 @@ def test_the_samples_cover_the_main_calls():
         "gl.Taxonomy(",
         "gl.Classifier(",
         "gl.Gold(",
-        "gold.draw(",
+        "gold.draw_sample(",
+        "dev + test",
         "gl.label(",
         "gl.evaluate(",
         "clf.estimate(",
@@ -362,14 +367,14 @@ def test_taxonomy_skill_example_builds_a_taxonomy_and_writes_no_file(
     assert list(tmp_path.iterdir()) == []  # the taxonomy lives in the notebook
 
 
-def test_folding_the_test_split_always_comes_with_the_explicit_yes():
+def test_combining_a_spent_test_sample_always_comes_with_the_explicit_yes():
     files = [p / "SKILL.md" for p in ALL_SKILLS] + [
         SKILL_DIR / "references" / n for n in REFS
     ]
-    mentions = [p for p in files if "fold_test" in p.read_text()]
+    mentions = [p for p in files if "dev + test" in p.read_text()]
     assert SKILLS / "goldlabel-tune" / "SKILL.md" in mentions
     for path in mentions:
-        assert "explicit yes" in path.read_text(), f"{path.name} folds without a yes"
+        assert "explicit yes" in path.read_text(), f"{path.name} combines without a yes"
 
 
 # --- corpus filters (010) ------------------------------------------------------------------------

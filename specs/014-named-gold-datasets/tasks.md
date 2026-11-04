@@ -24,7 +24,7 @@ Each task's grep is the check that none are missed.
 
 **Independent test**: US1's and US5's independent tests in `spec.md`.
 
-- [ ] T001 [US1] [US5] Implement named samples, `draw_sample`, `Sample` and named datasets in `src/goldlabel/gold.py` and `src/goldlabel/candidates.py`, adapting every caller.
+- [X] T001 [US1] [US5] Implement named samples, `draw_sample`, `Sample` and named datasets in `src/goldlabel/gold.py` and `src/goldlabel/candidates.py`, adapting every caller.
 
   **Tests first (red).** Put these in `tests/test_gold.py` unless noted. Candidates are built by hand: `Candidates([{"id": str(i), "text": f"t{i}"} for i in range(200)])`. Tests use `monkeypatch.chdir(tmp_path)` or `settings.root = tmp_path`.
   - **Files and names.**

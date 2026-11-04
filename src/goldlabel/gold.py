@@ -1,35 +1,56 @@
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from goldlabel import _frame, _html
 from goldlabel._gold_rule import GOLD_RULE_SHORT, GoldError, GoldTypeError
-from goldlabel.evaluation import eval_log
+from goldlabel.candidates import order_by_id
 from goldlabel.settings import resolve
 from goldlabel.taxonomy import Taxonomy
 
-SPLITS = ("dev", "test")
+NAME = re.compile(r"[a-z0-9_-]+")  # lowercase: dataset names become file names
+
+
+def check_name(name, what: str = "sample") -> str:
+    if not isinstance(name, str) or not NAME.fullmatch(name):
+        raise GoldError(
+            f"a {what} name is lowercase letters, digits, '-' and '_', not {name!r}"
+        )
+    return name
+
+
+def check_size(n, what: str) -> int:
+    if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+        raise GoldError(f"{what} must be a whole number of at least 1, not {n!r}")
+    return n
 
 
 class GoldRow(BaseModel):
-    """One gold item. `labels` is `None` while pending (`[]` in pre-006 files means the same)."""
+    """One gold item. `labels` is `None` while pending. `sample` is the name of its sample."""
 
     model_config = ConfigDict(extra="allow")  # a hand-edited file keeps its other keys
 
     id: str
     text: str
     labels: list[str] | None
-    split: Literal["dev", "test"]
+    sample: str
     labelled_by: str | None = None  # "goldlabel-ui", "imported" or absent
     labelled_at: str | None = None
     note: str | None = (
         None  # a person's comment on the row, written by the labelling page
     )
+
+    @field_validator("sample")
+    @classmethod
+    def _sample_name(cls, value: str) -> str:
+        if not NAME.fullmatch(value):
+            raise ValueError(f"a sample name is [a-z0-9_-]+, not {value!r}")
+        return value
 
     def dump(self) -> dict:
         d = self.model_dump()
@@ -39,15 +60,32 @@ class GoldRow(BaseModel):
         return d
 
 
+def _summary(rows: list[GoldRow]) -> tuple[int, str]:
+    labelled = [r for r in rows if r.labels]
+    sources = {"goldlabel-ui": 0, "imported": 0, "unstamped": 0}
+    for r in labelled:
+        key = r.labelled_by if r.labelled_by in sources else "unstamped"
+        sources[key] += 1
+    return len(labelled), ", ".join(f"{k} {v}" for k, v in sources.items())
+
+
+def _rows_table(rows: list[GoldRow]) -> str:
+    return _html.table(
+        ["id", "text", "labels", "sample", "labelled by"],
+        [
+            (r.id, r.text, r.labels if r.labels else "pending", r.sample, r.labelled_by)
+            for r in rows
+        ],
+    )
+
+
 @dataclass(frozen=True)
 class GoldSet:
-    """A read-only view of gold rows."""
+    """A read-only snapshot of gold rows."""
 
     rows: list[GoldRow]
     name: str = "all"
-    path: Path | None = (
-        None  # the gold file a view of `Gold` came from (the evaluation log records it)
-    )
+    path: Path | None = None  # the gold file a view of `Gold` came from
 
     def __len__(self) -> int:
         return len(self.rows)
@@ -68,53 +106,123 @@ class GoldSet:
         return _frame.to_pandas([r.model_dump() for r in self.rows])
 
     def _summary(self) -> str:
-        labelled = [r for r in self.rows if r.labels]
-        sources = {"goldlabel-ui": 0, "imported": 0, "unstamped": 0}
-        for r in labelled:
-            key = r.labelled_by if r.labelled_by in sources else "unstamped"
-            sources[key] += 1
-        by = ", ".join(f"{k} {v}" for k, v in sources.items())
+        labelled, by = _summary(self.rows)
         return (
             f"GoldSet {self.name}: {len(self.rows)} rows "
-            f"({len(labelled)} labelled, {len(self.rows) - len(labelled)} pending); {by}"
+            f"({labelled} labelled, {len(self.rows) - labelled} pending); {by}"
         )
 
     def _repr_html_(self) -> str:
-        rows = [
-            (r.id, r.text, r.labels if r.labels else "pending", r.split, r.labelled_by)
-            for r in self.rows
-        ]
-        return _html.line(self._summary()) + _html.table(
-            ["id", "text", "labels", "split", "labelled by"], rows
+        return _html.line(self._summary()) + _rows_table(self.rows)
+
+    def __repr__(self) -> str:
+        return f"{self._summary()}\n{GOLD_RULE_SHORT}"
+
+
+class Sample:
+    """A live, read-only view of one named sample of a gold dataset, or of several added with `+`.
+
+    It reads the gold file every time it is used, so it never shows stale rows.
+    """
+
+    def __init__(self, gold: "Gold", names: tuple[str, ...], drawn: int = 0):
+        self.gold, self.names, self.drawn = gold, names, drawn
+
+    @property
+    def path(self) -> Path:
+        return self.gold.path
+
+    @property
+    def rows(self) -> list[GoldRow]:
+        return [r for r in self.gold._read() if r.sample in self.names]
+
+    def _set(self) -> GoldSet:
+        return GoldSet(self.rows, " + ".join(self.names), self.path)
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    def counts(self, taxonomy: Taxonomy) -> dict[str, int]:
+        return self._set().counts(taxonomy)
+
+    def to_polars(self):
+        return self._set().to_polars()
+
+    def to_pandas(self):
+        return self._set().to_pandas()
+
+    def __add__(self, other):
+        if not isinstance(other, Sample):
+            return NotImplemented
+        if other.path.resolve() != self.path.resolve():
+            raise GoldError(
+                f"cannot add samples of two gold datasets ({self.path} and {other.path})"
+            )
+        new = tuple(n for n in other.names if n not in self.names)
+        return Sample(self.gold, self.names + new)
+
+    def _summary(self) -> str:
+        rows = self.rows
+        labelled, _ = _summary(rows)
+        title = " + ".join(f'"{n}"' for n in self.names)
+        line = (
+            f"Sample {title} of {self.gold.label}: {len(rows)} rows "
+            f"({labelled} labelled, {len(rows) - labelled} pending)"
         )
+        if len(self.names) == 1:
+            line += f"; drew {self.drawn} now" if self.drawn else "; nothing drawn"
+        return line
+
+    def _repr_html_(self) -> str:
+        return _html.line(self._summary()) + _rows_table(self.rows)
 
     def __repr__(self) -> str:
         return f"{self._summary()}\n{GOLD_RULE_SHORT}"
 
 
 class Gold:
-    """The gold file. Every property reads the file again, so it never shows stale rows."""
+    """A gold dataset: one file in the storage folder, holding named samples.
 
-    def __init__(self, path=None):
-        self.path = resolve(path, "gold.jsonl")
+    Every property and Sample reads the file again, so nothing shows stale rows.
+    """
+
+    def __init__(self, candidates=None, *, name=None, sample_size=50):
+        if name is not None:
+            check_name(name, "dataset")
+        self.candidates, self.name = candidates, name
+        self.sample_size = check_size(sample_size, "sample_size")
+        self.path = resolve(
+            None, "gold.jsonl" if name is None else f"gold-{name}.jsonl"
+        )
+
+    @property
+    def label(self) -> str:
+        return self.name or "default"
+
+    def _samples(self, rows: list[GoldRow]) -> dict[str, list[GoldRow]]:
+        by: dict[str, list[GoldRow]] = {}
+        for r in rows:
+            by.setdefault(r.sample, []).append(r)
+        return by
 
     def __repr__(self) -> str:
-        views = [self.dev, self.test, self.pending]
-        sources = GoldSet(self._read())._summary().partition("; ")[2]
+        rows = self._read()
+        parts = [
+            f"{name} {len(rs)} ({sum(1 for r in rs if r.labels)} labelled)"
+            for name, rs in self._samples(rows).items()
+        ]
         return (
-            f"Gold {self.path}: dev {len(views[0])}, test {len(views[1])}, "
-            f"pending {len(views[2])}; {sources}\n{GOLD_RULE_SHORT}"
+            f"Gold {self.label} ({self.path}): {', '.join(parts) or 'no samples'}; "
+            f"{_summary(rows)[1]}\n{GOLD_RULE_SHORT}"
         )
 
     def _repr_html_(self) -> str:
-        rows = []
-        for view in (self.dev, self.test, self.pending, self.all):
-            labelled = sum(1 for r in view.rows if r.labels)
-            rows.append(
-                (view.name, len(view.rows), labelled, len(view.rows) - labelled)
-            )
-        return _html.line(f"Gold: {self.path}") + _html.table(
-            ["view", "rows", "labelled", "pending"], rows
+        table = []
+        for name, rs in self._samples(self._read()).items():
+            labelled = sum(1 for r in rs if r.labels)
+            table.append((name, len(rs), labelled, len(rs) - labelled))
+        return _html.line(f"Gold {self.label}: {self.path}") + _html.table(
+            ["sample", "rows", "labelled", "pending"], table
         )
 
     def _read(self) -> list[GoldRow]:
@@ -140,21 +248,8 @@ class Gold:
             tmp.unlink(missing_ok=True)
             raise
 
-    @property
-    def dev(self) -> GoldSet:
-        return GoldSet(
-            [r for r in self._read() if r.labels and r.split == "dev"],
-            "dev",
-            self.path,
-        )
-
-    @property
-    def test(self) -> GoldSet:
-        return GoldSet(
-            [r for r in self._read() if r.labels and r.split == "test"],
-            "test",
-            self.path,
-        )
+    def _removed(self) -> Path:
+        return self.path.with_suffix(".removed.jsonl")
 
     @property
     def pending(self) -> GoldSet:
@@ -164,30 +259,61 @@ class Gold:
     def all(self) -> GoldSet:
         return GoldSet(self._read(), "all", self.path)
 
-    def draw(self, candidates, n: int = 50, split: str = "dev", seed=None) -> GoldSet:
-        """Append `n` pending rows (`labels=None`) not already anywhere in the file."""
-        if split not in SPLITS:
-            raise GoldError(f"split must be 'dev' or 'test', not {split!r}")
+    def __getitem__(self, name: str) -> Sample:
+        names = list(self._samples(self._read()))
+        if name not in names:
+            raise KeyError(
+                f"no sample {name!r} in {self.path}; samples: {', '.join(names) or 'none'}"
+            )
+        return Sample(self, (name,))
+
+    def draw_sample(self, name: str, n: int | None = None) -> Sample:
+        """Make the sample `name` hold at least `n` rows (default `sample_size`), drawing only the
+        shortfall as pending rows, in an order fixed by each candidate's id and this dataset's name.
+
+        Rerunning draws nothing once the sample is full. Never removes rows; never draws an id that
+        is already in the file or was removed from it.
+        """
+        check_name(name)
+        n = self.sample_size if n is None else check_size(n, "n")
         rows = self._read()
-        picked = candidates.sample(n, seed, exclude={r.id for r in rows}).rows
-        if len(picked) < n:
+        need = n - sum(1 for r in rows if r.sample == name)
+        if need <= 0:
+            return Sample(self, (name,))
+        if self.candidates is None:
             raise GoldError(
-                f"only {len(picked)} candidates are not already in {self.path}; asked for {n}"
+                f"sample {name!r} needs {need} more rows and this Gold has no candidates: "
+                "create it with gl.Gold(candidates)"
+            )
+        taken = {r.id for r in rows}
+        if self._removed().exists():
+            taken |= {
+                str(json.loads(x)["id"])
+                for x in self._removed().read_text().splitlines()
+                if x.strip()
+            }
+        pool = [
+            c
+            for c in order_by_id(self.candidates.rows, self.name or "")
+            if str(c["id"]) not in taken
+        ]
+        if len(pool) < need:
+            raise GoldError(
+                f"sample {name!r} needs {need} more rows, but only {len(pool)} candidates "
+                f"are not already in {self.path} or removed from it"
             )
         new = [
-            GoldRow(id=str(r["id"]), text=r["text"], labels=None, split=split)
-            for r in picked
+            GoldRow(id=str(c["id"]), text=c["text"], labels=None, sample=name)
+            for c in pool[:need]
         ]
         self._write(rows + new)
-        return GoldSet(new, "drawn")
+        return Sample(self, (name,), drawn=need)
 
-    def import_rows(self, rows, split: str) -> GoldSet:
-        """Add rows people already labelled (dicts with `id`, `text`, `labels`), stamped `imported`.
-
-        Labels are not checked against a taxonomy here; `evaluate` does that.
+    def import_rows(self, rows, name: str) -> GoldSet:
+        """Add rows people already labelled (dicts with `id`, `text`, `labels`) to the sample
+        `name`, stamped `imported`. Labels are not checked against a taxonomy here; evaluation does that.
         """
-        if split not in SPLITS:
-            raise GoldError(f"split must be 'dev' or 'test', not {split!r}")
+        check_name(name)
         existing = self._read()
         seen = {r.id for r in existing}
         now = datetime.now(UTC).isoformat()
@@ -199,7 +325,7 @@ class Gold:
                     f"imported row {r.get('id')!r} needs id, text and labels"
                 )
             row = GoldRow.model_validate(
-                {**r, "split": split, "labelled_by": "imported", "labelled_at": now}
+                {**r, "sample": name, "labelled_by": "imported", "labelled_at": now}
             )
             if row.id in seen:
                 raise GoldError(f"id {row.id!r} is already in {self.path}")
@@ -217,7 +343,10 @@ class Gold:
         )
 
     def remove(self, ids) -> GoldSet:
-        """Move rows to `<gold>.removed.jsonl` (appended) and rewrite the file without them."""
+        """Move rows to `<gold>.removed.jsonl` (appended) and rewrite the file without them.
+
+        A removed id is never drawn again.
+        """
         if isinstance(ids, str):
             raise GoldTypeError("ids must be a list of ids, not a string")
         ids = {str(i) for i in ids}
@@ -227,40 +356,7 @@ class Gold:
             raise GoldError(f"not in {self.path}: {sorted(unknown)}")
         gone = [r for r in rows if r.id in ids]
         if gone:
-            removed = self.path.with_suffix(".removed.jsonl")
-            with removed.open("a") as f:
+            with self._removed().open("a") as f:
                 f.write("".join(json.dumps(r.dump()) + "\n" for r in gone))
             self._write([r for r in rows if r.id not in ids])
         return GoldSet(gone, "removed")
-
-    def fold_test(self, log=None) -> GoldSet:
-        """Move the labelled rows of an evaluated test split to dev; only `split` changes.
-
-        For a test split that is spent: the user wants to keep tuning after scoring it. Draw a fresh
-        test split afterwards (`draw(..., split="test")`) for people to label. Refuses while a test
-        row is pending or when the test split was not evaluated since the last fold. Logs a
-        `test_folded` event in the evaluation log (`log`: that file; default `<root>/evals.jsonl`).
-        """
-        rows = self._read()
-        test = [r for r in rows if r.split == "test"]
-        if any(not r.labels for r in test):
-            raise GoldError("a test row is still pending; finish labelling it first")
-        if not test:
-            raise GoldError(f"there are no test rows in {self.path} to fold")
-        path = resolve(log, "evals.jsonl")
-        history = eval_log(path)
-        since = history.folds[-1]["time"] if history.folds else ""
-        if not any(r["split"] == "test" and r["time"] > since for r in history.rows):
-            raise GoldError(
-                "the test split has not been evaluated since the last fold; there is nothing to retire"
-            )
-        moved = {r.id: r.model_copy(update={"split": "dev"}) for r in test}
-        self._write([moved.get(r.id, r) for r in rows])
-        with path.open("a") as f:
-            event = {
-                "event": "test_folded",
-                "time": datetime.now(UTC).isoformat(),
-                "rows": len(moved),
-            }
-            f.write(json.dumps(event) + "\n")
-        return GoldSet(list(moved.values()), "folded")

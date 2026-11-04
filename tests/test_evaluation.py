@@ -71,11 +71,11 @@ def write_gold(rows, path=None):
     path = path or settings.root / "gold.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(r) + "\n" for r in rows))
-    return Gold(path)
+    return Gold()
 
 
 def g(id, labels, split="dev", **extra):
-    return {"id": id, "text": f"t{id}", "labels": labels, "split": split, **extra}
+    return {"id": id, "text": f"t{id}", "labels": labels, "sample": split, **extra}
 
 
 # gold a,a,b,b,off_topic  vs predicted a,b,b,off_topic,off_topic
@@ -103,7 +103,7 @@ def five():
 
 def test_metrics_and_disagreements_match_hand_computed_values():
     gold, c, _ = five()
-    ev = evaluate(c, gold.dev)
+    ev = evaluate(c, gold["dev"])
     assert isinstance(ev, Evaluation)
     assert ev.n == 5 and ev.skipped_pending == 0
     assert ev.score("accuracy") == approx(0.6)
@@ -140,29 +140,29 @@ def test_pending_rows_are_skipped_and_counted():
 
 def test_default_metric_per_mode_and_target_pass_fail():
     gold, c, _ = five()
-    ev = evaluate(c, gold.dev, target=0.5)
+    ev = evaluate(c, gold["dev"], target=0.5)
     assert ev.metric == "accuracy"
     assert "PASS" in repr(ev) and "FAIL" not in repr(ev)
     assert "accuracy 0.6000" in repr(ev)
-    ev = evaluate(c, gold.dev, target=0.9)
+    ev = evaluate(c, gold["dev"], target=0.9)
     assert "FAIL" in repr(ev) and "PASS" not in repr(ev)
-    ev = evaluate(c, gold.dev, metric="micro_f1", target=0.6)
+    ev = evaluate(c, gold["dev"], metric="micro_f1", target=0.6)
     assert ev.metric == "micro_f1" and "PASS" in repr(ev)
-    assert "PASS" not in repr(evaluate(c, gold.dev)) and "FAIL" not in repr(
-        evaluate(c, gold.dev)
+    assert "PASS" not in repr(evaluate(c, gold["dev"])) and "FAIL" not in repr(
+        evaluate(c, gold["dev"])
     )
 
 
 def test_multi_mode_defaults_to_macro_f1():
     model, _ = answering({"t1": ["a"]})
     gold = write_gold([g("1", ["a"])])
-    assert evaluate(clf(model, mode="multi"), gold.dev).metric == "macro_f1"
+    assert evaluate(clf(model, mode="multi"), gold["dev"]).metric == "macro_f1"
 
 
 def test_an_item_that_failed_is_a_disagreement_with_no_prediction():
     model, _ = answering({"t1": ["a"], "t2": []})  # an empty list never validates
     gold = write_gold([g("1", ["a"]), g("2", ["b"])])
-    ev = evaluate(clf(model), gold.dev)
+    ev = evaluate(clf(model), gold["dev"])
     assert ev.n == 2 and ev.score("accuracy") == approx(0.5)
     [d] = ev.disagreements
     assert d["id"] == "2" and d["gold"] == ["b"] and d["predicted"] is None
@@ -171,11 +171,11 @@ def test_an_item_that_failed_is_a_disagreement_with_no_prediction():
 
 def test_second_evaluate_is_all_cache_and_a_new_prompt_is_live_again():
     gold, c, calls = five()
-    evaluate(c, gold.dev)
+    evaluate(c, gold["dev"])
     assert len(calls) == 5
-    evaluate(c, gold.dev)
+    evaluate(c, gold["dev"])
     assert len(calls) == 5  # SC-3: zero live calls
-    evaluate(c.with_prompt("another prompt"), gold.dev)
+    evaluate(c.with_prompt("another prompt"), gold["dev"])
     assert len(calls) == 10  # one live call per item
 
 
@@ -183,7 +183,7 @@ def test_invalid_gold_labels_raise_with_ids_before_any_call():
     model, calls = answering({})
     gold = write_gold([g("1", ["a"]), g("2", ["zzz"]), g("3", ["a", "b"])])
     with pytest.raises(ValueError, match=r"\['2', '3'\].*orphaned"):
-        evaluate(clf(model), gold.dev)
+        evaluate(clf(model), gold["dev"])
     assert calls == [] and not (settings.root / "evals.jsonl").exists()
 
 
@@ -197,7 +197,7 @@ def test_rows_without_a_stamp_and_imported_rows_are_accepted_and_counted():
             g("4", ["b"], labelled_by="hand", extra="kept"),
         ]
     )
-    ev = evaluate(clf(model), gold.dev)
+    ev = evaluate(clf(model), gold["dev"])
     assert ev.n == 4 and ev.score("accuracy") == 1
     assert ev.sources == {"goldlabel-ui": 1, "imported": 1, "unstamped": 2}
     assert "goldlabel-ui 1, imported 1, unstamped 2" in repr(ev)
@@ -205,7 +205,7 @@ def test_rows_without_a_stamp_and_imported_rows_are_accepted_and_counted():
 
 def test_repr_shows_the_per_label_table():
     gold, c, _ = five()
-    text = repr(evaluate(c, gold.dev))
+    text = repr(evaluate(c, gold["dev"]))
     assert "macro_f1 0.6111" in text and "micro_f1 0.6000" in text
     assert re.search(r"\ba\s+1\.00\s+0\.50\s+0\.67\s+2\s+1\b", text)
     assert re.search(r"\bb\s+0\.50\s+0\.50\s+0\.50\s+2\s+2\b", text)
@@ -214,7 +214,7 @@ def test_repr_shows_the_per_label_table():
 
 def test_write_stores_the_numbers_as_json(tmp_path):
     gold, c, _ = five()
-    ev = evaluate(c, gold.dev, target=0.5)
+    ev = evaluate(c, gold["dev"], target=0.5)
     ev.write(tmp_path / "out" / "ev.json")
     data = json.loads((tmp_path / "out" / "ev.json").read_text())
     assert data["n"] == 5 and data["digest"] == c.digest
@@ -226,7 +226,7 @@ def test_write_stores_the_numbers_as_json(tmp_path):
 
 async def test_aevaluate_matches_evaluate():
     gold, c, _ = five()
-    ev = await aevaluate(c, gold.dev)
+    ev = await aevaluate(c, gold["dev"])
     assert ev.score("accuracy") == approx(0.6)
 
 
@@ -241,7 +241,7 @@ def log_rows(path=None):
 def test_each_call_appends_one_line_with_every_field():
     gold, c, _ = five()
     before = datetime.now(UTC)
-    evaluate(c, gold.dev, target=0.5)
+    evaluate(c, gold["dev"], target=0.5)
     [row] = log_rows()
     assert set(row) == {
         "time", "split", "n", "gold", "model", "digest", "prompt", "taxonomy", "metric",
@@ -268,9 +268,9 @@ def test_each_call_appends_one_line_with_every_field():
 
 def test_log_is_append_only_and_records_cached_calls():
     gold, c, _ = five()
-    evaluate(c, gold.dev)
+    evaluate(c, gold["dev"])
     first = (settings.root / "evals.jsonl").read_text()
-    evaluate(c, gold.dev)
+    evaluate(c, gold["dev"])
     text = (settings.root / "evals.jsonl").read_text()
     assert text.startswith(first) and len(log_rows()) == 2
     assert (log_rows()[1]["live_calls"], log_rows()[1]["cached_calls"]) == (0, 5)
@@ -278,9 +278,9 @@ def test_log_is_append_only_and_records_cached_calls():
 
 def test_log_false_writes_nothing_and_a_path_moves_it(tmp_path):
     gold, c, _ = five()
-    evaluate(c, gold.dev, log=False)
+    evaluate(c, gold["dev"], log=False)
     assert not (settings.root / "evals.jsonl").exists()
-    evaluate(c, gold.dev, log=tmp_path / "deep" / "dir" / "mine.jsonl")
+    evaluate(c, gold["dev"], log=tmp_path / "deep" / "dir" / "mine.jsonl")
     assert len(log_rows(tmp_path / "deep" / "dir" / "mine.jsonl")) == 1
     assert not (settings.root / "evals.jsonl").exists()
 
@@ -289,15 +289,15 @@ def test_a_set_spanning_both_splits_is_logged_as_mixed():
     model, _ = answering({"t1": ["a"], "t2": ["b"]})
     gold = write_gold([g("1", ["a"]), g("2", ["b"], split="test")])
     evaluate(clf(model), gold.all)
-    assert log_rows()[0]["split"] == "mixed"
-    evaluate(clf(model), gold.test)
+    assert log_rows()[0]["split"] == "dev + test"
+    evaluate(clf(model), gold["test"])
     assert log_rows()[1]["split"] == "test"
 
 
 def test_priced_calls_log_dollars():
     model, _ = answering({"t1": ["a"]}, name="gpt-4o-mini", priced=True)
     gold = write_gold([g("1", ["a"])])
-    evaluate(clf(model), gold.dev)
+    evaluate(clf(model), gold["dev"])
     assert log_rows()[0]["dollars"] == approx(
         0.00021
     )  # 1000 in / 100 out of gpt-4o-mini
@@ -307,10 +307,10 @@ def test_eval_log_counts_test_evaluations_and_distinct_prompts():
     model, _ = answering({"t1": ["a"], "t2": ["b"]})
     gold = write_gold([g("1", ["a"]), g("2", ["b"], split="test")])
     c = clf(model)
-    evaluate(c, gold.dev)
-    evaluate(c, gold.test)
-    evaluate(c, gold.test)
-    evaluate(c.with_prompt("other"), gold.test)
+    evaluate(c, gold["dev"])
+    evaluate(c, gold["test"])
+    evaluate(c, gold["test"])
+    evaluate(c.with_prompt("other"), gold["test"])
     log = eval_log()
     assert isinstance(log, EvalLog) and len(log.rows) == 4
     text = repr(log)
@@ -428,7 +428,7 @@ def test_a_note_on_a_gold_row_never_reaches_the_model():
     # guard (013): green before the notes feature too, and it keeps the notes out of prompts
     gold = write_gold([g("1", ["a"], note="secret edge case"), g("2", ["b"])])
     model, calls = answering({"t1": ["a"], "t2": ["b"]})
-    evaluate(clf(model), gold.dev)
+    evaluate(clf(model), gold["dev"])
     assert sorted(calls) == [
         "t1",
         "t2",

@@ -10,6 +10,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from goldlabel.classifier import Classifier
 from goldlabel.evaluation import evaluate
 from goldlabel.gold import Gold
+from goldlabel.settings import settings
 from goldlabel.taxonomy import Label, Taxonomy
 
 
@@ -45,14 +46,15 @@ def clf(model="m", prompt="Classify it."):
 
 def evaluation(c):
     rows = [
-        {"id": "1", "text": "t1", "labels": ["a"], "split": "dev"},
-        {"id": "2", "text": "t2", "labels": ["b"], "split": "dev"},
-        {"id": "3", "text": "t3", "labels": ["b"], "split": "dev"},
+        {"id": "1", "text": "t1", "labels": ["a"], "sample": "dev"},
+        {"id": "2", "text": "t2", "labels": ["b"], "sample": "dev"},
+        {"id": "3", "text": "t3", "labels": ["b"], "sample": "dev"},
     ]
-    path = Path("gold.jsonl")
+    path = settings.root / "gold.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(r) + "\n" for r in rows))
     c = replace(c, model=answering({"t1": ["a"], "t2": ["b"], "t3": ["a"]}))
-    return evaluate(c, Gold(path).dev, log=False)
+    return evaluate(c, Gold()["dev"], log=False)
 
 
 def test_save_writes_the_files_with_trailing_newlines(tmp_path):

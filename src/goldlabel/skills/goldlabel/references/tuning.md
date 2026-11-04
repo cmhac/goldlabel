@@ -1,13 +1,13 @@
 # Tuning the prompt
 
-Tune against the **dev** split. The gold rule applies throughout: you may read the gold labels to understand a disagreement, but you never write or change one, and a label that looks wrong is a question for the user (who may relabel it in the labelling page), not something to fix.
+Tune against the **dev** sample. The gold rule applies throughout: you may read the gold labels to understand a disagreement, but you never write or change one, and a label that looks wrong is a question for the user (who may relabel it in the labelling page), not something to fix.
 
 ## The loop
 
 1. Evaluate and read the disagreements:
 
 ```python
-ev = gl.evaluate(clf, gold.dev, target=0.80)
+ev = gl.evaluate(clf, dev, target=0.80)
 df = ev.disagreements_to_polars()  # id, text, gold, predicted, reasoning
 df.filter(df["predicted"].is_not_null()).head(10)
 ev.metrics.per_label  # which label is weak: precision or recall?
@@ -19,7 +19,7 @@ ev.metrics.per_label  # which label is weak: precision or recall?
 
 ```python
 clf_v2 = clf.with_prompt(prompt_v2)  # prompt_v2 is the edited prompt string
-ev2 = gl.evaluate(clf_v2, gold.dev, target=0.80)
+ev2 = gl.evaluate(clf_v2, dev, target=0.80)
 ```
 
    An unchanged prompt costs nothing to re-evaluate (cached). A changed prompt makes one live call per dev item, so say that before you run it on a large dev split.
@@ -38,17 +38,17 @@ log.to_polars()
 
 Stop when the score reaches the target the user set, or when the remaining disagreements look like label noise or genuinely ambiguous items (say so; show a few), or when changes stop moving the score. Do not keep tuning to squeeze out a point. If the dev split is small, one row is a large swing; suggest more labelled rows (the user labels them) before more prompt changes.
 
-## Never tune on the test split
+## Never tune on the test sample
 
-The test split exists to report an honest number once. Do not evaluate it to decide what to change, do not read its disagreements to write the prompt, and do not draw more rows from it. Evaluate it when the user says the prompt is final:
+The test sample exists to report an honest number once. Do not evaluate it to decide what to change, do not read its disagreements to write the prompt, and do not draw more rows into it. Evaluate it when the user says the prompt is final:
 
 ```python
-gold.draw(candidates, n=50, split="test")  # pending; people label them
-gl.label(gold, taxonomy)
-final = gl.evaluate(clf, gold.test)
+test = gold.draw_sample("test")  # pending; people label them
+gl.label(gold, taxonomy, split="test")
+final = gl.evaluate(clf, test)
 ```
 
-If the result is disappointing, report it as it is and ask the user what they want. The test rows are now spent: changing the prompt after seeing the score makes them a second dev set. If the user wants to keep tuning, there is one honest way, and it needs their **explicit yes** after you have said what it does: `gold.fold_test()` moves the spent, labelled test rows into dev (only `split` changes, never a label; it refuses while a test row is pending; `gl.eval_log()` records the fold), then draw a fresh test split with `gold.draw(candidates, n=50, split="test")`, have people label it (`gl.label(gold, taxonomy)`), tune on the larger dev set, and evaluate the fresh test split once. Never fold without that yes. The `goldlabel-tune` skill has the steps.
+If the result is disappointing, report it as it is and ask the user what they want. The test rows are now spent: changing the prompt after seeing the score makes them a second dev set. If the user wants to keep tuning, there is one honest way, and it needs their **explicit yes** after you have said what it does: add the spent test sample to the tuning set (`tuning = dev + test`, which writes nothing and changes no label), draw a fresh, separately named test sample (`test_2 = gold.draw_sample("test-2")`), have people label it, tune on `tuning`, and evaluate `test_2` once. Never combine without that yes. The `goldlabel-tune` skill has the steps.
 
 ## Gold looks wrong or incomplete
 

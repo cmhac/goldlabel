@@ -11,6 +11,7 @@ from goldlabel.cost import Cost
 from goldlabel.evaluation import BandReport, EvalLog, Evaluation
 from goldlabel.gold import Gold, GoldRow, GoldSet
 from goldlabel.metrics import compute_metrics
+from goldlabel.settings import settings
 from goldlabel.taxonomy import Label, Taxonomy
 
 HOSTILE = "<script>alert(1)</script> & co"
@@ -60,9 +61,9 @@ def gold_set():
     return GoldSet(
         [
             GoldRow(
-                id="1", text=HOSTILE, labels=["a"], split="dev", labelled_by="imported"
+                id="1", text=HOSTILE, labels=["a"], sample="dev", labelled_by="imported"
             ),
-            GoldRow(id="2", text="t2", labels=None, split="dev"),
+            GoldRow(id="2", text="t2", labels=None, sample="dev"),
         ],
         name="dev",
     )
@@ -137,12 +138,12 @@ def classifier(evaluation=None):
 
 
 def gold(tmp_path):
-    path = tmp_path / "gold.jsonl"
-    path.write_text(
-        '{"id": "1", "text": "x", "labels": ["a"], "split": "dev", "labelled_by": "goldlabel-ui"}\n'
-        '{"id": "2", "text": "y", "labels": null, "split": "test"}\n'
+    settings.root = tmp_path  # conftest resets it after the test
+    (tmp_path / "gold.jsonl").write_text(
+        '{"id": "1", "text": "x", "labels": ["a"], "sample": "dev", "labelled_by": "goldlabel-ui"}\n'
+        '{"id": "2", "text": "y", "labels": null, "sample": "test"}\n'
     )
-    return Gold(path)
+    return Gold()
 
 
 def everything(tmp_path):
@@ -154,6 +155,7 @@ def everything(tmp_path):
         "Estimate": Estimate(10, 4, 6, None, None),
         "Gold": gold(tmp_path),
         "GoldSet": gold_set(),
+        "Sample": gold(tmp_path)["dev"],
         "Evaluation": evaluation(),
         "EvalLog": eval_log(),
         "BandReport": band_report(),
@@ -331,6 +333,7 @@ def tables(tmp_path):
         "Candidates": (candidates(), "to_polars", "to_pandas"),
         "Predictions": (predictions(), "to_polars", "to_pandas"),
         "GoldSet": (gold_set(), "to_polars", "to_pandas"),
+        "Sample": (gold(tmp_path)["dev"], "to_polars", "to_pandas"),
         "Evaluation": (
             evaluation(),
             "disagreements_to_polars",
@@ -389,7 +392,7 @@ def test_numbers_and_types_candidates_and_gold():
         "id",
         "text",
         "labels",
-        "split",
+        "sample",
         "labelled_by",
         "labelled_at",
         "note",
@@ -468,6 +471,7 @@ def test_public_result_classes_have_both_exports():
         "Estimate",
         "Gold",
         "GoldSet",
+        "Sample",
         "Evaluation",
         "EvalLog",
         "BandReport",

@@ -24,4 +24,4 @@ When working with the `goldlabel` library (content analysis over a corpus: candi
 - In one Jupyter notebook, write only goldlabel calls; keep the taxonomy, the prompt and the seeds in code, not in files, and ask the user before writing anything else.
 - Never run a full classification without showing `clf.estimate(...)` (calls, cost, time) and getting a yes from the user.
 - Never put API keys or database URLs in a notebook, script or file; they come from environment variables.
-- Never evaluate the test split to guide edits, and never fold a spent test split into dev without the user's explicit yes.
+- Never evaluate the held-out test sample to guide edits, and never combine a spent test sample into the tuning set (`dev + test`) without the user's explicit yes.

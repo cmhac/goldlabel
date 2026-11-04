@@ -128,7 +128,7 @@ def test_walkthrough_script_and_notebook_hold_the_same_cells():
 def test_walkthrough_is_honest_about_gold_and_keys():
     code = "\n".join(src for kind, src in py_cells() if kind == "code")
     ast.parse(code)
-    assert "gl.label(" in code and "gold.draw(" in code
+    assert "gl.label(" in code and "gold.draw_sample(" in code
     for bad in ("labelled_by", "import_rows", "api_key", "sk-", "postgres://"):
         assert bad not in code, bad
     assert not re.search(r"\blabels\s*=\s*\[", code)  # no hand-written gold rows

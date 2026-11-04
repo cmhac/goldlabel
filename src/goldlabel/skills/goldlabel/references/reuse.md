@@ -5,7 +5,7 @@ Do this when the user says the classifier is final. It is for notebooks and auto
 ## Save a bundle
 
 ```python
-final = gl.evaluate(clf, gold.test)  # the one reported number; see tuning.md
+final = gl.evaluate(clf, test)  # the one reported number; see tuning.md
 clf.save("classifiers/scams/", evaluation=final)
 ```
 

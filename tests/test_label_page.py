@@ -12,10 +12,16 @@ import pytest
 import goldlabel
 from goldlabel import _label
 from goldlabel.gold import Gold
+from goldlabel.settings import settings
 from goldlabel.taxonomy import Label, Taxonomy
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ("index.html", "app.js", "app.css")
+
+
+@pytest.fixture(autouse=True)
+def root(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "root", tmp_path)
 
 
 def taxonomy(mode="multi"):
@@ -25,7 +31,9 @@ def taxonomy(mode="multi"):
 
 
 def write_gold(path, ids=("1", "2")):
-    rows = [{"id": i, "text": f"text {i}", "labels": None, "split": "dev"} for i in ids]
+    rows = [
+        {"id": i, "text": f"text {i}", "labels": None, "sample": "dev"} for i in ids
+    ]
     path.write_text("".join(json.dumps(r) + "\n" for r in rows))
     return path
 
@@ -60,7 +68,7 @@ def post(url, path, body=None):
 
 @pytest.fixture
 def handle(gold_path):
-    h = _label.serve(Gold(gold_path), taxonomy())
+    h = _label.serve(Gold(), taxonomy())
     yield h
     h.stop()
 
@@ -191,7 +199,7 @@ def test_label_is_exported():
 def test_label_opens_the_page_and_returns_when_done(
     gold_path, press_done_on_open, capsys
 ):
-    result = goldlabel.label(Gold(gold_path), taxonomy())
+    result = goldlabel.label(Gold(), taxonomy())
     (url,) = press_done_on_open
     assert url in capsys.readouterr().out
     assert result.rows == []  # nothing was labelled before Done
@@ -204,7 +212,7 @@ def test_label_blocks_until_done_and_returns_the_labelled_rows(
     monkeypatch.setattr("webbrowser.open", urls.append)
     result = []
     t = threading.Thread(
-        target=lambda: result.append(goldlabel.label(Gold(gold_path), taxonomy())),
+        target=lambda: result.append(goldlabel.label(Gold(), taxonomy())),
         daemon=True,
     )
     t.start()
@@ -229,14 +237,14 @@ def test_label_blocks_until_done_and_returns_the_labelled_rows(
 
 
 def test_label_reports_orphans_and_continues(tmp_path, press_done_on_open, capsys):
-    p = tmp_path / "g.jsonl"
+    p = tmp_path / "gold.jsonl"
     p.write_text(
-        json.dumps({"id": "1", "text": "t", "labels": ["gone"], "split": "dev"})
+        json.dumps({"id": "1", "text": "t", "labels": ["gone"], "sample": "dev"})
         + "\n"
-        + json.dumps({"id": "2", "text": "t", "labels": None, "split": "dev"})
+        + json.dumps({"id": "2", "text": "t", "labels": None, "sample": "dev"})
         + "\n"
     )
-    goldlabel.label(Gold(p), taxonomy())
+    goldlabel.label(Gold(), taxonomy())
     assert "1 labelled row" in capsys.readouterr().out
     assert len(press_done_on_open) == 1  # the page was still served
 
@@ -246,7 +254,7 @@ def test_label_stops_the_server_if_interrupted(gold_path, monkeypatch):
         _label.Handle, "wait", lambda self: (_ for _ in ()).throw(KeyboardInterrupt)
     )
     with pytest.raises(KeyboardInterrupt):
-        goldlabel.label(Gold(gold_path), taxonomy(), open_browser=False)
+        goldlabel.label(Gold(), taxonomy(), open_browser=False)
     assert not gold_path.with_name("gold.jsonl.lock").exists()
 
 
@@ -259,7 +267,7 @@ def write_rows(path, rows):
 
 
 def row(id_, labels, split="dev"):
-    return {"id": id_, "text": f"text {id_}", "labels": labels, "split": split}
+    return {"id": id_, "text": f"text {id_}", "labels": labels, "sample": split}
 
 
 @pytest.fixture
@@ -274,8 +282,8 @@ def no_page(monkeypatch):
 
 
 def test_label_skips_the_page_when_every_row_is_labelled(tmp_path, no_page, capsys):
-    p = write_rows(tmp_path / "g.jsonl", [row("1", ["a"]), row("2", ["b"])])
-    result = goldlabel.label(Gold(p), taxonomy())
+    p = write_rows(tmp_path / "gold.jsonl", [row("1", ["a"]), row("2", ["b"])])
+    result = goldlabel.label(Gold(), taxonomy())
     out = capsys.readouterr().out
     assert [(r.id, r.labels) for r in result.rows] == [("1", ["a"]), ("2", ["b"])]
     assert out.splitlines() == [
@@ -284,62 +292,62 @@ def test_label_skips_the_page_when_every_row_is_labelled(tmp_path, no_page, caps
             "Pass force_open_ui=True to review or relabel."
         )
     ]
-    assert not p.with_name("g.jsonl.lock").exists()
+    assert not p.with_name("gold.jsonl.lock").exists()
 
 
 def test_label_skips_a_split_that_is_fully_labelled(tmp_path, no_page, capsys):
-    p = write_rows(
-        tmp_path / "g.jsonl", [row("1", ["a"]), row("t1", None, split="test")]
+    write_rows(
+        tmp_path / "gold.jsonl", [row("1", ["a"]), row("t1", None, split="test")]
     )
-    result = goldlabel.label(Gold(p), taxonomy(), split="dev")
+    result = goldlabel.label(Gold(), taxonomy(), split="dev")
     assert [r.id for r in result.rows] == ["1"]
     assert "All 1 rows in dev are labelled" in capsys.readouterr().out
 
 
 def test_label_serves_when_the_other_split_is_pending(tmp_path, press_done_on_open):
-    p = write_rows(
-        tmp_path / "g.jsonl", [row("1", ["a"]), row("t1", None, split="test")]
+    write_rows(
+        tmp_path / "gold.jsonl", [row("1", ["a"]), row("t1", None, split="test")]
     )
-    result = goldlabel.label(Gold(p), taxonomy())
+    result = goldlabel.label(Gold(), taxonomy())
     assert len(press_done_on_open) == 1
     assert [r.id for r in result.rows] == ["1"]
 
 
 def test_label_says_so_when_the_split_has_no_rows(tmp_path, no_page, capsys):
-    p = write_rows(tmp_path / "g.jsonl", [row("1", ["a"])])
-    result = goldlabel.label(Gold(p), taxonomy(), split="test")
+    write_rows(tmp_path / "gold.jsonl", [row("1", ["a"])])
+    result = goldlabel.label(Gold(), taxonomy(), split="test")
     assert result.rows == []
     assert capsys.readouterr().out.splitlines() == [
-        "No rows to label in test: draw some first (gold.draw)."
+        "No rows to label in test: draw some first (gold.draw_sample)."
     ]
 
 
 def test_label_with_no_gold_file_says_so(tmp_path, no_page, capsys):
-    assert goldlabel.label(Gold(tmp_path / "none.jsonl"), taxonomy()).rows == []
+    assert goldlabel.label(Gold(), taxonomy()).rows == []
     assert "No rows to label" in capsys.readouterr().out
 
 
 def test_force_open_ui_serves_even_when_everything_is_labelled(
     tmp_path, press_done_on_open
 ):
-    p = write_rows(tmp_path / "g.jsonl", [row("1", ["a"])])
-    result = goldlabel.label(Gold(p), taxonomy(), force_open_ui=True)
+    write_rows(tmp_path / "gold.jsonl", [row("1", ["a"])])
+    result = goldlabel.label(Gold(), taxonomy(), force_open_ui=True)
     assert len(press_done_on_open) == 1
     assert [r.id for r in result.rows] == ["1"]
 
 
 def test_skip_still_reports_orphans(tmp_path, no_page, capsys):
-    p = write_rows(tmp_path / "g.jsonl", [row("1", ["gone"])])
-    goldlabel.label(Gold(p), taxonomy())
+    write_rows(tmp_path / "gold.jsonl", [row("1", ["gone"])])
+    goldlabel.label(Gold(), taxonomy())
     assert "1 labelled row" in capsys.readouterr().out
 
 
 def test_label_has_no_block_parameter(gold_path):
     with pytest.raises(TypeError):
-        goldlabel.label(Gold(gold_path), taxonomy(), block=False)  # ty: ignore[unknown-argument]
+        goldlabel.label(Gold(), taxonomy(), block=False)  # ty: ignore[unknown-argument]
 
 
 def test_a_bad_split_is_refused_even_when_everything_is_labelled(tmp_path, no_page):
-    p = write_rows(tmp_path / "g.jsonl", [row("1", ["a"])])
+    write_rows(tmp_path / "gold.jsonl", [row("1", ["a"])])
     with pytest.raises(goldlabel.GoldError):
-        goldlabel.label(Gold(p), taxonomy(), split="nope")
+        goldlabel.label(Gold(), taxonomy(), split="Nope")
