@@ -66,8 +66,9 @@ A user watches an agent build the analysis in a notebook or script. The cells co
 2. **Given** the data must be fetched from a database or service the library cannot read directly, **When** the agent writes the query, **Then** it is the single approved non-goldlabel step, its result goes straight into `gl.Table(df, ...)`, and no snapshot file or exists-check is written unless the user asks for one.
 3. **Given** a notebook is re-run, **When** the agent would add a guard around `draw`, `evaluate` or a fetch, **Then** the skills tell it not to, and what to say to the user instead (see the open question).
 4. **Given** a taxonomy, a prompt or a seed list, **When** the agent writes it, **Then** it is a variable in a notebook cell (`gl.Taxonomy(...)`, a string, a list of strings), not a `taxonomy.yaml`, `prompt.md` or `seeds.csv`; a change to the prompt is an edit to that string in its cell followed by `with_prompt`, never a `.replace` chain on the old one.
-5. **Given** the classified output exists, **When** `goldlabel-run` finishes, **Then** the agent stops and names the optional follow-ups; charts, deduplication, aggregates, fact-check cells and exports are written only if the user asks for them.
-6. **Given** a task the skills do not cover, **When** the agent would write a helper, **Then** it asks instead.
+5. **Given** the user has not said notebook or script, **When** the agent starts, **Then** it creates a notebook, and creates a script only on the user's say-so or after telling the user its tools cannot edit a notebook.
+6. **Given** the classified output exists, **When** `goldlabel-run` finishes, **Then** the agent stops and names the optional follow-ups; charts, deduplication, aggregates, fact-check cells and exports are written only if the user asks for them.
+7. **Given** a task the skills do not cover, **When** the agent would write a helper, **Then** it asks instead.
 
 ---
 
@@ -110,7 +111,8 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - **FR-008**: When the data cannot be read by a goldlabel corpus, the skills MUST allow one fetch step, written only after the user agrees, whose result is passed directly to `gl.Table`; they MUST NOT have it write and re-read a snapshot file unless the user asks.
 - **FR-009**: The skills MUST say how to handle a notebook being re-run without writing guards [NEEDS CLARIFICATION: see the open question].
 - **FR-010**: The skills MUST have the agent define the taxonomy (`gl.Taxonomy(...)`), the prompt (a string) and the seed or keyword list (a list) as code in the notebook or script, and MUST NOT tell it to create, write or read `taxonomy.yaml`, `prompt.md`, `seeds.csv` or a notes file. A prompt is changed by editing its string in place.
-- **FR-010b**: As a general rule the overview and every stage skill MUST say: keep everything in code in the one notebook or script; do not split inputs across files unless the user asks. The files that remain are the corpus, the files the library writes itself (`.goldlabel/`, the `out=` results) and, only when the user wants to reuse the classifier, the bundle that `clf.save` writes. The "commit these files" guidance changes to "commit the notebook".
+- **FR-010b**: As a general rule the overview and every stage skill MUST say: keep everything in code in the one notebook or script; do not split inputs across files unless the user explicitly tells it to. The files that remain are the corpus, the files the library writes itself (`.goldlabel/`, the `out=` results) and, only when the user wants to reuse the classifier, the bundle that `clf.save` writes. The "commit these files" guidance changes to "commit the notebook".
+- **FR-010d**: When the user has not said whether to use a notebook or a script, the skills MUST have the agent write a Jupyter notebook (`.ipynb`). It writes a `# %%` script only when the user says so, or when its tools cannot edit a notebook reliably, in which case it says so and tells the user how to open or convert the script.
 - **FR-010c**: Notes taken while reading the corpus for the taxonomy stay in the conversation, not in a file.
 - **FR-010a**: The skills MUST say that nothing is done after `goldlabel-run` except what the user asks (charts, deduplication, aggregates, exports, fact-check cells), and that `.env` files are not loaded by the agent: keys are expected in the environment.
 - **FR-011**: The gold rule text in every skill MUST stay verbatim as today; this change MUST NOT alter `gold_rule.md` or any way a gold label is set.
@@ -153,6 +155,7 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - "Spec Kit-style" means the pattern of ordered skills that each end by naming the next command and that carry a completion checklist, not Spec Kit's files or CLI.
 - Strict means refuse-and-offer by default, with the user able to override in words; it is not a hard block.
 - The minimal-code rule is carried in skill text and a trial, because skills cannot be enforced by the library.
+- The existing fallback for agents that cannot edit `.ipynb` files (`references/workflow.md`, "When you cannot edit notebooks") stays, as a stated exception rather than a free choice; the user may remove it.
 - The notebook is the record, so a diff of the notebook is what shows a changed prompt; the user accepts that over per-file diffs.
 - The list of non-library constructs allowed is short: a `where=` polars expression, a path to a seeds file, the text of a prompt read from a file, and the documented reads.
 - The three supplied notebooks are representative; which lines the user disliked is inferred from the user's description (caches of input data and of gold evaluation results, and verbose code), not told cell by cell.
