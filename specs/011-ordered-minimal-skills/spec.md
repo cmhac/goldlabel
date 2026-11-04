@@ -30,7 +30,7 @@ Two sources: the skills in this repository, and three notebooks the user supplie
 
 **What the skills say about it.** Nothing forbids any of the above. `goldlabel-connect` teaches a polars transform that writes a file; `goldlabel-taxonomy` suggests a notes file; `goldlabel-tune` shows `open("prompt.md").read()` and an `assert`. No skill says "write only goldlabel calls".
 
-**Not a library gap, as far as these notebooks show.** The library already caches model calls, so re-running `evaluate` or `classify` costs nothing, and it writes seed candidates. An earlier draft of this spec proposed new library calls (`Evaluation.read`, saving keyword lists by default). The notebooks give no evidence they are needed, so they are out. The one real tension is in the open question below.
+**Not a library gap, as far as these notebooks show.** The library already caches model calls, so re-running `evaluate` or `classify` costs nothing, and it writes seed candidates. An earlier draft of this spec proposed new library calls (`Evaluation.read`, saving keyword lists by default). The notebooks give no evidence they are needed, so they are out. The one real tension, re-run side effects, is settled under "Decision on re-run guards" below.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -64,7 +64,7 @@ A user watches an agent build the analysis in a notebook or script. The cells co
 
 1. **Given** any stage skill, **When** an agent follows it, **Then** every code block is goldlabel calls plus the allowed constructs, and the skill states "write only goldlabel calls; anything else needs the user's yes, shown first".
 2. **Given** the data must be fetched from a database or service the library cannot read directly, **When** the agent writes the query, **Then** it is the single approved non-goldlabel step, its result goes straight into `gl.Table(df, ...)`, and no snapshot file or exists-check is written unless the user asks for one.
-3. **Given** a notebook is re-run, **When** the agent would add a guard around `draw`, `evaluate` or a fetch, **Then** the skills tell it not to, and what to say to the user instead (see the open question).
+3. **Given** a notebook is re-run, **When** the agent would add a guard around `draw`, `evaluate` or a fetch, **Then** the skills tell it not to, and to tell the user which cells are run-once (FR-009).
 4. **Given** a taxonomy, a prompt or a seed list, **When** the agent writes it, **Then** it is a variable in a notebook cell (`gl.Taxonomy(...)`, a string, a list of strings), not a `taxonomy.yaml`, `prompt.md` or `seeds.csv`; a change to the prompt is an edit to that string in its cell followed by `with_prompt`, never a `.replace` chain on the old one.
 5. **Given** the user has not said notebook or script, **When** the agent starts, **Then** it creates a notebook, and creates a script only on the user's say-so.
 6. **Given** the classified output exists, **When** `goldlabel-run` finishes, **Then** the agent stops and names the optional follow-ups; charts, deduplication, aggregates, fact-check cells and exports are written only if the user asks for them.
@@ -109,7 +109,7 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - **FR-006**: The overview and every stage skill MUST state the minimal-code rule: write only goldlabel calls (plus the few documented non-library constructs); any other code, including caches of input data or evaluation results, helpers and reshaping, only when the user directs it, shown first.
 - **FR-007**: Every code block in the skills MUST consist of goldlabel calls and a short list of allowed constructs (a polars expression for `where=`, a path to a seeds or prompt file and its read, the corpus-fetch step of FR-008), except in sections marked as user-directed; the skills MUST NOT teach writing a snapshot or cache, a guard around a library call, a helper function, a class or a transform that is not user-directed.
 - **FR-008**: When the data cannot be read by a goldlabel corpus, the skills MUST allow one fetch step, written only after the user agrees, whose result is passed directly to `gl.Table`; they MUST NOT have it write and re-read a snapshot file unless the user asks.
-- **FR-009**: The skills MUST say how to handle a notebook being re-run without writing guards [NEEDS CLARIFICATION: see the open question].
+- **FR-009**: The skills MUST tell the agent not to wrap `draw`, `evaluate` or the labelling call in guards, and to tell the user which cells are run-once (drawing a split, evaluating the test split) so the user does not re-run them. (Decision A below; the labelling cell is safe to re-run once spec 012 lands.)
 - **FR-010**: The skills MUST have the agent define the taxonomy (`gl.Taxonomy(...)`), the prompt (a string) and the seed or keyword list (a list) as code in the notebook or script, and MUST NOT tell it to create, write or read `taxonomy.yaml`, `prompt.md`, `seeds.csv` or a notes file. A prompt is changed by editing its string in place.
 - **FR-010b**: As a general rule the overview and every stage skill MUST say: keep everything in code in the one notebook or script; do not split inputs across files unless the user explicitly tells it to. The files that remain are the corpus, the files the library writes itself (`.goldlabel/`, the `out=` results) and, only when the user wants to reuse the classifier, the bundle that `clf.save` writes. The "commit these files" guidance changes to "commit the notebook".
 - **FR-010d**: When the user has not said whether to use a notebook or a script, the skills MUST have the agent write a Jupyter notebook (`.ipynb`). It writes a `# %%` script only when the user says so. The skills no longer carry a fallback for agents that cannot edit notebooks, and `references/workflow.md` loses its "When you cannot edit notebooks" section.
@@ -134,7 +134,7 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - **SC-002**: 0 code lines in the skills, outside user-directed sections, that are not goldlabel calls or the listed non-library constructs.
 - **SC-003**: Following the skills over the sample corpus, a reviewer finds the notebook the agent wrote contains 0 lines of non-goldlabel code that the user did not ask for.
 - **SC-004**: In a trial of the same request given to a fresh agent in each of Claude Code and one other agent, 2 of 2 start at the first stage, announce the next stage at the end of each stage they complete, and refuse (offer the earlier stage) when asked to skip ahead.
-- **SC-005**: Re-running the sample walkthrough from the top a second time makes 0 model calls and writes no file that is not the library's own, with no guard code in the notebook (subject to the open question).
+- **SC-005**: Re-running the sample walkthrough from the top a second time makes 0 model calls and writes no file that is not the library's own, with no guard code in the notebook (the run-once cells excepted, FR-009).
 - **SC-006**: Ruff, ty and pytest pass; the gold rule drift tests pass unchanged.
 
 ## Deliberately skipped
@@ -144,7 +144,7 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - New skills for the optional steps; they stay inside the stage they belong to.
 - A linter that parses notebooks an agent produced; the check is the skills' own text and the trial.
 - New library calls to reload candidates or evaluations (the notebooks show no need).
-- Making `gold.draw` or `evaluate` safe to re-run, unless the user chooses that in the open question.
+- Making `gold.draw` or `evaluate` safe to re-run, (a separate spec if the decision below proves irritating).
 - Removing `Taxonomy.read`/`write`, `read_seeds` or the classifier bundle from the library: the library keeps them for people who want files; only the agent guidance changes.
 - Changing the gold rule, the labelling page, `fold_test`, metrics or any search backend.
 - Splitting or renaming the six skills, or changing `goldlabel install`.
@@ -160,12 +160,6 @@ When anyone edits a stage skill, a test fails if the stage loses its entry check
 - The list of non-library constructs allowed is short: a `where=` polars expression, a path to a seeds file, the text of a prompt read from a file, and the documented reads.
 - The three supplied notebooks are representative; which lines the user disliked is inferred from the user's description (caches of input data and of gold evaluation results, and verbose code), not told cell by cell.
 
-## Open question for the user
+## Decision on re-run guards
 
-Agents add guards because a re-run cell has side effects: `gold.draw(...)` adds another 50 pending rows, and a second `evaluate` on the test split adds a second test entry to the evaluation log. What should the skills tell an agent to do?
-
-- **A. Tell the agent to write no guard**, and to tell the user which cells are run-once (draw, test evaluation). Smallest; the user owns the re-run risk.
-- **B. Change the library so a second `draw` of the same split and a second test `evaluate` are safe.** The notebooks stay clean; it is a library change with its own spec, and it touches the "test split is evaluated once" rule.
-- **C. Tell the agent to put run-once cells in a separate marked cell with a comment**, no code guard.
-
-My recommendation is A, then B only if A proves irritating.
+Agents add guards because a re-run cell has side effects: `gold.draw(...)` adds another 50 pending rows, and a second `evaluate` on the test split adds a second test entry to the evaluation log. The user asked to go straight through without answering, so the recommendation was adopted: **A, write no guard and tell the user which cells are run-once.** B (make `draw` and the test evaluation safe to re-run in the library) is a separate spec if A proves irritating. Flagged to the user in the completion report; reversible.

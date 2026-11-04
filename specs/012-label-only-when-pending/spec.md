@@ -89,7 +89,7 @@ A user wants to go back over rows that are already labelled (to fix a label, or 
 - Any change to the page, the token, the port or the labelling lock.
 - A separate "review" function or mode on the page.
 - A non-blocking mode for `gl.label`, removed at the user's request; code that needs a handle uses `goldlabel._label.serve`, which is not part of the public API.
-- Making `draw` or evaluation safe to re-run (that is the open question in spec 011).
+- Making `draw` or evaluation safe to re-run (decided in spec 011: agents write no guard).
 
 ## Assumptions
 

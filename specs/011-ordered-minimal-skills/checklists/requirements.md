@@ -8,7 +8,7 @@
 - [x] Mandatory sections completed
 
 ## Requirement Completeness
-- [ ] No [NEEDS CLARIFICATION] markers remain (1 open: how to handle re-run guards, FR-009)
+- [x] No [NEEDS CLARIFICATION] markers remain (FR-009 decided: option A)
 - [x] Requirements are testable
 - [x] Success criteria are measurable
 - [x] Edge cases identified
