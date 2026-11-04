@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-04
 
-**Status**: Draft
+**Status**: Implemented (human checks listed in AGENTS.md)
 
 **Input**: User description: "Drawing a gold dataset should only run the data entry server if there are actually more rows to label. If all rows have been labeled, it should just print a statement that all rows are labeled and skip data entry, unless an explicit option is passed." Follow-up from the user: drop the `block` parameter so `gl.label` only ever blocks until **Done**.
 

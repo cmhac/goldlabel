@@ -8,7 +8,8 @@ inclusion: always
 Importing a file the user says people already labelled is allowed: import it unchanged, never add, correct or fill in labels, and tell the user what the file says about who labelled it. Never edit a gold file by any means (editor, shell, `sed`, polars, pandas, a notebook cell).
 When working with the `goldlabel` library (content analysis over a corpus: candidates from seed phrases, keywords or the whole corpus, an LLM classifier checked against human-labelled gold data):
 
-- Use the goldlabel agent skills: `goldlabel` (start here), then the one for the stage you are at: `goldlabel-connect`, `goldlabel-search-terms`, `goldlabel-taxonomy`, `goldlabel-candidates`, `goldlabel-tune`, `goldlabel-run`. If they are not installed, run `goldlabel install kiro`, or print the rule with `import goldlabel; print(goldlabel.GOLD_RULE_FULL)`.
+- Use the goldlabel agent skills: `goldlabel` (start here), then the six stage skills in order, one at a time, telling the user at the end of each stage which stage comes next: `goldlabel-connect`, `goldlabel-search-terms`, `goldlabel-taxonomy`, `goldlabel-candidates`, `goldlabel-tune`, `goldlabel-run`. If they are not installed, run `goldlabel install kiro`, or print the rule with `import goldlabel; print(goldlabel.GOLD_RULE_FULL)`.
+- In one Jupyter notebook, write only goldlabel calls; keep the taxonomy, the prompt and the seeds in code, not in files, and ask the user before writing anything else.
 - Never run a full classification without showing `clf.estimate(...)` (calls, cost, time) and getting a yes from the user.
 - Never put API keys or database URLs in a notebook, script or file; they come from environment variables.
 - Never evaluate the test split to guide edits, and never fold a spent test split into dev without the user's explicit yes.

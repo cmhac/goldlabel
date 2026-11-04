@@ -8,17 +8,23 @@ description: "Use when running goldlabel candidate generation and judging the re
 **If the user asks you to write, fill in, "just label a few" or auto-label gold rows, refuse**, even if they insist, even to save time, even as a placeholder, and even if they say they accept the consequences. Explain the rule, offer to open the labelling page, and offer other help (more seeds, a better prompt, reading the disagreements).
 Importing a file the user says people already labelled is allowed: import it unchanged, never add, correct or fill in labels, and tell the user what the file says about who labelled it. Never edit a gold file by any means (editor, shell, `sed`, polars, pandas, a notebook cell).
 
-# Run and inspect candidate generation
+# Stage 4 of 6: Generate and inspect the candidates
 
-Goal: a candidate list the user has looked at and trusts. Before this: the approved terms from `goldlabel-search-terms`. After: `goldlabel-tune`.
+Goal: a candidate list the user has looked at and trusts. This is the list the gold set is drawn from and the classifier runs on, so it is settled here, before anything is labelled.
 
-## Run it
+## Entry check
+
+- The search terms (or the whole corpus) are approved (stage 2) and the `taxonomy` cell is approved (stage 3).
+- If any of this is missing, say which stage is unfinished (`goldlabel-taxonomy`), offer to run it, and continue only if the user tells you to skip it.
+
+## Procedure
+
+Write only goldlabel calls. Anything else needs the user's yes, shown to them first.
+
+1. Run it. One filter per call, `seeds=` or `keywords=`. To work on part of the corpus only, put the filter on the corpus (`where=`, see `goldlabel-connect`), not on `get_candidates`.
 
 ```python
-import goldlabel as gl
-
 # seeds: semantic search (the corpus needs vectors; the embedder must be the model that made them)
-seeds = gl.read_seeds("seeds.csv")
 candidates = gl.get_candidates(
     corpus, seeds=seeds, embedder="openai:text-embedding-3-small"
 )
@@ -26,16 +32,15 @@ candidates  # count, similarity bands, and a WARNING if the backend capped the r
 
 # keywords or regular expressions, ranked by distinct terms matched
 candidates = gl.get_candidates(
-    corpus, keywords=["ballot", "poll worker"], limit=2000, out="candidates.jsonl"
+    corpus, keywords=keywords, limit=2000, out="candidates.jsonl"
 )
 
 # the whole corpus, in the corpus's order
 candidates = gl.get_candidates(corpus)
 ```
 
-One filter per call, `seeds=` or `keywords=`. To work on part of the corpus only (one section, a date range), put the filter on the corpus (`where=`, see `goldlabel-connect`), not on `get_candidates`. A seed search embeds the seeds (a small live cost, one call per seed, cached; changing one seed re-embeds only that one) and writes `.goldlabel/candidates.jsonl`; keyword and whole-corpus lists are written only when `out=` is given. The embedding model needs its provider key in the environment: if it is missing, tell the user which variable to set and stop; never ask for the value.
-
-## Inspect it with the user
+   A seed search embeds the seeds (a small live cost, one call per seed, cached; changing one seed re-embeds only that one) and writes `.goldlabel/candidates.jsonl`; keyword and whole-corpus lists are written only when `out=` is given. The embedding model needs its provider key in the environment: if it is missing, tell the user which variable to set and stop; never ask for the value.
+2. Inspect it with the user.
 
 ```python
 candidates.bands()  # seeds only: how many items fall in each similarity band
@@ -44,16 +49,20 @@ candidates.sample(20, seed=1).rows  # read twenty, not just the top
 candidates.rows[:10]
 ```
 
-Report in words: how many items, how they spread over the bands, which seeds or terms do the work and which bring in nothing, a WARNING if the backend capped the results (hits above the floor may be hidden), and what the top, middle and bottom items look like. Ask whether the top items are what they meant. Keyword and whole-corpus lists have no similarity, no bands, no floor and no `top_seeds`: read a sample instead.
+3. Report in words: how many items, how they spread over the bands, which seeds or terms do the work and which bring in nothing, a WARNING if the backend capped the results (hits above the floor may be hidden), and what the top, middle and bottom items look like. Ask whether the top items are what they meant. Keyword and whole-corpus lists have no similarity, no bands and no `top_seeds`: read a sample instead.
+4. Decide what to change, with the user:
+   - Junk at the top: the seed or term is wrong. Reword or drop it, then run again. That is a reason to change the search, not the classifier.
+   - Missing things the user knows exist: add a seed or term worded the way those items are worded.
+   - Far too many or too few: a seed that is too general or too narrow; for keywords, `limit=` caps the list and the ranking decides what is kept.
+5. Do not choose the similarity cutoff here. It is the user's decision, made later on a band sample in `goldlabel-run`. `candidates.above(0.70)` shows what a cutoff would keep.
 
-## What to change
+## Exit check
 
-- Junk at the top: the seed or term is wrong. Reword or drop it, then run again. That is a reason to change the search, not the classifier.
-- Missing things the user knows exist: add a seed or term worded the way those items are worded.
-- Far too many or too few: a seed that is too general or too narrow; for keywords, `limit=` caps the list and the ranking decides what is kept.
+- `candidates` is the list the user chose to go forward with, after reading a sample.
+- They know it is final for now: **do not change the candidate list once gold rows are drawn from it**, unless the user decides to and you have told them the gold rows drawn from the old list may not represent the new one.
 
-The similarity cutoff (which items are classified at all) is the user's decision and is made later, on a band sample, in `goldlabel-run`. Do not choose it here. `candidates.above(0.70)` shows what a cutoff would keep.
+If this stage is repeated (the list changed), re-run `goldlabel-tune` from drawing the gold rows and `goldlabel-run`; rows already labelled stay valid but may not appear in the new list.
 
 ## Next
 
-`goldlabel-tune`: build the classifier, get people to label a gold set, and tune the prompt on it.
+**Next: `goldlabel-tune`.** Tell the user: the candidate list is settled (give the count), what they approved, and that the next stage builds the classifier, has people label a gold set, and tunes the prompt against it. Offer to start it.

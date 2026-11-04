@@ -10,7 +10,7 @@
 
 ## Phase 2: Close
 
-- [ ] T004 Run ruff, ty and the whole suite; run `/ponytail-review` on the diff; record in `spec.md` Status and the AGENTS.md "Current state" paragraph; list the human check (quickstart step 2) as still to do.
+- [X] T004 Run ruff, ty and the whole suite; run `/ponytail-review` on the diff; record in `spec.md` Status and the AGENTS.md "Current state" paragraph; list the human check (quickstart step 2) as still to do.
 
 ## Dependencies
 

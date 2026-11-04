@@ -39,7 +39,10 @@ import goldlabel as gl
 corpus = gl.PgCorpus(
     table="posts", text_column="body"
 )  # or gl.S3Corpus(...), gl.Table("posts.parquet", ...)
-seeds = gl.read_seeds("seeds.csv")  # or a plain list of strings
+seeds = [
+    "I just lost my job",
+    "The company is cutting staff",
+]  # phrases a match could say
 candidates = gl.get_candidates(
     corpus, seeds=seeds, embedder="openai:text-embedding-3-small"
 )
@@ -132,9 +135,8 @@ taxonomy = gl.Taxonomy(
         "satire": "A joke.",
     },
 )
-clf = gl.Classifier(
-    "anthropic:claude-haiku-4-5", taxonomy, prompt=open("prompt.md").read()
-)
+prompt = "Read the post and choose the label that fits it best."
+clf = gl.Classifier("anthropic:claude-haiku-4-5", taxonomy, prompt=prompt)
 ```
 
 **3. Gold: people label.** `draw` writes pending rows with no labels. `gl.label` opens the labelling page
@@ -154,7 +156,10 @@ ev = gl.evaluate(clf, gold.dev, target=0.9)
 ev  # metrics, per-label table, PASS/FAIL against the target, where the labels came from
 ev.disagreements_to_polars()  # id, text, gold, predicted, reasoning
 
-clf2 = clf.with_prompt(open("prompt.md").read())  # classifiers are immutable: keep both
+prompt_v2 = (
+    prompt + " Rumoured redundancies count as layoff."
+)  # edit the string, one change at a time
+clf2 = clf.with_prompt(prompt_v2)  # classifiers are immutable: keep both
 ev2 = gl.evaluate(clf2, gold.dev, target=0.9)
 ```
 
@@ -198,8 +203,9 @@ the current directory. Change it for the process with `gl.settings.root = Path("
 | `cache/` | model and embedding calls, and the cost ledger | `.goldlabel/cache`; `cache=` moves it, `cache=False` turns it off |
 | `results.jsonl` | `clf.classify(out=...)` | none: a classification writes only where you tell it |
 
-Inputs are always explicit: `gl.read_seeds("seeds.csv")`, `gl.Taxonomy.read("taxonomy.yaml")`,
-`gl.Candidates.read("candidates.jsonl")`. `seeds.csv`, `taxonomy.yaml`, `prompt.md` and the notebook are
+Inputs are always explicit, and the simplest place for them is the notebook itself: a list of seeds, a
+`gl.Taxonomy(...)` and the prompt string. If you prefer files, `gl.read_seeds("seeds.csv")`,
+`gl.Taxonomy.read("taxonomy.yaml")` and `gl.Candidates.read("candidates.jsonl")` read them. The notebook is
 yours to commit; the library never runs git. Moving a project is moving its folder. The cache keeps
 paying for itself: re-running a notebook top to bottom, or after a kernel restart, repeats no model call.
 
@@ -315,7 +321,8 @@ Importing a file the user says people already labelled is allowed: import it unc
 
 When working with the `goldlabel` library (content analysis over a corpus: candidates from seed phrases, keywords or the whole corpus, an LLM classifier checked against human-labelled gold data):
 
-- Use the goldlabel agent skills: `goldlabel` (start here), then the one for the stage you are at: `goldlabel-connect`, `goldlabel-search-terms`, `goldlabel-taxonomy`, `goldlabel-candidates`, `goldlabel-tune`, `goldlabel-run`. If they are not installed, run `goldlabel install <agent>` (claude, codex, copilot, kiro), read them at https://github.com/cmhac/goldlabel/tree/main/src/goldlabel/skills, or print the rule with `import goldlabel; print(goldlabel.GOLD_RULE_FULL)`.
+- Use the goldlabel agent skills: `goldlabel` (start here), then the six stage skills in order, one at a time, telling the user at the end of each stage which stage comes next: `goldlabel-connect`, `goldlabel-search-terms`, `goldlabel-taxonomy`, `goldlabel-candidates`, `goldlabel-tune`, `goldlabel-run`. If they are not installed, run `goldlabel install <agent>` (claude, codex, copilot, kiro), read them at https://github.com/cmhac/goldlabel/tree/main/src/goldlabel/skills, or print the rule with `import goldlabel; print(goldlabel.GOLD_RULE_FULL)`.
+- In one Jupyter notebook, write only goldlabel calls; keep the taxonomy, the prompt and the seeds in code, not in files, and ask the user before writing anything else.
 - Never run a full classification without showing `clf.estimate(...)` (calls, cost, time) and getting a yes from the user.
 - Never put API keys or database URLs in a notebook, script or file; they come from environment variables.
 - Never evaluate the test split to guide edits, and never fold a spent test split into dev without the user's explicit yes.

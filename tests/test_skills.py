@@ -350,15 +350,16 @@ def test_connect_skill_shaping_example_runs_and_leaves_the_source_alone(
     assert source.read_text() == before
 
 
-def test_taxonomy_skill_example_builds_and_writes_a_loadable_taxonomy(
+def test_taxonomy_skill_example_builds_a_taxonomy_and_writes_no_file(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
     scope: dict[str, Any] = {"gl": goldlabel}
-    exec(block_with("goldlabel-taxonomy", "taxonomy.write"), scope)  # noqa: S102
-    loaded = goldlabel.Taxonomy.read("taxonomy.yaml")
-    assert loaded == scope["taxonomy"] and loaded.mode == "single"
-    assert [label.name for label in loaded.labels] == ["scam", "satire"]
+    exec(block_with("goldlabel-taxonomy", "gl.Taxonomy("), scope)  # noqa: S102
+    taxonomy = scope["taxonomy"]
+    assert taxonomy.mode == "single"
+    assert [label.name for label in taxonomy.labels] == ["scam", "satire"]
+    assert list(tmp_path.iterdir()) == []  # the taxonomy lives in the notebook
 
 
 def test_folding_the_test_split_always_comes_with_the_explicit_yes():
