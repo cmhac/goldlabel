@@ -66,7 +66,7 @@ import goldlabel as gl
 corpus = gl.Table("posts.csv", text_column="body", id_column="post_id")
 candidates = gl.get_candidates(corpus, keywords=["laid off", "layoffs"])
 
-# 2. Taxonomy and classifier (set ANTHROPIC_API_KEY in your environment first)
+# 2. Taxonomy and classifier (set OPENAI_API_KEY in your environment first)
 taxonomy = gl.Taxonomy(
     mode="single",
     labels={
@@ -75,7 +75,7 @@ taxonomy = gl.Taxonomy(
     },
 )
 clf = gl.Classifier(
-    "anthropic:claude-haiku-4-5",
+    "openai:gpt-6-luna",
     taxonomy,
     prompt="Choose the one label that fits the post best.",
 )
