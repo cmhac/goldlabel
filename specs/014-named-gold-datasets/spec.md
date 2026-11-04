@@ -38,11 +38,11 @@ A user draws a dev sample and runs the labelling call with `split="dev"`. The pa
 
 ### User Story 2 - A `Gold` that knows its candidates and its sample size (Priority: P1)
 
-A user creates the gold dataset once, with the candidates it samples from and, optionally, a sample size that applies to each split (default 50). They then draw a dev sample and a test sample without repeating the candidates or the number. `draw_sample(split)` draws `sample_size` pending rows of the named split (the split is required); `draw_dev()` and `draw_test()` are shortcuts for it. A user who wants more rows (a second dev round, a fresh test split after `fold_test`, a larger sample for one split) calls `draw_sample` again, or changes `sample_size` first; the new rows are drawn from candidates not already in the file.
+A user creates the gold dataset once, with the candidates it samples from and, optionally, a sample size that applies to each split (default 50). They then draw a dev sample and a test sample without repeating the candidates or the number. `draw_sample(split)` draws `sample_size` pending rows of the named split (the split is required); `draw_dev()` and `draw_test()` are shortcuts for it. A user who wants a different number for one draw (a smaller test set for a second corpus, a larger dev round) passes `n=` to that call; `sample_size` on the `Gold` is only the default, and is never changed by an override. A user who wants more rows (a second dev round, a fresh test split after `fold_test`) calls `draw_sample` again; the new rows are drawn from candidates not already in the file.
 
 **Why this priority**: it removes the repeated arguments that made the notebook's draw cells error-prone and gives agents one idiom.
 
-**Independent Test**: create a `Gold` over a hand-built candidates set of 200 rows with the default size, call `draw_dev()` and `draw_test()` and check 50 pending rows each, no id in both; call `draw_sample("dev")` again and check 50 more, all new; set `sample_size = 10`, draw, and check 10.
+**Independent Test**: create a `Gold` over a hand-built candidates set of 200 rows with the default size, call `draw_dev()` and `draw_test()` and check 50 pending rows each, no id in both; call `draw_sample("dev")` again and check 50 more, all new; call `draw_dev(n=10)` and check 10, then `draw_dev()` and check 50 again (the override did not stick).
 
 **Acceptance Scenarios**:
 
@@ -52,7 +52,8 @@ A user creates the gold dataset once, with the candidates it samples from and, o
 4. **Given** a `Gold` with candidates, **When** `draw_sample` is called without a split, or with one that is not `dev` or `test`, **Then** it is refused and nothing is written.
 5. **Given** fewer unused candidates than `sample_size`, **When** a draw is called, **Then** it fails as today, naming how many are available and how many were asked for, and writes nothing.
 6. **Given** a `Gold` created without candidates, **When** it is only read (labelled, evaluated, folded), **Then** it works; **When** a draw is attempted, **Then** it fails with a message that says to give the candidates when creating the `Gold`.
-7. **Given** a `seed`, **When** `draw_sample`, `draw_dev` or `draw_test` is called, **Then** the same rows are drawn on the same inputs, as today.
+7. **Given** a `seed`, **When** a draw is repeated from the same file state and candidates, **Then** the same rows are drawn. **Given** the same `seed` is used again after rows were drawn (the same split again, or the other split), **Then** the call is *not* a repeat: it samples only from candidates not already in the file, so it appends new rows, never a duplicate and never a row already in either split, and the two draws are different samples. A seed makes a draw reproducible from a given file state; it does not make rerunning the call a no-op.
+   7a. **Given** `n=10` passed to `draw_sample`, `draw_dev` or `draw_test`, **When** the draw runs, **Then** 10 rows are drawn and `sample_size` is unchanged; `n` must be a whole number of at least 1.
 8. **Given** the old `gold.draw(candidates, n, split)` call, **When** it is used, **Then** it no longer exists; the error is Python's `AttributeError`, and every doc, skill, example and test uses the new calls.
 
 ---
@@ -116,8 +117,8 @@ An agent following `goldlabel-tune` writes `Gold(candidates)`, `draw_dev()`, `gl
 - The default dataset and one someone named "gold" must not collide: the name is mapped to a distinct file name, and `gold.jsonl` stays the default.
 - Two named datasets with the same row id are fine; ids are unique per dataset only.
 - `remove` writes `<file>.removed.jsonl` per dataset, so removed rows from B never land in A's file.
-- `sample_size` is a plain attribute: changing it later changes later draws only, never rows already drawn. A size below 1 or not a whole number is refused.
-- Re-running a notebook cell that calls `draw_dev()` draws another sample, exactly as re-running `draw` did; the user keeps their own guard (see "Deliberately skipped").
+- A `sample_size` or `n` below 1 or not a whole number is refused before anything is written.
+- Re-running a notebook cell that calls `draw_dev()` draws another sample, exactly as re-running `draw` did, **even with the same seed**: the rows already drawn are excluded, so the second call samples from a smaller pool and appends different rows. `draw_dev(seed=1)` then `draw_test(seed=1)` likewise gives two disjoint samples; no row can be in both splits. The user keeps their own guard against reruns (see "Deliberately skipped").
 - A row drawn into the file by another process after a labelling pass began is not added to that pass.
 
 ## Requirements *(mandatory)*
@@ -127,8 +128,8 @@ An agent following `goldlabel-tune` writes `Gold(candidates)`, `draw_dev()`, `gl
 - **FR-001**: `gl.label` MUST require `split` (`"dev"` or `"test"`), refusing a missing or other value before any server starts; no pass may page both splits. `Gold`'s labelling server (`serve`) MUST do the same.
 - **FR-002**: A `gl.label` pass MUST page and count only the rows that were pending in its split when the call was made, never already-labelled rows (except with `force_open_ui=True`, which pages every row of that split) and never rows of the other split; the total is fixed for the pass. It returns the labelled rows of that split, as today.
 - **FR-003**: The labelling page MUST show which split it is labelling, and its "x of N" MUST count only the rows of this pass.
-- **FR-004**: `Gold` MUST accept the candidates when it is created, and a `sample_size` (default 50, a whole number of at least 1) that applies to each split and may be changed later as an attribute. Candidates are optional so a `Gold` can be created only to read, label, evaluate or fold; a draw without candidates MUST fail with a message saying where to give them.
-- **FR-005**: `Gold.draw_sample(split, seed=None)` MUST replace `Gold.draw`: it takes the split as a required argument, draws `sample_size` rows from the candidates not already in the file, appends them pending, and writes nothing if the candidates cannot supply enough. `draw_dev(seed=None)` and `draw_test(seed=None)` MUST call it with `"dev"` and `"test"`. `draw` MUST be removed (no alias), and all docs, skills, examples and tests updated.
+- **FR-004**: `Gold` MUST accept the candidates when it is created, and a `sample_size` (default 50, a whole number of at least 1) that is the default draw size for each split. Candidates are optional so a `Gold` can be created only to read, label, evaluate or fold; a draw without candidates MUST fail with a message saying where to give them.
+- **FR-005**: `Gold.draw_sample(split, n=None, seed=None)` MUST replace `Gold.draw`: it takes the split as a required argument, draws `n` rows (`sample_size` when `n` is not given; an override never changes `sample_size`) from the candidates not already in the file, appends them pending, and writes nothing if the candidates cannot supply enough. `draw_dev(n=None, seed=None)` and `draw_test(n=None, seed=None)` MUST call it with `"dev"` and `"test"`. `draw` MUST be removed (no alias), and all docs, skills, examples and tests updated.
 - **FR-006**: A user MUST be able to create a gold dataset by name; the name selects a file beside the default one, and an unnamed `Gold` MUST remain the existing default file.
 - **FR-007**: A dataset name MUST be refused if it is empty or contains anything other than letters, digits, `-` and `_`, so it cannot escape the root or collide with the default file or its `.lock`, `.tmp` or `.removed.jsonl` companions.
 - **FR-008**: Each dataset MUST have its own rows, lock, removed-rows file and labelling session; the "id is not already in the file" rules of drawing and `import_rows` MUST apply per dataset.
@@ -161,7 +162,7 @@ An agent following `goldlabel-tune` writes `Gold(candidates)`, `draw_dev()`, `gl
 - "Named dataset" means a name that picks a file; datasets need no registry, no list command and no stored metadata, in line with "the code is the pipeline".
 - The name is a file-name suffix beside the default; the exact pattern is a plan decision, but it must keep the default untouched.
 - `Gold(candidates=None, *, name=None, path=None, sample_size=50)`: candidates become the first parameter and the others keyword-only, so the old positional `Gold(path)` stops working. The plan lists the callers to update. (The user asked for the candidates to be passed at creation; the order and keyword-only choice are mine.)
-- A seed stays an optional argument of the three draw calls, because the docs and skills use one for reproducibility.
+- `n` and `seed` stay optional arguments of the three draw calls (`n` was added at the user's request so one draw can differ without changing the `Gold`; the docs and skills use a seed for reproducibility).
 - The page names the split in its existing header or status text; no redesign (013 stays as built).
 - "This pass" means the rows pending at the call, which needs no record of which draw created a row (no draw ids, no stored state).
 - `gl.label(gold, taxonomy, split=...)` stays a function of the library; it does not become a `Gold` method in this change.
@@ -171,7 +172,6 @@ An agent following `goldlabel-tune` writes `Gold(candidates)`, `draw_dev()`, `gl
 
 - A dataset registry, listing command, config file or stored "current dataset": names are only file names.
 - A `draw` alias or deprecation period: the library is pre-1.0 and the user asked for a rename.
-- An `n=` override on `draw_sample`: change `sample_size` instead.
 - An idempotent draw (a guard that makes re-running `draw_dev()` a no-op); the user's notebook keeps its own `if not gold.all.rows:` check.
 - A `split=None` or "both" mode for the labelling page, a split picker, tabs or a dataset switcher in the page.
 - Merging, copying or diffing datasets, and cross-dataset metrics.

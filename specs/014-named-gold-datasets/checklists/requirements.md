@@ -32,6 +32,6 @@
 ## Notes
 
 - Ponytail skill applied before drafting; the spec carries a "Deliberately skipped" list.
-- Decisions from the user (2026-11-04): required `split` on `gl.label`; the page shows only the rows pending in the pass; `Gold` takes the candidates and a `sample_size` (default 50, per split); `draw` becomes `draw_sample(split)` with `draw_dev`/`draw_test` shortcuts.
-- Judgement calls made as defaults, for the user to overturn: candidates optional on `Gold` (needed only to draw); `Gold(candidates=None, *, name=None, path=None, sample_size=50)` breaks positional `Gold(path)`; no `draw` alias; no `n=` override; a name is only a file name; per-dataset log counts reuse the gold path already on each log line.
+- Decisions from the user (2026-11-04): required `split` on `gl.label`; the page shows only the rows pending in the pass; `Gold` takes the candidates and a `sample_size` (default 50, per split); `draw` becomes `draw_sample(split, n=None, seed=None)` with `draw_dev`/`draw_test` shortcuts; `n` overrides the size for one call.
+- Judgement calls made as defaults, for the user to overturn: candidates optional on `Gold` (needed only to draw); `Gold(candidates=None, *, name=None, path=None, sample_size=50)` breaks positional `Gold(path)`; no `draw` alias; a name is only a file name; per-dataset log counts reuse the gold path already on each log line.
 - `/ponytail-review` of spec, plan and tasks is still required before `/speckit-implement`.
