@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Samples: rerun-safe, seedless gold draws, and named gold datasets
+# Specification Quality Checklist: Named samples, rerun-safe seedless draws, evaluations on the classifier, and named gold datasets
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-11-04
@@ -19,7 +19,7 @@
 - [x] Success criteria are technology-agnostic
 - [x] All acceptance scenarios are defined
 - [x] Edge cases are identified
-- [x] Scope is clearly bounded ("Deliberately skipped")
+- [x] Scope is clearly bounded ("Deliberately skipped", follow-up list in Assumptions)
 - [x] Dependencies and assumptions identified
 
 ## Feature Readiness
@@ -32,6 +32,6 @@
 ## Notes
 
 - Ponytail skill applied before drafting; the spec carries a "Deliberately skipped" list.
-- Decisions from the user (2026-11-04): the page shows only the rows pending in the pass; `Gold(candidates, sample_size=50)`; `draw_sample(split, n=None)` with `draw_dev`/`draw_test`; draws top a split up to its size in an id-fixed order, no seeds, no guards (option 3); draws return a `Sample` that `gl.label` and `clf.evaluate` take; evaluation and the band check are classifier methods (`clf.evaluate`/`clf.aevaluate`, `clf.band_sample`); `gl.evaluate`, `gl.aevaluate`, `gl.band_sample` removed.
-- Judgement calls for the user to overturn: candidates optional on `Gold`; `Gold(candidates=None, *, name=None, path=None, sample_size=50)` breaks positional `Gold(path)`; no `draw` alias; `gold.dev`/`gold.test` become live Samples including pending rows; evaluating a test Sample with pending rows is refused; the name salts the draw order.
+- The user's decisions are listed in order at the top of the spec. The constitution was amended to 1.3.0 for decision 8.
+- Judgement calls for the user to overturn: `gold["name"]` replaces `gold.dev`/`gold.test`; a spent test sample refuses new rows and a second prompt; an identical evaluation is not logged twice, a new `target` is; the band check writes no log line; `out=`, `cache=` and the bundle paths are left for a follow-up spec.
 - `/ponytail-review` of spec, plan and tasks is still required before `/speckit-implement`.

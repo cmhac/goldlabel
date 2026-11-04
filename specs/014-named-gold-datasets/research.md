@@ -1,53 +1,54 @@
-# Research: 014 Samples and named gold datasets
+# Research: 014 named samples and named gold datasets
 
-Every decision below was checked against the code on this branch (`src/goldlabel/gold.py`, `_label.py`, `evaluation.py`, `classifier.py`, `candidates.py`, `search.py`, `settings.py`, `web/app.js`). No new dependency; only the standard library (`hashlib`, `re`) is added to what `gold.py` imports.
+Every decision below was checked against the code on this branch (`src/goldlabel/gold.py`, `_label.py`, `evaluation.py`, `classifier.py`, `candidates.py`, `search.py`, `settings.py`, `web/app.js`). No new dependency. Standard-library `hashlib` (already used in `candidates.py`) and `re`.
 
 ## R1. Draw order without a seed
 
-- **Decision**: order candidates by `hashlib.sha256(f"{salt}\0{id}".encode()).hexdigest()`, where `salt` is the dataset name (`""` for the default). A draw takes the first `need` ids in that order that are not already in the file. `band_sample` uses the same key, salt `""`, per band.
-- **Rationale**: the order is fixed by the id alone, so adding or removing candidates never moves the rows already drawn, and it is the same on every machine (`sha256` is not affected by `PYTHONHASHSEED`, unlike `hash()`). Sorting a candidate list once per draw is cheap at the sizes the library sees (keyword candidates in the hundreds; seeds in the thousands).
-- **Ids**: every corpus already turns ids into strings (`search.py` builds `{"id": str(id_), ...}`; `Gold.draw` does `str(r["id"])`), so the key is computed on `str(id)` and matches the gold file.
-- **Alternatives**: `random.Random(seed)` over the pool (today; changes whenever the pool changes, needs a seed); `random.Random(name)` (same problem); storing a draw order in the file (stored state, rejected by the spec).
+- **Decision**: `order_by_id(rows, salt)` in `candidates.py` sorts by `hashlib.sha256(f"{salt}\0{row['id']}".encode()).hexdigest()`. `salt` is the dataset name (`""` for the default). A draw takes the first `need` candidates in that order whose id is in no sample of the file. `band_sample` uses the same helper with `salt=""` inside each band.
+- **Rationale**: an id keeps its position whatever else is in the list, so rows already drawn never move and the order is the same on every machine (`sha256`, not `hash()`, which `PYTHONHASHSEED` changes). Every corpus already makes ids strings (`search.py`: `{"id": str(id_), ...}`), so the key matches the gold file. `candidates.py` imports neither `gold.py` nor `evaluation.py`, so both can import the helper without a cycle.
+- **Alternatives**: `random.Random(seed)` over the remaining pool (today: changes whenever the pool changes, needs a seed); storing an order in the file (stored state).
 
-## R2. What a Sample is
+## R2. Sample names on rows
 
-- **Decision**: a small class in `gold.py`, `Sample(gold, split, drawn=0)`, whose `rows` is a property that reads `gold._read()` and keeps that split. Its `path` is `gold.path` and its `name` is the split, so `aevaluate` (which reads `.rows`, `.name`, `.path`) takes it unchanged. `counts`, `to_polars`, `to_pandas`, `__len__`, `_summary` delegate to a `GoldSet` built on the fly. No base class, no inheritance from `GoldSet` (a frozen dataclass with a `rows` field).
-- **Rationale**: it is the least code that is live (no stale rows after labelling, folding or a top-up) and reuses `GoldSet`'s summary, counts and frames.
-- **Alternatives**: make `GoldSet` live (changes every snapshot view and the `remove`/`import_rows`/`fold_test` results the spec keeps); return a `GoldSet` snapshot (stale after the page saves, the problem the spec removes).
+- **Decision**: `GoldRow.sample: str | None = None`, dropped from the file by `dump()` when `None` (the existing pattern for `labelled_by`, `labelled_at`, `note`). A row's sample is `row.sample or row.split`, so every pre-014 row belongs to "dev" or "test". Draws write `sample` on every new row; `import_rows(rows, split)` writes `sample=split`. A name must match `[A-Za-z0-9_-]+` and all rows of a name must share one split (checked on draw).
+- **Rationale**: one optional field, no migration; the rule is visible in one line.
+- **Alternatives**: free-form `split` values ("test-2") would break `split: Literal["dev","test"]` and every filter on it.
 
-## R3. Top-up arithmetic
+## R3. What a Sample is
 
-- **Decision**: `need = n - len(rows of split)`; `need <= 0` returns `Sample(drawn=0)` and writes nothing; otherwise pick `need` ids (R1) not in the file; fewer than `need` available raises `GoldError` naming both numbers, writes nothing. `n` and `sample_size` must be `int` (not `bool`) and `>= 1`.
-- **Rationale**: matches FR-002 and the spec's rerun scenarios; removed rows (moved to `.removed.jsonl`) are no longer in the file, so a rerun replaces them.
+- **Decision**: `class Sample` in `gold.py`: `Sample(gold, names, split, drawn=0)`. `names` is a tuple (one name, or several for a combination); `split` is `"dev"`/`"test"` for one name and `None` for a combination. `rows` is a property: the rows of `gold._read()` whose sample is in `names`. `path` is `gold.path`. `counts`, `to_polars`, `to_pandas`, `__len__` and the summary delegate to a `GoldSet` built on the fly. `__add__` returns `Sample(gold, names_a + new names_b, None)` after its checks (R6).
+- **Rationale**: live (no stale rows after the page saves or a top-up), read-only, reuses `GoldSet`. No base class.
 
-## R4. Named files
+## R4. Top-up
 
-- **Decision**: `Gold(candidates=None, *, name=None, path=None, sample_size=50)`; the file is `resolve(path, "gold.jsonl" if name is None else f"gold-{name}.jsonl")`. Names must match `[A-Za-z0-9_-]+` (`re.fullmatch`).
-- **Rationale**: `resolve` already gives "argument, then `settings.root`". The default stays `gold.jsonl`; `gold-gold.jsonl` cannot collide with it; no dot is allowed, so a name can never produce `.lock`, `.tmp` or `.removed.jsonl` (those are `gold-<name>.jsonl.lock`, `.jsonl.tmp`, `gold-<name>.removed.jsonl`, all derived from the path as today).
-- **Break**: positional `Gold(path)` stops working. Callers found: `tests/test_pre006_fixtures.py:61`, `tests/test_bundle.py:55`, `tests/test_label_page.py:239,278`, and every `Gold(tmp_path / ...)` in `tests/test_gold.py`, `test_label_server.py`, `test_e2e.py`, `test_evaluation.py` (66 `Gold(` lines in tests, src and docs). Each becomes `Gold(path=...)`.
+- **Decision**: `need = n - len(rows of the sample)`. `need <= 0`: return the Sample, write nothing. A spent test sample with `need > 0`: refuse. Otherwise pick `need` candidates (R1); fewer available: refuse with both numbers; no candidates given: refuse naming `gl.Gold(candidates)`. `n` and `sample_size` must be `int` (not `bool`) `>= 1`. A draw with no shortfall needs no candidates.
+- **Rationale**: FR-003; a removed row (moved to `.removed.jsonl`) is no longer in the file, so a rerun replaces it.
 
-## R5. Labelling pass
+## R5. Files and the log location
 
-- **Decision**: `serve(sample, taxonomy, *, force_open_ui=False, port=None)`; the `Handle` stores `split = sample.split` and `ids`, the ids pending in that split at the start (all ids of the split with `force_open_ui`). `_scope()` keeps rows of that split whose id is in `ids`, so the total is fixed and labelled-in-pass rows stay reachable with Back. `label(id_, ...)` already refuses ids outside `_scope()` (404). `_state()` gains `"split"`; `app.js`'s row line becomes `"Row N of M in dev · id X"`, and the finished text names the split. `gl.label(sample, taxonomy, *, force_open_ui=False, open_browser=True, port=None)` refuses a non-`Sample` with `GoldError` showing the Sample form, and returns the Sample.
-- **Rationale**: the smallest change to `Handle`: one stored set replaces the `split in (None, r.split)` filters (three places). No new route, no page redesign.
+- **Decision**: `Gold(candidates=None, *, name=None, sample_size=50)`; `self.path = settings.root / ("gold.jsonl" if name is None else f"gold-{name}.jsonl")`, fixed when the `Gold` is made. The evaluation log of a dataset is `gold.path.parent / "evals.jsonl"`: in the storage folder, and the same file every time for that dataset even if `gl.settings.root` changes later. Lock, temp and removed files are derived from the path as today.
+- **Callers to change** (`Gold(path)` positional or keyword): `tests/test_pre006_fixtures.py:61`, `tests/test_bundle.py:55`, `tests/test_label_page.py:239,278`, and the `Gold(tmp_path / ...)` lines in `tests/test_gold.py`, `test_label_server.py`, `test_e2e.py`, `test_evaluation.py`; each becomes `monkeypatch.chdir(tmp_path)` or `settings.root = tmp_path` with `Gold()` or `Gold(name=...)`.
 
-## R6. Evaluation and band check on the classifier
+## R6. Spent, identical, and combining
 
-- **Decision**: `Classifier.evaluate` / `aevaluate` / `band_sample` / `aband_sample` are thin methods that import from `goldlabel.evaluation` inside the method (`evaluation.py` already imports `classifier.py`, so a top-level import would be circular). The module functions are renamed `_aevaluate` and `_aband_sample` and dropped from `__init__`; `evaluate` and `band_sample` (sync module functions) are deleted, the sync methods call `_sync.run(...)` like `Classifier.classify`.
-- **Rationale**: no code moves between modules; the import inside a method is the plain way out of the cycle and costs one line each. `band_sample` gets `aband_sample` (it calls `aclassify`), satisfying "every I/O function has an async and a sync form".
-- **Alternatives**: move `Evaluation`, `EvalLog`, the log and metrics into `classifier.py` (a large move for no behaviour); keep module functions and add methods (two ways to do one thing, the spec removes them).
+- **Decision**: each log line gains `"samples": [names]` and `"rows_digest"`: `sha256` of the JSON of `sorted((id, sorted(labels)) for labelled rows)`. In `evaluation.py`:
+  - `_history(log_path, gold_path)`: the log's evaluation lines whose `gold` resolves to `gold_path` (`Path(x).resolve()`); a line with no `samples` is read as `[split]`; `test_folded` events are skipped.
+  - `_spent(history, name)`: the first line whose `samples == [name]` and `split == "test"`, or `None`.
+  - Identical: a line with the same `samples`, `rows_digest`, `digest`, `model`, `metric` and `target` exists, so no line is appended. The `Evaluation` is still built and returned (the predictions are cached, so no model call).
+- In `_aevaluate`, before any model call: a single test sample with a pending row is refused; a single test sample that is spent, where the first line's `digest`, `model` or `rows_digest` (when present) differs, is refused. Combinations are never checked as tests.
+- In `Sample.__add__`: refuse different `gold.path`s; refuse any single test sample that has a pending row or is not spent (`gold.py` imports `_history`/`_spent` from `evaluation.py`; `gold.py` already imports from it today, and `evaluation.py` does not import `gold.py`).
+- **Rationale**: one hash per evaluation over rows already in memory; the log is still the only record; old lines keep counting (a pre-014 test evaluation makes "test" spent).
 
-## R7. Test split must be fully labelled
+## R7. Evaluation and the band check on the classifier
 
-- **Decision**: in `_aevaluate`, before any model call, if any row of `gold_set.rows` has `split == "test"` and no labels, raise `GoldError` ("N test rows are still pending; finish labelling before evaluating the test split"). Dev keeps skip-and-count.
-- **Rationale**: one check that works for a Sample and for `gold.all`; `gold.test` was labelled-only before, so no existing caller hits it with a correctly labelled split.
+- **Decision**: `Classifier.evaluate`/`aevaluate`/`band_sample`/`aband_sample` are thin methods that import inside the method (`evaluation.py` imports `classifier.py`, so a top-level import would be circular). `aevaluate` also imports `Sample` there and refuses anything else. The module functions become private (`_aevaluate`, `_aband_sample`); `evaluate`, `aevaluate`, `band_sample`, `eval_log` and `EvalLog` leave `evaluation.py`'s public surface and `__init__`. The `log` argument is removed. Sync methods use `_sync.run`, like `classify`.
+- **Rationale**: no code moves between modules; one import line per method.
 
-## R8. Per-dataset evaluation history
+## R8. Labelling pass
 
-- **Decision**: the log stays one file. `Gold.fold_test` keeps only log rows whose `gold` resolves to the same file (`Path(r["gold"]).resolve() == self.path.resolve()`), and only fold events for this file; it writes `"gold": str(self.path)` on its `test_folded` event. A fold event with no `gold` (older logs) belongs to any file named `gold.jsonl` (the default). `EvalLog._test_line` reports one count per gold file ("test split evaluated 2 times (2 distinct prompts) for .goldlabel/gold.jsonl; 1 time for .goldlabel/gold-corpus-b.jsonl"), so no new parameter on `eval_log`.
-- **Rationale**: every evaluation line already records `gold` (`evaluation.py:209`); this reads it. `resolve()` makes `Gold(name=...)` and `Gold(path=...)` for the same file compare equal.
-- **Alternatives**: `eval_log(gold=...)` filter parameter (an option nobody asked for); a log per dataset (breaks the single append-only history).
+- **Decision**: `serve(sample, taxonomy, *, force_open_ui=False, port=None)`. The `Handle` keeps the `sample` and `ids`: the ids pending in it at start (every id with `force_open_ui`). `_scope()` is the file's rows with id in `ids`. That replaces the three `split in (None, r.split)` filters, so the total is fixed and Back works within the pass. `label()` already 404s an id outside the scope. `_state()` gains `"sample"` (names joined with " + ") and `"split"`. `app.js`'s row line becomes `"Row N of M in <sample> · id X"`, and the finished line names the sample. Text goes in through `el()`/`textContent` as today, and no CSS classes are added. `gl.label(sample, taxonomy, *, force_open_ui=False, open_browser=True, port=None)` refuses a non-Sample and returns the Sample.
+- **Rationale**: the smallest `Handle` change; no new route, no page redesign, no CSS rebuild.
 
-## R9. What is not touched
+## R9. Kept as is
 
-`Candidates.sample(n, seed)` stays: the stage skills use it to read a few candidates with the user, not to draw gold. `gl.eval_log`, `GoldSet`, `gold.all`, `gold.pending`, `remove`, `import_rows`, `orphaned`, `fold_test`'s return value, the cache, cost and metrics are unchanged apart from R8.
+`Candidates.sample(n, seed)` (a reading aid in the skills, not a gold draw), `GoldSet`, `gold.all`, `gold.pending`, `remove`, `orphaned`, the cache, cost and metrics. The `get_candidates(out=)`, `cache=`, `classify(out=)` and bundle paths are a follow-up (spec Assumptions).

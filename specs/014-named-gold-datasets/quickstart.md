@@ -10,17 +10,24 @@ uv sync --all-extras
 uv run ruff check && uv run ruff format --check && uv run ty check && uv run pytest
 ```
 
-What the suite proves (see the tests named in `plan.md`):
+What the suite proves (tests named in `plan.md`):
 
-1. Rerun safety: `draw_dev()` twice over 200 candidates leaves 50 dev rows; `draw_dev(n=80)` adds 30; `draw_dev(n=30)` adds none (SC-001).
-2. Same rows for two people: two fresh roots, same candidates, same dev ids; a different name gives different ids (SC-003).
-3. Pass scope: 50 labelled dev + 50 pending test, the test Sample's server state says total 50, split `test`, never a dev id (SC-002).
-4. Test refusal: a test Sample with one pending row raises in `clf.evaluate` with zero `FunctionModel` calls and no log line (SC-004).
-5. Two datasets: same id in both, separate files, separate locks, A's fold eligibility unchanged by B's test evaluation (SC-005).
-6. Drift: no doc or skill example calls `.draw(`, a draw `seed=`, `gl.label(gold`, `gl.evaluate(` or `gl.band_sample(` (SC-006).
-7. End to end: `tests/test_e2e.py` runs the README chain with the new calls, labelling done by the simulated human over HTTP, then runs the draw, label and evaluate calls a second time and checks the gold file is byte-identical and no model call was made (SC-001).
+1. Rerun safety: over 200 candidates, `draw_dev()` twice leaves 50 dev rows; `draw_test()` and `draw_test("test-2")` add 50 each, disjoint; `draw_dev(n=80)` adds 30; `draw_dev(n=30)` adds none.
+2. Same rows for two people: two fresh roots and the same candidates give the same dev ids; another dataset name gives different ids.
+3. Pass scope: with 50 labelled dev and 50 pending test rows, the test Sample's server state says total 50, sample `test`, and never serves a dev id.
+4. Test once: these are refused, each with zero `FunctionModel` calls and no log line:
+   - a test sample with a pending row;
+   - a spent test sample under a second prompt;
+   - `dev + test_2` with "test-2" unspent.
+
+   An identical rerun returns the result and adds no line.
+5. Fold by `+`: `dev + test` with "test" spent has 100 rows, and the gold file is byte-identical before and after.
+6. Two datasets: the same id in both, separate files and locks; B's test evaluation leaves A's "test" unspent.
+7. Old files: the pre-006 fixtures and a hand-written pre-014 log (no `samples`, one `test_folded` event) load; "test" in that log is spent.
+8. End to end: `tests/test_e2e.py` runs the README chain with the new calls (labelling by the simulated human over HTTP), including `tuning = dev + test` and "test-2". It then runs the whole chain again and checks that the gold file and log are byte-identical and that no model call was made (SC-001).
+9. Drift: no doc or skill example uses a removed name or a draw `seed=`.
 
 ## Needs a human
 
-- Open the labelling page in a real browser for a dev Sample and a test Sample: the row line names the split, the count is the pass only, Back works within the pass.
-- Run `examples/sample/walkthrough.ipynb` in real Jupyter twice from the top: the second run draws nothing.
+- Open the labelling page in a real browser for a dev Sample and a test Sample. The row line should name the sample, the count should be the pass only, and Back should work within the pass.
+- Run `examples/sample/walkthrough.ipynb` in real Jupyter twice from the top. The second run should draw nothing, write no log line and make no live call.
