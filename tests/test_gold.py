@@ -37,12 +37,16 @@ def cands(n):
     )
 
 
-def write(path, *rows):
-    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+def write(path, *rows, taxonomy=None):
+    path.write_text(json.dumps({"taxonomy": taxonomy, "rows": list(rows)}))
     return path
 
 
 def lines(path):
+    return json.loads(path.read_text())["rows"]
+
+
+def removed_lines(path):  # the removed-rows file is still one JSON row per line
     return [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
 
 
@@ -61,12 +65,12 @@ def by_hash(ids, salt=""):
 
 
 def test_files_follow_settings_root_and_the_dataset_name(tmp_path, monkeypatch):
-    assert Gold().path == tmp_path / "gold.jsonl"
-    assert Gold(name="corpus-b").path == tmp_path / "gold-corpus-b.jsonl"
-    assert Gold(name="gold").path == tmp_path / "gold-gold.jsonl"
+    assert Gold().path == tmp_path / "gold.json"
+    assert Gold(name="corpus-b").path == tmp_path / "gold-corpus-b.json"
+    assert Gold(name="gold").path == tmp_path / "gold-gold.json"
     monkeypatch.setattr(settings, "root", tmp_path / "root")
     g = Gold()
-    assert g.path == tmp_path / "root" / "gold.jsonl"
+    assert g.path == tmp_path / "root" / "gold.json"
     assert len(g.all) == 0 and len(g.pending) == 0
     assert not (tmp_path / "root").exists()  # nothing is written on load
 
@@ -91,19 +95,19 @@ def test_sample_size_is_a_whole_number_of_at_least_one(bad):
 
 def test_a_row_without_a_sample_name_is_not_a_gold_row(tmp_path):
     write(
-        tmp_path / "gold.jsonl",
+        tmp_path / "gold.json",
         {"id": "1", "text": "t", "labels": None, "split": "dev"},
     )
     with pytest.raises(GoldError, match="not a gold row"):
         _ = Gold().all
-    write(tmp_path / "gold.jsonl", row("1", None, "Dev"))
+    write(tmp_path / "gold.json", row("1", None, "Dev"))
     with pytest.raises(GoldError, match="not a gold row"):
         _ = Gold().all
 
 
 def test_hand_edited_file_with_extra_keys_loads_and_keeps_them(tmp_path):
     path = write(
-        tmp_path / "gold.jsonl",
+        tmp_path / "gold.json",
         row("x", ["a"], extra="hand", labelled_by="somebody"),
     )
     g = Gold()
@@ -112,14 +116,87 @@ def test_hand_edited_file_with_extra_keys_loads_and_keeps_them(tmp_path):
     assert lines(path)[0]["extra"] == "hand"
 
 
-def test_malformed_line_raises_with_its_number(tmp_path):
-    path = tmp_path / "gold.jsonl"
-    path.write_text(json.dumps(row("a", ["a"])) + "\n\n{not json\n")
-    with pytest.raises(ValueError, match=r"gold\.jsonl:3"):
+def test_a_bad_file_or_row_raises_naming_the_file_and_the_row(tmp_path):
+    path = tmp_path / "gold.json"
+    path.write_text("{not json")
+    with pytest.raises(ValueError, match=r"gold\.json: not a gold file"):
         _ = Gold().all
-    path.write_text(json.dumps(row("a", ["a"])) + "\n" + json.dumps({"id": "b"}) + "\n")
-    with pytest.raises(ValueError, match=r"gold\.jsonl:2"):
+    path.write_text(json.dumps([row("a", ["a"])]))  # a list, not a document
+    with pytest.raises(ValueError, match=r"gold\.json: not a gold file"):
         _ = Gold().all
+    path.write_text(json.dumps({"taxonomy": None}))  # no rows
+    with pytest.raises(ValueError, match=r"gold\.json: not a gold file"):
+        _ = Gold().all
+    write(path, row("a", ["a"]), {"id": "b"})
+    with pytest.raises(ValueError, match=r"gold\.json: row 2: not a gold row"):
+        _ = Gold().all
+
+
+# --- the gold file is one JSON document ---------------------------------------------------------
+
+TAX = {"mode": "single", "labels": [{"name": "yes", "description": "d"}]}
+
+
+def test_the_files_are_json_documents_and_the_removed_file_stays_line_per_row(tmp_path):
+    assert Gold().path == tmp_path / "gold.json"
+    assert Gold(name="corpus-b").path == tmp_path / "gold-corpus-b.json"
+    g = Gold(cands(5), sample_size=3)
+    g.draw_sample("dev")
+    assert json.loads(g.path.read_text())["taxonomy"] is None
+    g.remove(["c0"] if "c0" in {r.id for r in g.all.rows} else [g.all.rows[0].id])
+    assert g._removed() == tmp_path / "gold.removed.jsonl"
+    assert (tmp_path / "gold.removed.jsonl").read_text().count("\n") == 1
+
+
+def test_a_write_keeps_the_stored_taxonomy_unless_one_is_passed(tmp_path):
+    path = write(tmp_path / "gold.json", row("1", None), taxonomy=TAX)
+    g = Gold(cands(5), sample_size=2)
+    g.draw_sample("dev")  # draw keeps it
+    g.import_rows(
+        [{"id": "z", "text": "t", "labels": ["yes"]}], "test"
+    )  # import keeps it
+    g.remove(["z"])  # remove keeps it
+    assert json.loads(path.read_text())["taxonomy"] == TAX
+    other = {"mode": "multi", "labels": [{"name": "q", "description": ""}]}
+    g._write(g._read(), taxonomy=other)
+    assert json.loads(path.read_text())["taxonomy"] == other
+    g._write(g._read())
+    assert json.loads(path.read_text())["taxonomy"] == other
+
+
+def test_revisions_round_trip_and_are_omitted_when_empty(tmp_path):
+    entries = [
+        {
+            "at": "2026-11-06T09:00:00+00:00",
+            "labels": ["no"],
+            "note": None,
+            "labelled_by": "imported",
+        },
+        {
+            "at": "2026-11-07T09:00:00+00:00",
+            "labels": ["yes"],
+            "note": "n",
+            "labelled_by": "goldlabel-ui",
+        },
+    ]
+    path = write(
+        tmp_path / "gold.json",
+        row("1", ["maybe"], revisions=entries),
+        row("2", ["a"], revisions=[]),
+        row("3", ["a"]),
+    )
+    g = Gold()
+    rows = g.all.rows
+    assert rows[0].revisions == entries and rows[2].revisions is None
+    g._write(rows)
+    on_disk = lines(path)
+    assert on_disk[0]["revisions"] == entries  # oldest first, untouched
+    assert "revisions" not in on_disk[1] and "revisions" not in on_disk[2]
+
+
+def test_a_014_line_per_row_file_is_not_read(tmp_path):
+    (tmp_path / "gold.jsonl").write_text(json.dumps(row("1", ["a"])) + "\n")
+    assert Gold().all.rows == [] and not Gold().path.exists()
 
 
 # --- draw_sample --------------------------------------------------------------------------------
@@ -129,15 +206,15 @@ def test_draw_sample_appends_pending_rows_and_a_rerun_draws_nothing(tmp_path):
     g = Gold(cands(60))
     dev = g.draw_sample("dev")
     assert isinstance(dev, Sample) and dev.drawn == 50 and dev.names == ("dev",)
-    on_disk = lines(tmp_path / "gold.jsonl")
+    on_disk = lines(tmp_path / "gold.json")
     assert len(on_disk) == 50
     assert all(r["labels"] is None and r["sample"] == "dev" for r in on_disk)
     assert all("labelled_by" not in r and "split" not in r for r in on_disk)
     assert {r["text"] for r in on_disk} == {f"text {r['id'][1:]}" for r in on_disk}
-    before = (tmp_path / "gold.jsonl").read_bytes()
+    before = (tmp_path / "gold.json").read_bytes()
     again = g.draw_sample("dev")
     assert again.drawn == 0 and len(again) == 50
-    assert (tmp_path / "gold.jsonl").read_bytes() == before
+    assert (tmp_path / "gold.json").read_bytes() == before
     assert [r.id for r in again.rows] == [r["id"] for r in on_disk]
 
 
@@ -170,7 +247,7 @@ def test_draw_sample_works_on_a_whole_corpus_list():
 def test_n_is_a_whole_number_of_at_least_one(bad, tmp_path):
     with pytest.raises(GoldError, match="n must be"):
         Gold(cands(5)).draw_sample("dev", n=bad)
-    assert not (tmp_path / "gold.jsonl").exists()
+    assert not (tmp_path / "gold.json").exists()
 
 
 @pytest.mark.parametrize("bad", ["Test", "", "a b", "a.b", None])
@@ -179,16 +256,16 @@ def test_a_sample_name_is_lowercase_letters_digits_dash_underscore(bad, tmp_path
         Gold(cands(5)).draw_sample(bad)
     with pytest.raises(TypeError):
         Gold(cands(5)).draw_sample()  # ty: ignore[missing-argument]
-    assert not (tmp_path / "gold.jsonl").exists()
+    assert not (tmp_path / "gold.json").exists()
 
 
 def test_draw_sample_refuses_when_short_names_both_numbers_and_writes_nothing(tmp_path):
     g = Gold(cands(60))
     g.draw_sample("dev")
-    before = (tmp_path / "gold.jsonl").read_bytes()
+    before = (tmp_path / "gold.json").read_bytes()
     with pytest.raises(GoldError, match="needs 20 more rows, but only 10 candidates"):
         g.draw_sample("test", n=20)
-    assert (tmp_path / "gold.jsonl").read_bytes() == before
+    assert (tmp_path / "gold.json").read_bytes() == before
 
 
 def test_a_gold_without_candidates_reads_and_tops_up_only_when_full(tmp_path):
@@ -218,9 +295,9 @@ def test_order_by_id_matches_sha256_of_salt_and_id():
 
 def test_more_candidates_never_move_rows_already_drawn(tmp_path):
     Gold(cands(60)).draw_sample("dev")
-    before = (tmp_path / "gold.jsonl").read_bytes()
+    before = (tmp_path / "gold.json").read_bytes()
     assert Gold(cands(120)).draw_sample("dev").drawn == 0
-    assert (tmp_path / "gold.jsonl").read_bytes() == before
+    assert (tmp_path / "gold.json").read_bytes() == before
     shared = {f"c{i}" for i in range(60)}
     narrow = [r["id"] for r in order_by_id(cands(60).rows)]
     wide = [r["id"] for r in order_by_id(cands(120).rows) if r["id"] in shared]
@@ -235,19 +312,19 @@ def test_a_removed_row_is_never_drawn_again(tmp_path):
     again = g.draw_sample("dev")
     assert again.drawn == 2 and len(again) == 5
     assert not set(gone) & {r.id for r in again.rows}
-    assert [r["id"] for r in lines(tmp_path / "gold.removed.jsonl")] == gone
+    assert [r["id"] for r in removed_lines(tmp_path / "gold.removed.jsonl")] == gone
 
 
 def test_getitem_returns_a_sample_without_drawing_or_lists_the_names(tmp_path):
     g = Gold(cands(200))
     for name in ("dev", "test", "test-2"):
         g.draw_sample(name)
-    before = (tmp_path / "gold.jsonl").read_bytes()
+    before = (tmp_path / "gold.json").read_bytes()
     s = g["test-2"]
     assert s.drawn == 0 and len(s) == 50 and s.names == ("test-2",)
     with pytest.raises(KeyError, match="dev, test, test-2"):
         g["nope"]
-    assert (tmp_path / "gold.jsonl").read_bytes() == before
+    assert (tmp_path / "gold.json").read_bytes() == before
 
 
 # --- Sample -------------------------------------------------------------------------------------
@@ -256,13 +333,13 @@ def test_getitem_returns_a_sample_without_drawing_or_lists_the_names(tmp_path):
 def test_a_sample_is_live(tmp_path):
     dev = Gold(cands(5), sample_size=2).draw_sample("dev")
     a, b = (r.id for r in dev.rows)
-    write(tmp_path / "gold.jsonl", row(a, ["a"]), row(b, None), row("x", None, "test"))
+    write(tmp_path / "gold.json", row(a, ["a"]), row(b, None), row("x", None, "test"))
     assert [(r.id, r.labels) for r in dev.rows] == [(a, ["a"]), (b, None)]
 
 
 def test_sample_counts_len_and_frames(tmp_path):
     write(
-        tmp_path / "gold.jsonl",
+        tmp_path / "gold.json",
         row("1", ["a"]),
         row("2", ["a", "b"]),
         row("3", ["off_topic"]),
@@ -291,7 +368,7 @@ def test_sample_repr_says_what_was_drawn_and_html_escapes(tmp_path):
     assert repr(b).startswith(
         'Sample "test" of corpus-b: 1 rows (0 labelled, 1 pending)'
     )
-    write(tmp_path / "gold.jsonl", row("1", None) | {"text": "<b>x</b>"})
+    write(tmp_path / "gold.json", row("1", None) | {"text": "<b>x</b>"})
     html = Gold()["dev"]._repr_html_()
     assert "&lt;b&gt;x&lt;/b&gt;" in html and "<b>x" not in html
 
@@ -299,7 +376,7 @@ def test_sample_repr_says_what_was_drawn_and_html_escapes(tmp_path):
 def test_adding_samples_gives_the_union_and_writes_nothing(tmp_path):
     g = Gold(cands(200))
     dev, test = g.draw_sample("dev"), g.draw_sample("test")
-    before = (tmp_path / "gold.jsonl").read_bytes()
+    before = (tmp_path / "gold.json").read_bytes()
     both = dev + test
     assert isinstance(both, Sample) and both.names == ("dev", "test")
     assert len(both) == 100
@@ -308,7 +385,7 @@ def test_adding_samples_gives_the_union_and_writes_nothing(tmp_path):
         "not evaluated"
     )
     assert len(dev + dev) == 50 and len(both + test) == 100
-    assert (tmp_path / "gold.jsonl").read_bytes() == before
+    assert (tmp_path / "gold.json").read_bytes() == before
 
 
 def test_samples_of_two_datasets_cannot_be_added():
@@ -329,7 +406,7 @@ def test_two_datasets_keep_their_own_rows_files_and_locks(tmp_path):
     b.import_rows([{"id": "1", "text": "t", "labels": ["b"]}], "test")
     assert [r.labels for r in a["test"].rows] == [["a"]]
     assert [r.labels for r in b["test"].rows] == [["b"]]
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["gold-b.jsonl", "gold.jsonl"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["gold-b.json", "gold.json"]
     assert a.path.name + ".lock" != b.path.name + ".lock"
 
 
@@ -346,7 +423,7 @@ def test_import_rows_stamps_and_writes_the_sample_name(tmp_path):
         "test",
     )
     assert len(got) == 2
-    on_disk = lines(tmp_path / "gold.jsonl")
+    on_disk = lines(tmp_path / "gold.json")
     assert [(r["id"], r["labels"], r["sample"], r["labelled_by"]) for r in on_disk] == [
         ("1", ["a"], "test", "imported"),
         ("2", ["a", "b"], "test", "imported"),
@@ -358,7 +435,7 @@ def test_import_rows_stamps_and_writes_the_sample_name(tmp_path):
 
 
 def test_import_rows_refuses_an_id_already_present_and_writes_nothing(tmp_path):
-    path = write(tmp_path / "gold.jsonl", row("1", ["a"]))
+    path = write(tmp_path / "gold.json", row("1", ["a"]))
     before = path.read_bytes()
     with pytest.raises(ValueError, match="'1'"):
         Gold().import_rows(
@@ -394,7 +471,7 @@ def test_import_rows_needs_id_text_and_labels(tmp_path):
     ):
         with pytest.raises(ValueError):
             g.import_rows([bad], "dev")
-    assert not (tmp_path / "gold.jsonl").exists()
+    assert not (tmp_path / "gold.json").exists()
 
 
 # --- views, counts, repr ------------------------------------------------------------------------
@@ -402,7 +479,7 @@ def test_import_rows_needs_id_text_and_labels(tmp_path):
 
 def test_pending_and_all_views(tmp_path):
     write(
-        tmp_path / "gold.jsonl",
+        tmp_path / "gold.json",
         row("1", ["a"]),
         row("2", None),
         row("3", ["b"], "test"),
@@ -416,7 +493,7 @@ def test_pending_and_all_views(tmp_path):
 
 def test_goldset_and_gold_reprs_are_plain_text(tmp_path):
     write(
-        tmp_path / "gold.jsonl",
+        tmp_path / "gold.json",
         row("1", ["a"], labelled_by="goldlabel-ui"),
         row("2", ["a"], "test", labelled_by="imported"),
         row("3", None),
@@ -426,7 +503,7 @@ def test_goldset_and_gold_reprs_are_plain_text(tmp_path):
         "GoldSet all: 3 rows (2 labelled, 1 pending); goldlabel-ui 1, imported 1, unstamped 0"
     )
     assert repr(Gold()).splitlines()[0] == (
-        f"Gold default ({tmp_path / 'gold.jsonl'}): dev 2 (1 labelled), test 1 (1 labelled); "
+        f"Gold default ({tmp_path / 'gold.json'}): dev 2 (1 labelled), test 1 (1 labelled); "
         "goldlabel-ui 1, imported 1, unstamped 0"
     )
 
@@ -441,7 +518,7 @@ def test_goldset_is_frozen():
 
 def test_orphaned_are_rows_with_a_label_outside_the_taxonomy(tmp_path):
     write(
-        tmp_path / "gold.jsonl",
+        tmp_path / "gold.json",
         row("1", ["a"]),
         row("2", ["a", "gone"]),
         row("3", ["old"], "test"),
@@ -453,7 +530,7 @@ def test_orphaned_are_rows_with_a_label_outside_the_taxonomy(tmp_path):
 
 def test_remove_moves_rows_to_removed_file_and_keeps_all_fields(tmp_path):
     path = write(
-        tmp_path / "gold.jsonl",
+        tmp_path / "gold.json",
         row(
             "1",
             ["a"],
@@ -469,7 +546,7 @@ def test_remove_moves_rows_to_removed_file_and_keeps_all_fields(tmp_path):
     assert [r.id for r in gone.rows] == ["1", "3"]
     assert [r["id"] for r in lines(path)] == ["2"]
     removed = tmp_path / "gold.removed.jsonl"
-    assert lines(removed) == [
+    assert removed_lines(removed) == [
         row(
             "1",
             ["a"],
@@ -480,12 +557,12 @@ def test_remove_moves_rows_to_removed_file_and_keeps_all_fields(tmp_path):
         row("3", None),
     ]
     g.remove(["2"])  # appends, never overwrites
-    assert [r["id"] for r in lines(removed)] == ["1", "3", "2"]
+    assert [r["id"] for r in removed_lines(removed)] == ["1", "3", "2"]
     assert lines(path) == []
 
 
 def test_remove_unknown_id_raises_and_changes_nothing(tmp_path):
-    path = write(tmp_path / "gold.jsonl", row("1", ["a"]))
+    path = write(tmp_path / "gold.json", row("1", ["a"]))
     before = path.read_bytes()
     with pytest.raises(ValueError, match="'zz'"):
         Gold().remove(["1", "zz"])
@@ -501,7 +578,7 @@ def test_remove_unknown_id_raises_and_changes_nothing(tmp_path):
 def test_a_crash_between_temp_write_and_replace_leaves_the_old_file(
     tmp_path, monkeypatch
 ):
-    path = write(tmp_path / "gold.jsonl", row("1", ["a"]))
+    path = write(tmp_path / "gold.json", row("1", ["a"]))
     before = path.read_bytes()
 
     def boom(*a, **k):
@@ -513,7 +590,7 @@ def test_a_crash_between_temp_write_and_replace_leaves_the_old_file(
     with pytest.raises(OSError, match="crash"):
         Gold().import_rows([{"id": "9", "text": "t", "labels": ["a"]}], "test")
     assert path.read_bytes() == before
-    assert [p.name for p in tmp_path.iterdir()] == ["gold.jsonl"]  # no temp file left
+    assert [p.name for p in tmp_path.iterdir()] == ["gold.json"]  # no temp file left
 
 
 # --- the gold rule ------------------------------------------------------------------------------
@@ -551,7 +628,7 @@ def test_only_import_rows_can_set_a_label():
 
 def test_nothing_but_import_rows_changes_a_labelled_row(tmp_path):
     path = write(
-        tmp_path / "gold.jsonl",
+        tmp_path / "gold.json",
         row("1", ["a"]),
         row("2", None),
         row("3", ["b"], "test"),
@@ -571,7 +648,7 @@ def test_nothing_but_import_rows_changes_a_labelled_row(tmp_path):
 
 def test_a_note_round_trips_and_an_unset_note_writes_no_key(tmp_path):
     p = write(
-        tmp_path / "gold.jsonl",
+        tmp_path / "gold.json",
         row("1", ["a"], note="two policies in one sentence"),
         row("2", ["a"]),
     )
@@ -592,6 +669,6 @@ def test_import_rows_keeps_a_note_key_as_given(tmp_path):
 
 
 def test_gold_frames_carry_the_note_column(tmp_path):
-    write(tmp_path / "gold.jsonl", row("1", ["a"], note="n"), row("2", ["b"]))
+    write(tmp_path / "gold.json", row("1", ["a"], note="n"), row("2", ["b"]))
     assert Gold().all.to_polars()["note"].to_list() == ["n", None]
     assert Gold().all.to_pandas()["note"].tolist() == ["n", None]

@@ -87,11 +87,11 @@ def simulated_human(url: str) -> threading.Thread:
     u = urlparse(url)
     assert u.hostname and u.port
     host, port = u.hostname, u.port
-    token = u.query.removeprefix("token=")
+    pass_id = u.fragment.removeprefix("/pass/")
 
     def call(method, path, body=None):
         conn = http.client.HTTPConnection(host, port, timeout=5)
-        headers = {"X-Goldlabel-Token": token}
+        headers = {"X-Goldlabel": "1"}
         if body is not None:
             headers["Content-Type"] = "application/json"
         conn.request(method, path, json.dumps(body) if body else None, headers)
@@ -102,14 +102,18 @@ def simulated_human(url: str) -> threading.Thread:
         return data
 
     def run():
-        state = call("GET", "/api/state")
+        state = call("GET", f"/api/pass/{pass_id}")
         while state["item"] is not None:
             state = call(
                 "POST",
                 "/api/label",
-                {"id": state["item"]["id"], "labels": HUMAN[state["item"]["id"]]},
+                {
+                    "pass": pass_id,
+                    "id": state["item"]["id"],
+                    "labels": HUMAN[state["item"]["id"]],
+                },
             )
-        call("POST", "/api/done")
+        call("POST", f"/api/pass/{pass_id}/done")
 
     thread = threading.Thread(target=run)
     thread.start()

@@ -33,6 +33,7 @@ POINTERS = """When working with the `goldlabel` library (content analysis over a
 - Never put API keys or database URLs in a notebook, script or file; they come from environment variables.
 - Never evaluate the held-out test sample to guide edits, and never combine a spent test sample into the tuning set (`dev + test`) without the user's explicit yes.
 - A second corpus gets its own named gold dataset (`name="corpus-b"`), usually just a held-out test sample, labelled by people and evaluated once.
+- To review or revise gold labels, tell the user to run `goldlabel label` (it opens the labelling page on every dataset in the storage folder, and `gl.label` joins it when it is already running); never write or change a label yourself. A revised row keeps its earlier values in `revisions`, and an evaluation made before a revision shows as STALE: evaluate again.
 """
 
 
@@ -102,7 +103,30 @@ def main(argv=None) -> int:
     ins.add_argument(
         "--dry-run", action="store_true", help="print what would be written"
     )
+    lab = sub.add_parser(
+        "label",
+        help="open the labelling page for the gold datasets of a storage folder",
+    )
+    lab.add_argument(
+        "name",
+        nargs="?",
+        metavar="NAME",
+        help="open the dataset made with name=NAME",
+    )
+    lab.add_argument(
+        "--dir", help="the storage folder (default: GOLDLABEL_DIR or .goldlabel)"
+    )
+    lab.add_argument(
+        "--port", type=int, help="the port to listen on (default: a free one)"
+    )
     args = ap.parse_args(argv)
+    if args.command == "label":
+        from goldlabel._label import run_forever  # only this command starts the server
+        from goldlabel.settings import settings
+
+        return run_forever(
+            Path(args.dir) if args.dir else settings.root, args.name, args.port
+        )
     valid = [*AGENTS, "all"]
     if args.dir and args.agents:
         ap.error("--dir takes no agent name")

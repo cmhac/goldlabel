@@ -174,3 +174,33 @@ def test_every_session_starts_with_the_dev_setup_script():
     assert os.access(script, os.X_OK)
     assert "uv sync --all-extras" in script.read_text()
     assert "pre-commit install" in script.read_text()
+
+
+def test_the_docs_teach_goldlabel_label_for_reviewing_and_revising_labels():
+    skills = ROOT / "src" / "goldlabel" / "skills"
+    for path in (
+        ROOT / "README.md",
+        INSTRUCTIONS,
+        ROOT / ".kiro/steering/goldlabel.md",
+        skills / "goldlabel" / "references" / "workflow.md",
+        skills / "goldlabel-tune" / "SKILL.md",
+    ):
+        assert "goldlabel label" in path.read_text(), path.name
+
+
+def test_the_docs_tell_agents_to_hand_the_command_to_the_user_never_to_write_a_label():
+    text = INSTRUCTIONS.read_text()
+    assert "tell the user to run `goldlabel label`" in text and "yourself" in text
+
+
+def test_the_sample_readme_shows_how_to_try_the_page_on_a_fresh_clone():
+    text = (SAMPLE / "README.md").read_text()
+    for needle in (
+        "uv sync",
+        "uv run goldlabel label",
+        "uv run python walkthrough.py",
+        "STALE",
+        "revisions",
+    ):
+        assert needle in text, needle
+    assert "OPENAI_API_KEY" in text and "openai:gpt-6-luna" in text

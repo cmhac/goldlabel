@@ -41,17 +41,17 @@ def test_unset_environment_gives_default_in_subprocess():
 
 
 def test_assignment_changes_resolve_on_next_call():
-    assert resolve(None, "gold.jsonl") == Path(".goldlabel/gold.jsonl")
+    assert resolve(None, "gold.json") == Path(".goldlabel/gold.json")
     settings.root = Path("/elsewhere")
-    assert resolve(None, "gold.jsonl") == Path("/elsewhere/gold.jsonl")
+    assert resolve(None, "gold.json") == Path("/elsewhere/gold.json")
 
 
 def test_explicit_path_beats_setting_beats_default(monkeypatch):
     settings.root = Path("/setting")
-    assert resolve(Path("/mine/x.jsonl"), "gold.jsonl") == Path("/mine/x.jsonl")
-    assert resolve(None, "gold.jsonl") == Path("/setting/gold.jsonl")
+    assert resolve(Path("/mine/x.jsonl"), "gold.json") == Path("/mine/x.jsonl")
+    assert resolve(None, "gold.json") == Path("/setting/gold.json")
     settings.root = Path(".goldlabel")
-    assert resolve(None, "gold.jsonl") == Path(".goldlabel/gold.jsonl")
+    assert resolve(None, "gold.json") == Path(".goldlabel/gold.json")
 
 
 def test_reset_fixture_restores_default_and_clears_env():

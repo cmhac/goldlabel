@@ -55,8 +55,8 @@ def press_done_on_open(monkeypatch):
         urls.append(url)
         u = urlparse(url)
         conn = http.client.HTTPConnection(u.hostname, u.port, timeout=5)
-        token = u.query.removeprefix("token=")
-        conn.request("POST", "/api/done", "{}", {"X-Goldlabel-Token": token})
+        pass_id = u.fragment.removeprefix("/pass/")
+        conn.request("POST", f"/api/pass/{pass_id}/done", "{}", {"X-Goldlabel": "1"})
         conn.getresponse().read()
 
     monkeypatch.setattr("webbrowser.open", open_)

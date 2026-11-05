@@ -152,12 +152,21 @@ def _history(log: Path, gold: Path) -> list[dict]:
     """The evaluation lines of `log` that scored samples of the gold file `gold`."""
     if not log.exists():
         return []
-    target = gold.resolve()
-    lines = [json.loads(x) for x in log.read_text().splitlines() if x.strip()]
+    lines = []
+    for x in log.read_text().splitlines():
+        try:
+            lines.append(json.loads(x))
+        except ValueError:  # a half-written or hand-damaged line must not hide the rest
+            pass
+    # the log lives beside its gold files, and `gold` is logged relative to where the notebook
+    # ran, so match the file name rather than a path that depends on the working directory
     return [
         r
         for r in lines
-        if "samples" in r and r.get("gold") and Path(r["gold"]).resolve() == target
+        if isinstance(r, dict)
+        and "samples" in r
+        and r.get("gold")
+        and Path(r["gold"]).name == gold.name
     ]
 
 
@@ -224,6 +233,7 @@ async def _aevaluate(
         "samples": list(sample.names),
         "rows_digest": _rows_digest(rows),
         "n": evaluation.n,
+        "skipped_pending": evaluation.skipped_pending,
         "gold": str(sample.path),
         "model": _model_name(clf.model),
         "digest": clf.digest,
@@ -237,6 +247,11 @@ async def _aevaluate(
         "live_calls": preds.live,
         "cached_calls": preds.cached,
         "goldlabel": _goldlabel_version(),
+        # the page joins each id to its text in the gold file, so the text is not copied here
+        "disagreements": [
+            {k: d[k] for k in ("id", "gold", "predicted", "reasoning")}
+            for d in evaluation.disagreements
+        ],
     }
     path = sample.path.parent / "evals.jsonl"
     same = ("samples", "rows_digest", "digest", "model", "metric", "target")

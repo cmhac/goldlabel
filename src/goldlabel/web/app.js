@@ -1,6 +1,7 @@
 // Renders the server's `state` and posts the person's actions. No rules live here: the server
 // validates labels, picks the next item and writes the file.
-const token = new URLSearchParams(location.search).get("token") || "";
+let passId = ""; // the pass this page walks, from #/pass/<id>
+const passPath = () => "/api/pass/" + encodeURIComponent(passId);
 const app = document.getElementById("app");
 const head = document.getElementById("head");
 const statusEl = document.getElementById("status");
@@ -12,6 +13,7 @@ let note = ""; // the draft note for the shown item; survives a re-render
 let saved = null; // {id, labels} of the last save, for the status line
 let busy = false; // a request is in flight
 let error = "";
+let editing = null; // {dataset} while one row of a dataset is revised, outside any pass
 
 const FOCUS =
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 " +
@@ -45,15 +47,15 @@ function el(tag, cls, text, attrs) {
   return e;
 }
 
-// `onOk` runs after a successful call and before the re-render.
-async function call(method, path, body, onOk) {
+// `onOk` runs after a successful call and before the re-render; `shape` turns the reply into state.
+async function call(method, path, body, onOk, shape) {
   if (busy) return false; // a held-down or double-clicked key must not act twice
   busy = true;
   let ok = false;
   try {
     const r = await fetch(path, {
       method,
-      headers: { "X-Goldlabel-Token": token, "Content-Type": "application/json" },
+      headers: { "X-Goldlabel": "1", "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const data = await r.json();
@@ -61,7 +63,7 @@ async function call(method, path, body, onOk) {
       error = data.error || "request failed (" + r.status + ")";
     } else {
       error = "";
-      state = data;
+      state = shape ? shape(data) : data;
       ok = true;
       if (onOk) onOk();
     }
@@ -73,17 +75,23 @@ async function call(method, path, body, onOk) {
   return ok;
 }
 
-const load = () => call("GET", "/api/state");
-const back = () => call("POST", "/api/back");
-const skip = () => call("POST", "/api/skip");
+const load = () => call("GET", passPath());
+const back = () => (editing ? history.back() : call("POST", passPath() + "/back"));
+const skip = () => (editing ? undefined : call("POST", passPath() + "/skip"));
 const save = () => {
   if (!selected.length) return;
   const id = state.item.id;
   const labels = selected;
-  return call("POST", "/api/label", { id, labels, note }, () => (saved = { id, labels }));
+  const done = () => (saved = { id, labels });
+  if (editing) return call("POST", "/api/label", { dataset: editing.dataset, id, labels, note }, done, rowState);
+  return call("POST", "/api/label", { pass: passId, id, labels, note }, done);
 };
 const done = async () => {
-  if (await call("POST", "/api/done")) {
+  if (await call("POST", passPath() + "/done")) {
+    if (!state.closing) {
+      location.hash = "#/"; // the server keeps running: back to the dataset list
+      return;
+    }
     head.replaceChildren();
     statusEl.hidden = true;
     app.replaceChildren(
@@ -110,6 +118,7 @@ const typing = () => document.activeElement && document.activeElement.id === "no
 function statusText() {
   if (typing()) return "Typing a note: the number keys are paused. Esc returns to the labels, Ctrl+Enter saves.";
   if (saved) return "Saved row " + saved.id + " as " + saved.labels.join(", ") + ". Press ← to go back.";
+  if (editing) return "Revising row " + state.item.id + ". " + (state.mode === "multi" ? "Choose every label that fits, then press Enter." : "Click a label or press its number. It saves.");
   return state.mode === "multi"
     ? "Choose every label that fits, then press Enter."
     : "Click a label or press its number. It saves and the next row opens.";
@@ -165,10 +174,14 @@ function finished() {
   return box;
 }
 
+// From 1024px each card scrolls on its own inside the window, so the text stays in view while the
+// label list scrolls (and the other way round). Below that the page is one column and scrolls as one.
+const SCROLL = "lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto";
+
 function textCard() {
-  const box = el("section", CARD + " flex flex-col gap-4 p-5 lg:p-8", undefined, { "aria-label": "Item to label" });
+  const box = el("section", CARD + " flex flex-col gap-4 p-5 lg:p-8 " + SCROLL + " " + FOCUS, undefined, { "aria-label": "Item to label", tabindex: "0" });
   box.append(
-    el("p", "text-sm tabular-nums " + MUTED, "Row " + state.position + " of " + state.total + " in " + state.sample + " · id " + state.item.id),
+    el("p", "text-sm tabular-nums " + MUTED, editing ? "Row id " + state.item.id + " in " + state.sample : "Row " + state.position + " of " + state.total + " in " + state.sample + " · id " + state.item.id),
     el("p", "max-w-[68ch] whitespace-pre-wrap break-words text-xl leading-relaxed", state.item.text),
   );
   return box;
@@ -178,7 +191,7 @@ function options() {
   const multi = state.mode === "multi";
   const group = el("fieldset", "flex flex-col gap-2");
   group.append(
-    el("legend", "mb-2 text-sm font-medium " + MUTED, multi ? "Choose every label that fits" : "Choose one label: it saves and moves on"),
+    el("legend", "mb-2 text-sm font-medium " + MUTED, multi ? "Choose every label that fits" : editing ? "Choose one label: it saves" : "Choose one label: it saves and moves on"),
   );
   state.labels.forEach((l, i) => {
     const on = selected.includes(l.name);
@@ -211,42 +224,69 @@ function noteField() {
 
 function panel() {
   const multi = state.mode === "multi";
-  const box = el("section", CARD + " flex flex-col gap-4 lg:sticky lg:top-4");
+  const box = el("section", CARD + " flex flex-col gap-4 " + SCROLL + " " + FOCUS, undefined, { "aria-label": "Labels", tabindex: "0" });
   const nav = el("div", "grid grid-cols-2 gap-2");
-  const b = el("button", BTN, "← Back", { type: "button" });
+  const b = el("button", BTN + (editing ? " col-span-2" : ""), "← Back", { type: "button" });
   b.onclick = back;
-  const s = el("button", BTN, "Skip (S)", { type: "button" });
-  s.onclick = skip;
-  nav.append(b, s);
+  nav.append(b);
+  if (!editing) {
+    const s = el("button", BTN, "Skip (S)", { type: "button" });
+    s.onclick = skip;
+    nav.append(s);
+  }
   if (multi) {
-    const n = el("button", PRIMARY + " col-span-2", "Save and next (Enter)", { type: "button" });
+    const n = el("button", PRIMARY + " col-span-2", editing ? "Save (Enter)" : "Save and next (Enter)", { type: "button" });
     n.disabled = !selected.length;
     n.onclick = save;
     nav.append(n);
   }
+  if (editing && !state.storedTaxonomy) {
+    box.append(el("p", MUTED, "No taxonomy is stored for this dataset yet, so these are the labels already used. gl.label stores one."));
+  }
+  box.append(options());
+  const names = state.labels.map((l) => l.name);
+  const extra = (state.item.labels || []).filter((l) => !names.includes(l));
+  if (extra.length) box.append(el("p", MUTED, "Labels not in this taxonomy: " + extra.join(", ") + ". Saving replaces them."));
   box.append(
-    options(),
     noteField(),
     nav,
+    el("p", "text-sm lg:hidden " + MUTED, "In this one-column layout the text is above the labels and the whole page scrolls. From 1024px wide each scrolls on its own."),
     el(
       "p",
       "border-t border-zinc-200 pt-3 text-sm dark:border-zinc-800 " + MUTED,
-      multi
-        ? "Keys: 1-9 choose, Enter save and next, ← back, S skip, N note."
-        : "Keys: 1-9 label and next, ← back, S skip, N note.",
+      editing
+        ? multi
+          ? "Keys: 1-9 choose, Enter save, ← back, N note."
+          : "Keys: 1-9 label, ← back, N note."
+        : multi
+          ? "Keys: 1-9 choose, Enter save and next, ← back, S skip, N note."
+          : "Keys: 1-9 label and next, ← back, S skip, N note.",
     ),
   );
   return box;
 }
 
+function ended() {
+  const box = el("section", CARD + " flex flex-col gap-3");
+  box.append(
+    el("h2", "text-lg font-semibold", "This pass has ended"),
+    el("p", MUTED, "The server that ran it was stopped, or the link is from an earlier session."),
+    el("a", LINK, "Open the dataset list", { href: "#/" }),
+  );
+  return box;
+}
+
 function render() {
-  if (!state) return;
+  if (!state) {
+    if (error) app.replaceChildren(ended());
+    return;
+  }
   if (!state.finished && shown !== state.item.id) {
     shown = state.item.id;
     selected = state.item.labels || [];
     note = state.item.note || "";
   }
-  head.replaceChildren(header());
+  head.replaceChildren(editing ? editorCrumbs() : header());
   statusEl.hidden = false;
   setStatus();
   const parts = [];
@@ -257,7 +297,7 @@ function render() {
     grid.append(textCard(), panel());
     parts.push(grid);
   }
-  parts.push(counts());
+  if (!editing) parts.push(counts());
   app.replaceChildren(...parts);
 }
 
@@ -287,4 +327,319 @@ document.addEventListener("keydown", (e) => {
   e.preventDefault();
 });
 
-load();
+// --- browse views: datasets, samples and rows ---------------------------------------------------
+
+const LINK =
+  "text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-300 " +
+  "dark:hover:text-blue-100 " +
+  FOCUS;
+const CELL = "border-t border-zinc-200 py-2 pr-4 dark:border-zinc-800";
+
+const getJson = (path) => api("GET", path);
+
+const enc = encodeURIComponent;
+const dsHref = (d) => "#/d/" + enc(d);
+const sampleHref = (d, s) => dsHref(d) + "/s/" + enc(s);
+const rowHref = (d, id) => dsHref(d) + "/r/" + enc(id);
+
+function crumbs(parts) {
+  const nav = el("nav", "flex flex-wrap items-center gap-2 " + MUTED, undefined, { "aria-label": "Breadcrumb" });
+  nav.append(el("span", undefined, "goldlabel /"));
+  parts.forEach(([text, href], i) => {
+    if (i) nav.append(el("span", undefined, "/", { "aria-hidden": "true" }));
+    nav.append(href ? el("a", LINK, text, { href }) : el("span", "font-semibold text-zinc-900 dark:text-zinc-100", text, { "aria-current": "page" }));
+  });
+  return nav;
+}
+
+function table(caption, heads, rows) {
+  const t = el("table", "w-full border-collapse text-left");
+  t.append(el("caption", "pb-2 text-left text-sm font-medium " + MUTED, caption));
+  const tr = el("tr");
+  heads.forEach((h) => tr.append(el("th", "pb-2 pr-4 text-sm font-medium " + MUTED, h, { scope: "col" })));
+  const thead = el("thead");
+  thead.append(tr);
+  t.append(thead);
+  const body = el("tbody");
+  rows.forEach((cells) => {
+    const row = el("tr");
+    cells.forEach((c) => {
+      const td = el("td", CELL + " tabular-nums");
+      td.append(c);
+      row.append(td);
+    });
+    body.append(row);
+  });
+  t.append(body);
+  return t;
+}
+
+const text = (s) => document.createTextNode(String(s));
+
+async function api(method, path, body) {
+  const r = await fetch(path, {
+    method,
+    headers: { "X-Goldlabel": "1", "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || "request failed (" + r.status + ")");
+  return data;
+}
+
+// The row of /api/row as the pass view's state, so the editor reuses its cards.
+const rowState = (row) => ({
+  sample: row.sample,
+  item: { id: row.id, text: row.text, labels: row.labels, note: row.note },
+  labels: row.options,
+  mode: row.mode,
+  storedTaxonomy: row.stored_taxonomy,
+  finished: false,
+});
+
+let editorTitle = "";
+const editorCrumbs = () =>
+  crumbs([["Datasets", "#/"], [editorTitle, dsHref(editing.dataset)], [state.sample, sampleHref(editing.dataset, state.sample)], ["Row " + state.item.id]]);
+
+async function rowView(name, id) {
+  const d = (await getJson("/api/datasets")).find((x) => x.name === name);
+  editorTitle = d ? d.title : name;
+  editing = { dataset: name };
+  try {
+    state = rowState(await getJson("/api/row?dataset=" + enc(name) + "&id=" + enc(id)));
+  } catch (e) {
+    editing = null;
+    throw new Error("no row " + id + " in " + editorTitle);
+  }
+  render();
+  return null; // render() drew the page
+}
+
+function jumpForm(d) {
+  const form = el("form", "flex flex-wrap items-end gap-2");
+  const field = el("div", "flex flex-col gap-1");
+  const input = el("input", "min-h-11 rounded-lg border border-zinc-400 bg-white px-3 dark:border-zinc-600 dark:bg-zinc-950 " + FOCUS, undefined, { id: "jump", type: "text", autocomplete: "off" });
+  field.append(el("label", "text-sm font-medium", "Jump to id", { for: "jump" }), input);
+  const msg = el("p", "w-full text-sm text-red-800 dark:text-red-300", undefined, { role: "alert" });
+  form.append(field, el("button", BTN, "Go", { type: "submit" }), msg);
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const id = input.value.trim();
+    if (!id) return;
+    try {
+      await getJson("/api/row?dataset=" + enc(d.name) + "&id=" + enc(id));
+      location.hash = rowHref(d.name, id);
+    } catch (err) {
+      msg.textContent = "no row " + id + " in " + d.title;
+    }
+  };
+  return form;
+}
+
+function pendingButton(d, s) {
+  const b = el("button", BTN, s.pending ? "Label pending (" + s.pending + ")" : "nothing pending", { type: "button" });
+  b.disabled = !s.pending;
+  b.onclick = async () => {
+    try {
+      location.hash = "#/pass/" + (await api("POST", "/api/pass", { dataset: d.name, samples: [s.name] })).pass;
+    } catch (err) {
+      b.textContent = "Error: " + err.message;
+    }
+  };
+  return b;
+}
+
+function datasetCard(d, linkTitle) {
+  const box = el("section", CARD + " flex flex-col gap-3", undefined, { "aria-label": "Dataset " + d.title });
+  const title = el("h2", "text-lg font-semibold");
+  title.append(linkTitle ? el("a", LINK, d.title, { href: dsHref(d.name) }) : text(d.title));
+  box.append(title);
+  if (d.error) {
+    box.append(el("p", "rounded-lg border border-red-700 p-3 text-red-800 dark:border-red-400 dark:text-red-300", "Error: " + d.error, { role: "alert" }));
+    return box;
+  }
+  if (!d.taxonomy) {
+    box.append(el("p", MUTED, "No taxonomy is stored in this file yet, so the labels offered are the ones already used. gl.label stores one."));
+  }
+  box.append(
+    table(
+      "Samples in " + d.title,
+      linkTitle ? ["Sample", "Rows", "Labelled", "Pending"] : ["Sample", "Rows", "Labelled", "Pending", ""],
+      d.samples.map((s) => {
+        const a = el("a", LINK, s.name, { href: sampleHref(d.name, s.name) });
+        const cells = [a, text(s.rows), text(s.labelled), text(s.pending)];
+        return linkTitle ? cells : [...cells, pendingButton(d, s)];
+      }),
+    ),
+  );
+  if (!linkTitle) box.append(jumpForm(d));
+  return box;
+}
+
+async function datasetsView() {
+  head.replaceChildren(crumbs([["Datasets"]]));
+  const list = await getJson("/api/datasets");
+  if (!list.length) return [el("p", MUTED, "No gold dataset in this folder yet. Make one with gl.Gold and gold.draw_sample.")];
+  return list.map((d) => datasetCard(d, true));
+}
+
+async function datasetView(name) {
+  const d = (await getJson("/api/datasets")).find((x) => x.name === name);
+  if (!d) throw new Error("no dataset " + name + " in this folder");
+  head.replaceChildren(crumbs([["Datasets", "#/"], [d.title]]));
+  return [datasetCard(d, false)];
+}
+
+function disagreementTable(name, e) {
+  if (e.disagreements === null) return el("p", MUTED, "disagreements were not recorded by this version");
+  if (!e.disagreements.length) return el("p", MUTED, "The classifier agreed with every gold label it scored.");
+  return table(
+    "Where the classifier disagreed with the gold label",
+    ["ID", "Text", "Gold then", "Predicted", "Reasoning", "Note", "Now"],
+    e.disagreements.map((d) => {
+      const now = d.missing ? "no longer in the file" : d.revised ? "revised since: " + (d.labels || []).join(", ") : "";
+      return [
+        el("a", LINK, d.id, { href: rowHref(name, d.id) }),
+        text(d.text === null ? "" : d.text),
+        text((d.gold || []).join(", ")),
+        text(d.predicted ? d.predicted.join(", ") : "no prediction (the item failed)"),
+        text(d.reasoning || ""),
+        text(d.note || ""),
+        text(now),
+      ];
+    }),
+  );
+}
+
+function evaluationCard(name, e) {
+  const box = el("details", "rounded-lg border border-zinc-300 p-3 dark:border-zinc-700");
+  const verdict = e.passed === null ? "no target" : e.passed ? "PASS" : "FAIL";
+  const score = e.score === null ? "?" : Number(e.score).toFixed(3);
+  const target = e.target === null ? "" : " against " + e.target;
+  const sum = el("summary", "cursor-pointer " + FOCUS);
+  sum.append(
+    text(
+      e.time + " · " + e.samples.join(" + ") + " · score " + score + target + " · " + verdict +
+        (e.stale ? " · STALE" : ""),
+    ),
+  );
+  box.append(sum);
+  const facts = [
+    "rows scored: " + (e.n === null ? "?" : e.n),
+    "skipped as pending: " + (e.skipped_pending === null ? "not recorded" : e.skipped_pending),
+    "model: " + (e.model || "?"),
+    "prompt digest: " + (e.digest || "?").slice(0, 12),
+  ];
+  box.append(el("p", "mt-2 text-sm " + MUTED, facts.join(" · ")));
+  if (e.stale) {
+    box.append(
+      el("p", "mt-2 font-medium", "STALE: a row was revised after this ran (" + e.stale_rows.join(", ") + "). Run the evaluation again for a current score."),
+    );
+  }
+  const wrap = el("div", "mt-3 overflow-x-auto");
+  wrap.append(disagreementTable(name, e));
+  box.append(wrap);
+  return box;
+}
+
+async function evalsSection(name, sample) {
+  const box = el("section", CARD + " flex flex-col gap-3", undefined, { "aria-label": "Evaluations of " + sample });
+  box.append(el("h2", "text-lg font-semibold", "Evaluations of " + sample));
+  let list = [];
+  try {
+    list = await getJson("/api/evals?dataset=" + enc(name) + "&sample=" + enc(sample));
+  } catch (e) {
+    // the rows above stay usable when only the evaluation log is damaged
+    box.append(el("p", "text-red-800 dark:text-red-300", "Error: " + e.message, { role: "alert" }));
+    return box;
+  }
+  if (!list.length) {
+    box.append(el("p", MUTED, "Not evaluated yet. Evaluations are run from code (clf.evaluate), never from this page."));
+  }
+  list.forEach((e) => box.append(evaluationCard(name, e)));
+  return box;
+}
+
+async function rowsView(name, sample) {
+  const rows = await getJson("/api/rows?dataset=" + enc(name) + "&sample=" + enc(sample));
+  const d = (await getJson("/api/datasets")).find((x) => x.name === name);
+  head.replaceChildren(crumbs([["Datasets", "#/"], [d ? d.title : name, dsHref(name)], [sample]]));
+  const box = el("section", CARD + " flex flex-col gap-3");
+  if (d) {
+    const s = d.samples.find((x) => x.name === sample);
+    const bar = el("div", "flex flex-wrap items-end justify-between gap-3");
+    bar.append(jumpForm(d));
+    if (s) bar.append(pendingButton(d, s));
+    box.append(bar);
+  }
+  box.append(
+    table(
+      "Rows of " + sample,
+      ["ID", "Labels", "Note", "Revised"],
+      rows.map((r) => [
+        el("a", LINK, r.id, { href: rowHref(name, r.id) }),
+        text(r.labels ? r.labels.join(", ") : "pending"),
+        text(r.note ? "yes" : "no"),
+        text(r.revised ? "yes" : "no"),
+      ]),
+    ),
+  );
+  return [box, await evalsSection(name, sample)];
+}
+
+// The hash picks the view: #/ datasets, #/d/<dataset>, #/d/<dataset>/s/<sample>, #/pass/<id>.
+function parse() {
+  const p = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  if (p[0] === "pass" && p[1]) return { kind: "pass", id: p[1] };
+  if (p[0] === "d" && p[1] && p[2] === "s" && p[3]) return { kind: "rows", d: p[1], s: p[3] };
+  if (p[0] === "d" && p[1] && p[2] === "r" && p[3]) return { kind: "row", d: p[1], id: p[3] };
+  if (p[0] === "d" && p[1] && !p[2]) return { kind: "dataset", d: p[1] };
+  if (!p.length) return { kind: "datasets" };
+  return { kind: "unknown" };
+}
+
+const scrolls = new Map(); // route -> scrollY, so Back lands where the list was
+let shownHash = null;
+let nav = 0; // counts navigations, so a slow reply for an old route is dropped
+
+async function browse(r, mine) {
+  app.replaceChildren(el("p", MUTED, "Loading..."));
+  try {
+    let parts = [el("p", MUTED, "No such page.")];
+    if (r.kind === "datasets") parts = await datasetsView();
+    else if (r.kind === "dataset") parts = await datasetView(r.d);
+    else if (r.kind === "rows") parts = await rowsView(r.d, r.s);
+    else if (r.kind === "row") parts = await rowView(r.d, r.id);
+    if (mine !== nav) return;
+    if (parts) app.replaceChildren(...parts);
+  } catch (e) {
+    if (mine !== nav) return;
+    app.replaceChildren(el("p", "rounded-lg border border-red-700 p-3 text-red-800 dark:border-red-400 dark:text-red-300", "Error: " + e.message, { role: "alert" }));
+  }
+}
+
+async function go() {
+  const mine = ++nav;
+  if (shownHash !== null) scrolls.set(shownHash, window.scrollY);
+  shownHash = location.hash;
+  state = null;
+  shown = null;
+  error = "";
+  saved = null;
+  note = "";
+  selected = [];
+  editing = null;
+  const r = parse();
+  statusEl.hidden = r.kind !== "pass" && r.kind !== "row";
+  head.replaceChildren();
+  if (r.kind === "pass") {
+    passId = r.id;
+    await load();
+  } else {
+    await browse(r, mine);
+  }
+  if (mine === nav) window.scrollTo(0, scrolls.get(shownHash) || 0);
+}
+
+window.addEventListener("hashchange", go);
+go();

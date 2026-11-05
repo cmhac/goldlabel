@@ -4,9 +4,11 @@
 # Eight short posts with hand-built 2-D vectors live in `corpus.jsonl`. Every cell below is one step of
 # the analysis; run them in order, in Jupyter, marimo, or as a plain script (`# %%` marks the cells).
 #
-# What needs you: a classifier model and its key (`ANTHROPIC_API_KEY` in the environment; nothing
+# What needs you: a classifier model and its key (`OPENAI_API_KEY` in the environment; nothing
 # here reads or writes a key file), and **a person** to label the gold rows in the labelling page.
-# Everything before the classifier runs offline.
+# Everything before the classifier runs offline. When the script has run, `uv run goldlabel label`
+# (from this folder) opens the same page on every dataset, to browse the rows, read the evaluations
+# and revise a label.
 
 # %%
 from pydantic_ai import Embedder
@@ -72,7 +74,7 @@ taxonomy = gl.Taxonomy(
     },
 )
 clf = gl.Classifier(
-    "anthropic:claude-haiku-4-5",
+    "openai:gpt-6-luna",
     taxonomy,
     prompt="Read the post and choose the one label that fits it best.",
 )
@@ -84,7 +86,8 @@ clf
 # `draw_sample` picks pending rows, with no labels, and is safe to rerun: it draws only what is
 # missing. `gl.label` opens the labelling page in your browser and
 # returns when you press **Done**. You decide every label; the page never shows the classifier's
-# guess. (An agent working with you must not fill these in, see the README.)
+# guess. (An agent working with you must not fill these in, see the README.) Label the three posts
+# by what they say: the first is a layoff, the other two are burnout.
 
 # %%
 gold = gl.Gold(candidates)
@@ -97,7 +100,9 @@ gl.label(dev, taxonomy)
 # ## 4. Evaluate on the dev split
 #
 # One model call per labelled row; running the same cell again makes none (they are cached).
-# Every evaluation is also appended to `.goldlabel/evals.jsonl`.
+# Every evaluation is also appended to `.goldlabel/evals.jsonl`, with the rows it got wrong. Run
+# `uv run goldlabel label` and open the "dev" sample to read them there: change a label you got
+# wrong, and the evaluation is marked STALE until you run it again.
 
 # %%
 ev = clf.evaluate(dev, target=0.9)

@@ -32,12 +32,12 @@ clf
 2. Advise on the gold set, then draw. You never label. 50 dev rows is a sensible start; every label needs more than a handful of rows (`counts` shows it), so for a rare label suggest more seeds that find it or drawing more rows; one row is a large swing on a small set.
 
 ```python
-gold = gl.Gold(candidates)  # .goldlabel/gold.jsonl; 50 rows per sample by default
+gold = gl.Gold(candidates)  # .goldlabel/gold.json; 50 rows per sample by default
 dev = gold.draw_sample("dev")  # pending rows with no labels; safe to rerun
 dev.counts(taxonomy)  # rows per label
 ```
 
-3. People label. `gl.label(dev, taxonomy)` opens the page on the rows of that sample that are still pending (only those: the page never shows another sample), waits until the person presses Done, and returns the sample. If every row in it is already labelled it prints that and returns at once; pass `force_open_ui=True` to open the page on every row of the sample anyway, to review or relabel. Tell the user to expect the page in their browser and do not run it when they are not there. The page never shows a model's prediction.
+3. People label. `gl.label(dev, taxonomy)` opens the page on the rows of that sample that are still pending (only those: the page never shows another sample), waits until the person presses Done, and returns the sample. If every row in it is already labelled it prints that and returns at once; pass `force_open_ui=True` to open the page on every row of the sample anyway, to review or relabel. Tell the user to expect the page in their browser and do not run it when they are not there. While people label, the page never shows a model's prediction. To fix a label later, tell the user to run `goldlabel label`: it lists every dataset and sample, opens any row by id, and lists each evaluation with its disagreements and a STALE flag when a row was revised after it ran. Evaluating stays in code.
 
 ```python
 gl.label(dev, taxonomy)
@@ -95,7 +95,7 @@ gl.label(test_2, taxonomy)  # people label the fresh sample
 ```python
 gold_b = gl.Gold(
     candidates_b, name="corpus-b"
-)  # its own file: .goldlabel/gold-corpus-b.jsonl
+)  # its own file: .goldlabel/gold-corpus-b.json
 test_b = gold_b.draw_sample("test", n=30)  # pending; people label them
 gl.label(test_b, taxonomy)
 final_b = clf.evaluate(test_b)  # once, as for any held-out sample

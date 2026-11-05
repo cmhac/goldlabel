@@ -81,7 +81,7 @@ clf = gl.Classifier(
 )
 
 # 3. Label a dev sample: opens the web app, returns when you press Done
-gold = gl.Gold(candidates)  # .goldlabel/gold.jsonl, 50 rows per sample by default
+gold = gl.Gold(candidates)  # .goldlabel/gold.json, 50 rows per sample by default
 dev = gold.draw_sample("dev")  # safe to rerun: it draws only what is missing
 gl.label(dev, taxonomy)
 
@@ -106,10 +106,24 @@ results.to_polars()
 
 ### Gold samples
 
-A gold dataset is one file in `.goldlabel/` (`gl.Gold(candidates)` is `gold.jsonl`; `gl.Gold(candidates_b, name="corpus-b")` is
-`gold-corpus-b.jsonl`, for a second corpus). It holds samples, each a name you choose: `gold.draw_sample("dev")` makes sure
+A gold dataset is one file in `.goldlabel/` (`gl.Gold(candidates)` is `gold.json`; `gl.Gold(candidates_b, name="corpus-b")` is
+`gold-corpus-b.json`, for a second corpus). It holds samples, each a name you choose: `gold.draw_sample("dev")` makes sure
 the sample "dev" has 50 rows (or `n=`), so rerunning the cell draws nothing, and the rows come in an order fixed by their ids,
 so there is no seed. `gl.label(dev, taxonomy)` shows only that sample's pending rows. Every `clf.evaluate` is logged in
 `.goldlabel/evals.jsonl`, and a sample's summary says how often it was evaluated: keep your test sample held out and score it
 once. If you decide to keep tuning after scoring it, `tuning = dev + test` adds it to the tuning set (nothing is written) and
 `gold.draw_sample("test-2")` draws a fresh one.
+
+### Review and revise labels
+
+```bash
+uv run goldlabel label            # every dataset in the storage folder
+uv run goldlabel label corpus-b   # open one dataset (gl.Gold(candidates, name="corpus-b"))
+```
+
+The page lists each dataset and sample with its row counts, opens any row by id, and lets a person change a label or
+note at any time, even after evaluations ran. A row that was already labelled keeps its earlier values in a `revisions`
+list in `gold.json`. For each sample the page also lists its evaluations with the classifier's disagreements, and marks an
+evaluation **STALE** when a row was revised after it ran. Evaluations are still run from code. If a page is already running,
+`gl.label(dev, taxonomy)` prints its URL and waits there instead of starting a second one. From 1024px wide the text and the
+label list scroll on their own, so the text stays in view; on a narrow window the page is one column and scrolls as one.
