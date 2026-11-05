@@ -191,3 +191,16 @@ def test_the_docs_teach_goldlabel_label_for_reviewing_and_revising_labels():
 def test_the_docs_tell_agents_to_hand_the_command_to_the_user_never_to_write_a_label():
     text = INSTRUCTIONS.read_text()
     assert "tell the user to run `goldlabel label`" in text and "yourself" in text
+
+
+def test_the_sample_readme_shows_how_to_try_the_page_on_a_fresh_clone():
+    text = (SAMPLE / "README.md").read_text()
+    for needle in (
+        "uv sync",
+        "uv run goldlabel label",
+        "uv run python walkthrough.py",
+        "STALE",
+        "revisions",
+    ):
+        assert needle in text, needle
+    assert "ANTHROPIC_API_KEY" in text and "no API key" in text

@@ -320,3 +320,59 @@ def test_a_spent_test_sample_joins_tuning_and_a_fresh_one_is_labelled_by_people(
         json.loads(x) for x in Path(".goldlabel/evals.jsonl").read_text().splitlines()
     ]
     assert [x["samples"] for x in log] == [["test"], ["dev", "test"], ["test-2"]]
+
+
+def test_the_sample_walkthrough_runs_offline_and_a_revision_makes_its_evaluation_stale(
+    tmp_path, monkeypatch
+):
+    """The fresh-clone experience: no key, the keyword stand-in, a simulated human in the page."""
+    import runpy
+
+    walkthrough = SAMPLE.parent / "walkthrough.py"
+    shutil.copy(SAMPLE, tmp_path / "corpus.jsonl")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    humans = []
+    monkeypatch.setattr(
+        _label.webbrowser, "open", lambda url: humans.append(simulated_human(url))
+    )
+    runpy.run_path(str(walkthrough), run_name="__main__")
+    for h in humans:
+        h.join()
+    assert len(humans) == 2  # the dev page and the test page
+    gold_file = tmp_path / ".goldlabel" / "gold.json"
+    rows = json.loads(gold_file.read_text())["rows"]
+    assert {r["id"]: r["labels"] for r in rows} == HUMAN
+    assert (tmp_path / "results.jsonl").exists()
+    assert (tmp_path / "classifiers" / "layoffs").is_dir()
+
+    server = _label.Server(tmp_path / ".goldlabel", stop_on_done=False)
+    try:
+        port = server.port
+
+        def call(method, path, body=None):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request(
+                method,
+                path,
+                json.dumps(body) if body else None,
+                {"X-Goldlabel": "1", "Content-Type": "application/json"},
+            )
+            return json.loads(conn.getresponse().read())
+
+        dev = call("GET", "/api/evals?dataset=gold&sample=dev")
+        assert [e["stale"] for e in dev] == [False, False]  # both prompts, newest first
+        # the stand-in calls anything that mentions work a layoff: burnout-2 is its mistake
+        assert [d["id"] for d in dev[0]["disagreements"]] == ["burnout-2"]
+        call(
+            "POST",
+            "/api/label",
+            {"dataset": "gold", "id": "burnout-1", "labels": ["layoff"]},
+        )
+        dev = call("GET", "/api/evals?dataset=gold&sample=dev")
+        assert [e["stale"] for e in dev] == [True, True]
+        assert dev[0]["stale_rows"] == ["burnout-1"]
+        test = call("GET", "/api/evals?dataset=gold&sample=test")
+        assert [e["stale"] for e in test] == [False]  # another sample is untouched
+    finally:
+        server.stop()
