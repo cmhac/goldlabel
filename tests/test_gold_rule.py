@@ -9,6 +9,7 @@ import pytest
 import goldlabel
 from goldlabel import _label
 from goldlabel.gold import Gold
+from goldlabel.settings import settings
 from goldlabel.taxonomy import Label, Taxonomy
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -20,6 +21,7 @@ HTML_RULE_MARKER = "Hard rule"
 @pytest.fixture(autouse=True)
 def project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(settings, "root", tmp_path)
 
 
 def taxonomy():
@@ -27,15 +29,16 @@ def taxonomy():
 
 
 def gold_file(tmp_path, ids=("1", "2")):
-    p = tmp_path / "g.jsonl"
+    """Write the default gold file (`<root>/gold.jsonl`) and return its `Gold`."""
+    p = tmp_path / "gold.jsonl"
     p.write_text(
         "".join(
-            json.dumps({"id": i, "text": f"t{i}", "labels": None, "split": "dev"})
+            json.dumps({"id": i, "text": f"t{i}", "labels": None, "sample": "dev"})
             + "\n"
             for i in ids
         )
     )
-    return p
+    return Gold()
 
 
 def cands(n):
@@ -107,52 +110,52 @@ def test_rule_file_is_in_the_wheel(tmp_path):
 
 
 def test_repr_of_gold_lists_path_counts_sources_and_ends_with_the_rule(tmp_path):
-    p = tmp_path / "g.jsonl"
+    p = tmp_path / "gold.jsonl"
     rows = [
         {
             "id": "1",
             "text": "t",
             "labels": ["a"],
-            "split": "dev",
+            "sample": "dev",
             "labelled_by": "goldlabel-ui",
         },
         {
             "id": "2",
             "text": "t",
             "labels": ["b"],
-            "split": "test",
+            "sample": "test",
             "labelled_by": "imported",
         },
-        {"id": "3", "text": "t", "labels": None, "split": "dev"},
+        {"id": "3", "text": "t", "labels": None, "sample": "dev"},
     ]
     p.write_text("".join(json.dumps(r) + "\n" for r in rows))
-    out = repr(Gold(p))
+    out = repr(Gold())
     assert str(p) in out
-    assert "dev 1" in out and "test 1" in out and "pending 1" in out
+    assert "dev 2 (1 labelled)" in out and "test 1 (1 labelled)" in out
     assert "goldlabel-ui 1, imported 1, unstamped 0" in out
     assert out.endswith(SHORT)
     assert out.splitlines()[-1] == SHORT
 
 
 def test_repr_of_a_goldset_ends_with_the_rule(tmp_path):
-    g = Gold(gold_file(tmp_path))
-    assert repr(g.dev).splitlines()[-1] == SHORT
+    g = gold_file(tmp_path)
+    assert repr(g["dev"]).splitlines()[-1] == SHORT
     assert repr(g.pending).splitlines()[0].startswith("GoldSet pending: 2 rows")
 
 
 def test_draw_return_repr_has_the_rule(tmp_path):
-    g = Gold(tmp_path / "new.jsonl")
-    assert repr(g.draw(cands(3), n=2)).splitlines()[-1] == SHORT
+    g = Gold(cands(3), sample_size=2)
+    assert repr(g.draw_sample("dev")).splitlines()[-1] == SHORT
 
 
 def test_html_reprs_do_not_carry_the_rule(tmp_path):
-    g = Gold(gold_file(tmp_path))
+    g = gold_file(tmp_path)
     assert HTML_RULE_MARKER not in g._repr_html_()
     assert HTML_RULE_MARKER not in g.pending._repr_html_()
 
 
 def test_label_prints_the_rule(tmp_path, press_done_on_open, capsys):
-    goldlabel.label(Gold(gold_file(tmp_path)), taxonomy())
+    goldlabel.label(gold_file(tmp_path)["dev"], taxonomy())
     assert SHORT in capsys.readouterr().out
 
 
@@ -160,7 +163,7 @@ def test_label_prints_the_rule(tmp_path, press_done_on_open, capsys):
 
 
 def test_import_rows_duplicate_id_error_carries_the_rule(tmp_path):
-    g = Gold(gold_file(tmp_path))
+    g = gold_file(tmp_path)
     with pytest.raises(ValueError) as e:
         g.import_rows([{"id": "1", "text": "t", "labels": ["a"]}], "dev")
     assert str(e.value) == "id '1' is already in " + str(g.path) + "\n\n" + SHORT
@@ -168,29 +171,28 @@ def test_import_rows_duplicate_id_error_carries_the_rule(tmp_path):
 
 
 def test_error_types_stay_compatible(tmp_path):
-    g = Gold(gold_file(tmp_path))
+    g = gold_file(tmp_path)
     with pytest.raises(TypeError) as t:
         g.remove("1")
     assert isinstance(t.value, goldlabel.GoldError) and SHORT in str(t.value)
     with pytest.raises(ValueError) as v:
-        g.draw(cands(1), split="x")
+        g.draw_sample("X")
     assert str(v.value).endswith("\n\n" + SHORT)
-    bad = tmp_path / "bad.jsonl"
-    bad.write_text("nope\n")
-    with pytest.raises(ValueError, match="bad.jsonl:1: not a gold row") as r:
-        len(Gold(bad).all)
+    (tmp_path / "gold-bad.jsonl").write_text("nope\n")
+    with pytest.raises(ValueError, match="gold-bad.jsonl:1: not a gold row") as r:
+        len(Gold(name="bad").all)
     assert SHORT in str(r.value)
 
 
 def test_label_lock_and_split_errors_carry_the_rule(tmp_path):
-    g = Gold(gold_file(tmp_path))
+    g = gold_file(tmp_path)
     with pytest.raises(ValueError) as e:
-        _label.serve(g, taxonomy(), split="x")
+        _label.serve(g, taxonomy())
     assert SHORT in str(e.value)
-    h = _label.serve(g, taxonomy())
+    h = _label.serve(g["dev"], taxonomy())
     try:
         with pytest.raises(RuntimeError, match="already being labelled") as e:
-            _label.serve(g, taxonomy())
+            _label.serve(g["dev"], taxonomy())
         assert isinstance(e.value, goldlabel.GoldError) and SHORT in str(e.value)
     finally:
         h.stop()
@@ -200,7 +202,7 @@ def test_http_error_bodies_do_not_carry_the_rule(tmp_path):
     import http.client
     from urllib.parse import urlparse
 
-    h = _label.serve(Gold(gold_file(tmp_path)), taxonomy())
+    h = _label.serve(gold_file(tmp_path)["dev"], taxonomy())
     try:
         u = urlparse(h.url)
         c = http.client.HTTPConnection("127.0.0.1", u.port)

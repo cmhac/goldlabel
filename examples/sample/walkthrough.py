@@ -81,16 +81,17 @@ clf
 # %% [markdown]
 # ## 3. Gold: people label
 #
-# `draw` picks pending rows, with no labels. `gl.label` opens the labelling page in your browser and
+# `draw_sample` picks pending rows, with no labels, and is safe to rerun: it draws only what is
+# missing. `gl.label` opens the labelling page in your browser and
 # returns when you press **Done**. You decide every label; the page never shows the classifier's
 # guess. (An agent working with you must not fill these in, see the README.)
 
 # %%
-gold = gl.Gold()
-gold.draw(candidates, n=3, split="dev")
+gold = gl.Gold(candidates)
+dev = gold.draw_sample("dev", n=3)
 
 # %%
-gl.label(gold, taxonomy)
+gl.label(dev, taxonomy)
 
 # %% [markdown]
 # ## 4. Evaluate on the dev split
@@ -99,7 +100,7 @@ gl.label(gold, taxonomy)
 # Every evaluation is also appended to `.goldlabel/evals.jsonl`.
 
 # %%
-ev = gl.evaluate(clf, gold.dev, target=0.9)
+ev = clf.evaluate(dev, target=0.9)
 ev
 
 # %%
@@ -115,26 +116,26 @@ clf2 = clf.with_prompt(
     "Read the post and choose the one label that fits it best. "
     "A post about rumoured redundancies counts as layoff."
 )
-ev2 = gl.evaluate(clf2, gold.dev, target=0.9)
+ev2 = clf2.evaluate(dev, target=0.9)
 ev2
 
 # %% [markdown]
 # ## 6. The test split, once
 #
-# Draw and label a separate test split, and evaluate it once, at the end, to report the number.
+# Draw and label a separate test sample, and evaluate it once, at the end, to report the number.
 
 # %%
-gold.draw(candidates, n=2, split="test")
+test = gold.draw_sample("test", n=2)
 
 # %%
-gl.label(gold, taxonomy)
+gl.label(test, taxonomy)
 
 # %%
-final = gl.evaluate(clf2, gold.test, target=0.9)
+final = clf2.evaluate(test, target=0.9)
 final
 
 # %%
-gl.eval_log()  # every evaluation so far, with how often the test split was used
+test  # its summary says how often this held-out sample was evaluated
 
 # %% [markdown]
 # ## 7. Pick a cutoff, price the run, run it
@@ -143,7 +144,7 @@ gl.eval_log()  # every evaluation so far, with how often the test split was used
 # You choose the cutoff. `estimate` calls no model; `unknown` cost shows as `?`, never as `$0`.
 
 # %%
-report = gl.band_sample(clf2, candidates, per_band=5)
+report = clf2.band_sample(candidates, per_band=5)
 report
 
 # %%

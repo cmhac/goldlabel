@@ -20,6 +20,7 @@ from pydantic_ai.exceptions import (
 from pydantic_ai.models import Model
 
 from goldlabel import _frame, _html, _sync
+from goldlabel._gold_rule import GoldError
 from goldlabel.cost import (
     cache_get,
     cache_key,
@@ -227,7 +228,7 @@ class Classifier:
         (dir / "prompt.md").write_text(self.prompt.rstrip("\n") + "\n")
         if evaluation is not None:
             data = {
-                "split": evaluation.split,
+                "samples": list(evaluation.samples),
                 "n": evaluation.n,
                 "score": evaluation.score(),
                 "metric": evaluation.metric,
@@ -282,7 +283,7 @@ class Classifier:
         else:
             out.append(
                 _html.line(
-                    f"evaluation: {ev['metric']} {ev['score']:.4f} on {ev['split']} "
+                    f"evaluation: {ev['metric']} {ev['score']:.4f} on {' + '.join(ev['samples'])} "
                     f"({ev['n']} rows, {ev['date'][:10]})"
                 )
             )
@@ -378,6 +379,39 @@ class Classifier:
             usage,
         )
         return Prediction(list(out.labels), reasoning=out.reasoning, dollars=dollars)
+
+    def evaluate(self, sample, *, metric=None, target=None):
+        """Score this classifier on the labelled rows of a gold Sample (`gold.draw_sample(...)`).
+
+        Same as `aevaluate`, for scripts and notebooks (also inside a running event loop).
+        """
+        return _sync.run(self.aevaluate(sample, metric=metric, target=target))
+
+    async def aevaluate(self, sample, *, metric=None, target=None):
+        """Classify the labelled rows of `sample` (cached) and score them; returns an `Evaluation`.
+
+        Every evaluation is appended to `evals.jsonl` beside the gold file, except an identical
+        rerun. Pending rows are skipped and counted.
+        """
+        from goldlabel.evaluation import _aevaluate  # evaluation imports this module
+        from goldlabel.gold import Sample
+
+        if not isinstance(sample, Sample):
+            raise GoldError(
+                f"evaluate a Sample, not {type(sample).__name__}: "
+                'dev = gold.draw_sample("dev"), then clf.evaluate(dev)'
+            )
+        return await _aevaluate(self, sample, metric=metric, target=target)
+
+    def band_sample(self, candidates, *, per_band=30):
+        """Off-topic rate per similarity band on up to `per_band` candidates each; writes nothing."""
+        return _sync.run(self.aband_sample(candidates, per_band=per_band))
+
+    async def aband_sample(self, candidates, *, per_band=30):
+        """Async form of `band_sample`."""
+        from goldlabel.evaluation import _aband_sample  # evaluation imports this module
+
+        return await _aband_sample(self, candidates, per_band=per_band)
 
     def classify(self, items, **kwargs) -> Predictions:
         """Same as `aclassify`, for scripts and notebooks (also inside a running event loop)."""

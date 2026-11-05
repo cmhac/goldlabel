@@ -19,7 +19,7 @@ repos:
         name: ruff format
         entry: uv run ruff format --check
         language: system
-        types: [python]
+        types_or: [python, markdown]  # ruff also formats Python code blocks in Markdown
         pass_filenames: false
       - id: ty
         name: ty check

@@ -153,7 +153,7 @@ function finished() {
   const box = el("section", CARD + " flex flex-col gap-3");
   box.append(
     el("h2", "text-lg font-semibold", "All rows are labelled"),
-    el("p", MUTED, state.done + " of " + state.total + " rows have labels. Press Done to end the session, or go back to change one."),
+    el("p", MUTED, state.done + " of " + state.total + " rows in " + state.sample + " have labels. Press Done to end the session, or go back to change one."),
   );
   const row = el("div", "flex flex-wrap gap-2");
   const b = el("button", BTN, "Back  ←", { type: "button" });
@@ -168,7 +168,7 @@ function finished() {
 function textCard() {
   const box = el("section", CARD + " flex flex-col gap-4 p-5 lg:p-8", undefined, { "aria-label": "Item to label" });
   box.append(
-    el("p", "text-sm tabular-nums " + MUTED, "Row " + state.position + " of " + state.total + " · id " + state.item.id),
+    el("p", "text-sm tabular-nums " + MUTED, "Row " + state.position + " of " + state.total + " in " + state.sample + " · id " + state.item.id),
     el("p", "max-w-[68ch] whitespace-pre-wrap break-words text-xl leading-relaxed", state.item.text),
   );
   return box;

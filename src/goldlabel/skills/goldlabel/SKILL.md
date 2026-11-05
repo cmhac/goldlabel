@@ -39,23 +39,23 @@ After `goldlabel-run` say **Sequence complete** and name what is optional and st
 
 In short: write only goldlabel calls. The notebook contains goldlabel calls and nothing else: no snapshot or cache of the data, no guard such as `if not path.exists()` or `if not gold.all.rows` around a library call, no helper function or class, no long constants, no code that loads a `.env` file, and no charts, deduplication, aggregates, exports or fact-check cells after the run. The library already caches model calls, so re-running `evaluate` or `classify` costs nothing. If something seems to need other code (a query for data the library cannot read, a reshaping step), stop, show the user exactly what you would write and why, and write it only after their yes. Do not put the taxonomy, the prompt or the seed and keyword lists in a file (YAML, markdown or CSV): they are variables in cells, unless the user explicitly tells you to use a file.
 
-Use a Jupyter notebook (`.ipynb`) for the analysis. Write a `# %%` script only if the user says to. Some cells are **run-once**: drawing a split (`gold.draw`) and evaluating the test split. Do not guard them; tell the user which they are and run each once.
+Use a Jupyter notebook (`.ipynb`) for the analysis. Write a `# %%` script only if the user says to. Drawing is safe to rerun: `gold.draw_sample(name)` draws only what its sample is missing. Evaluating the held-out test sample is **run-once**: tell the user which cell it is and run it once. Do not guard any cell.
 
 ## Hard rules
 
 1. The gold rule above. Never write, edit, infer or auto-fill a gold label, never edit a gold file by any means, and never take a label from a model.
 2. Never run the full classification without first showing the estimate (`clf.estimate(...)`: calls, cost, time; `cost ?` means the price is unknown, never read it as zero) and getting an explicit yes. Pass `max_cost=` when you do run it.
-3. Never evaluate the test split to guide edits. Tune on the dev split; the test split is evaluated once, at the end, to report. If its score is too low and the user wants to keep tuning, `gold.fold_test()` retires the spent rows into dev, but only after the user's explicit yes (see `goldlabel-tune`).
+3. Never evaluate the held-out test sample to guide edits. Tune on the dev sample; the test sample is evaluated once, at the end, to report. If its score is too low and the user wants to keep tuning, the spent test sample joins the tuning set (`tuning = dev + test`) and people label a fresh one (`gold.draw_sample("test-2")`), but only after the user's explicit yes (see `goldlabel-tune`).
 4. Never put an API key or a database URL in a notebook, script or any file. Keys and `GOLDLABEL_PG_URL` come from environment variables (environment variable names go in code, values never); `PgCorpus(url_env=...)` takes the variable's name. Do not load a `.env` file.
 5. Ask the user at each decision point; do not decide for them: the brief (what counts as a match), the seeds (which phrases would be true of a match), `single` or `multi` labels, the label descriptions, the similarity cutoff, the target score, and whether to spend money on a full run.
 
 ## Where files go
 
-`.goldlabel/` in the current directory by default (`gl.settings.root`, or the environment variable `GOLDLABEL_DIR`): `candidates.jsonl`, `gold.jsonl`, `evals.jsonl` (every evaluation, kept as a history) and `cache/` (model calls and the cost ledger). Every function takes a path to move its file; `cache=False` or `out=False` writes nothing. Commit the notebook; the library never runs git.
+`.goldlabel/` in the current directory by default (`gl.settings.root`, or the environment variable `GOLDLABEL_DIR`): `candidates.jsonl`, `gold.jsonl`, `evals.jsonl` (every evaluation, kept as a history) and `cache/` (model calls and the cost ledger). The gold files and `evals.jsonl` always live there: there is no option to move them or to switch the log off. Candidates, results and the cache take a path to move their file; `cache=False` or `out=False` writes nothing. Commit the notebook; the library never runs git.
 
 ## References (load the one you need)
 
 - `references/workflow.md`: the whole chain as the cells of one notebook, in order.
-- `references/tuning.md`: reading `ev.disagreements`, changing one thing at a time, when to stop, the test split, `gl.eval_log()`.
+- `references/tuning.md`: reading `ev.disagreements`, changing one thing at a time, when to stop, the held-out test sample, the evaluation history.
 - `references/running.md`: estimate, cost, `max_cost`, resuming, keys and database URLs, the band sample and the cutoff.
 - `references/reuse.md`: saving a classifier bundle, importing it in a pipeline, recording the evaluation.

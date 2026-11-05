@@ -2,6 +2,7 @@
 
 import ast
 import json
+import os
 import re
 from pathlib import Path
 
@@ -128,13 +129,28 @@ def test_walkthrough_script_and_notebook_hold_the_same_cells():
 def test_walkthrough_is_honest_about_gold_and_keys():
     code = "\n".join(src for kind, src in py_cells() if kind == "code")
     ast.parse(code)
-    assert "gl.label(" in code and "gold.draw(" in code
+    assert "gl.label(" in code and "gold.draw_sample(" in code
     for bad in ("labelled_by", "import_rows", "api_key", "sk-", "postgres://"):
         assert bad not in code, bad
     assert not re.search(r"\blabels\s*=\s*\[", code)  # no hand-written gold rows
     for name in public_names_used(code):
         assert name in goldlabel.__all__, name
     assert not (SAMPLE / ".goldlabel" / "config.toml").exists()
+
+
+def test_walkthrough_uses_no_removed_name():
+    code = PY.read_text()
+    for pattern in (
+        r"\.draw\(",
+        r"\bfold_test\b",
+        r"\bgl\.a?evaluate\(",
+        r"\bgl\.band_sample\(",
+        r"\bgl\.eval_log\(",
+        r"\blog=",
+        r"\bgl\.label\(\s*gold\b",
+        r"draw_sample\([^)]*seed=",
+    ):
+        assert not re.search(pattern, code), pattern
 
 
 def test_agents_md_holds_the_rule_and_claude_md_is_its_symlink():
@@ -148,3 +164,13 @@ def test_agents_md_holds_the_rule_and_claude_md_is_its_symlink():
     assert (
         "# agents.md" in text and "textual tui" not in text.split("## current state")[0]
     )
+
+
+def test_every_session_starts_with_the_dev_setup_script():
+    settings = json.loads((ROOT / ".claude" / "settings.json").read_text())
+    [hook] = [h for entry in settings["hooks"]["SessionStart"] for h in entry["hooks"]]
+    assert hook["command"] == '"$CLAUDE_PROJECT_DIR"/scripts/dev-setup.sh'
+    script = ROOT / "scripts" / "dev-setup.sh"
+    assert os.access(script, os.X_OK)
+    assert "uv sync --all-extras" in script.read_text()
+    assert "pre-commit install" in script.read_text()

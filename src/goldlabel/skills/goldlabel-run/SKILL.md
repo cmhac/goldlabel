@@ -24,7 +24,7 @@ Write only goldlabel calls. Anything else needs the user's yes, shown to them fi
 1. (optional, seed searches only) Choose the cutoff with the user. The band sample is a classification run: it makes live calls and costs money, so it needs the same yes as the full run. It is not an evaluation (not logged, uses no gold). Show the table and ask where to cut. Keyword and whole-corpus lists have no bands: `selected = candidates`.
 
 ```python
-report = gl.band_sample(clf, candidates, per_band=30, seed=1)
+report = clf.band_sample(candidates, per_band=30)
 report  # per band: n, off_topic, rate; and the cost
 selected = candidates.above(0.70)  # the user's number
 ```
@@ -47,11 +47,22 @@ results.errors  # items that failed; returned, never raised
    - `out=` makes the run resumable: run the same call again and only missing ids are classified.
    - A 401 or 403 from the provider, or several API errors in a row, stop the run; finished rows are already in `out`. Fix the cause (a missing key, a rate limit) and run the same call again. A missing key: tell the user which variable to set; never ask for the value.
    - `gl.cost()` shows the running total.
-4. Report: where the output is, how many items, what it cost, how many errors, and the one test score with its split, `n`, who labelled the gold rows (`final.sources`) and how often the test split was evaluated (`gl.eval_log()`).
+4. Report: where the output is, how many items, what it cost, how many errors, and the one test score with its split, `n`, who labelled the gold rows (`final.sources`) and how often the held-out sample was evaluated (its summary, `test`).
 5. (optional, only if the user wants to reuse the classifier) Save a bundle. Ask where it should live and tell the user to commit the folder. `references/reuse.md` has the rest: loading it in a pipeline, and what to do if a digest warning appears.
 
 ```python
 clf.save("classifiers/my-topic/", evaluation=final)  # final is the one test evaluation
+```
+
+6. (optional) Before running the classifier on a different corpus, check it there: give that corpus its own named gold dataset with a held-out test sample, have people label it and evaluate it once (`goldlabel-tune` step 10). Report that score with the other one; never fold that corpus's rows into the first dataset.
+
+```python
+gold_b = gl.Gold(
+    candidates_b, name="corpus-b"
+)  # its own file: .goldlabel/gold-corpus-b.jsonl
+test_b = gold_b.draw_sample("test", n=30)  # pending; people label them
+gl.label(test_b, taxonomy)
+final_b = clf.evaluate(test_b)  # once, as for any held-out sample
 ```
 
 More detail is in `references/running.md` and `references/reuse.md` of the `goldlabel` skill.

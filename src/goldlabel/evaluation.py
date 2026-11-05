@@ -1,12 +1,12 @@
+import hashlib
 import json
-import random
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from goldlabel import _frame, _html, _sync
-from goldlabel.candidates import BANDS, band_of
+from goldlabel import _frame, _html
+from goldlabel.candidates import BANDS, band_of, order_by_id
 from goldlabel.classifier import UNKNOWN_COST, Classifier, _dollars, _model_name
 from goldlabel.metrics import (
     Metrics,
@@ -14,7 +14,6 @@ from goldlabel.metrics import (
     default_target_metric,
     target_value,
 )
-from goldlabel.settings import resolve
 from goldlabel.taxonomy import OFF_TOPIC, validate_labels
 
 
@@ -42,7 +41,7 @@ class Evaluation:
     labels: list[str] = field(
         default_factory=list
     )  # every label incl. off_topic, for the table
-    split: str = ""  # "dev", "test", or "mixed" when the rows span both
+    samples: tuple[str, ...] = ()  # the names of the samples it scored
 
     def score(self, name: str | None = None) -> float:
         return target_value(self.metrics, name or self.metric)
@@ -143,22 +142,43 @@ class Evaluation:
         return "\n".join(lines)
 
 
-def evaluate(clf: Classifier, gold_set, **kwargs) -> Evaluation:
-    """Same as `aevaluate`, for scripts and notebooks (also inside a running event loop)."""
-    return _sync.run(aevaluate(clf, gold_set, **kwargs))
+def _rows_digest(rows) -> str:
+    """What the evaluation saw of the gold rows: their ids and labels, in a fixed order."""
+    data = sorted((r.id, sorted(r.labels)) for r in rows if r.labels)
+    return hashlib.sha256(json.dumps(data).encode()).hexdigest()
 
 
-async def aevaluate(
-    clf: Classifier, gold_set, *, metric=None, target=None, log=None
+def _history(log: Path, gold: Path) -> list[dict]:
+    """The evaluation lines of `log` that scored samples of the gold file `gold`."""
+    if not log.exists():
+        return []
+    target = gold.resolve()
+    lines = [json.loads(x) for x in log.read_text().splitlines() if x.strip()]
+    return [
+        r
+        for r in lines
+        if "samples" in r and r.get("gold") and Path(r["gold"]).resolve() == target
+    ]
+
+
+def _counts(history: list[dict], names) -> tuple[int, int]:
+    """Evaluations of exactly these samples, and how many distinct prompts they used."""
+    mine = [r for r in history if r["samples"] == list(names)]
+    return len(mine), len({r["digest"] for r in mine})
+
+
+async def _aevaluate(
+    clf: Classifier, sample, *, metric=None, target=None
 ) -> Evaluation:
-    """Classify the labelled rows of `gold_set` through `clf` (cached) and score them.
+    """Classify the labelled rows of `sample` through `clf` (cached) and score them.
 
     Pending rows (no labels) are skipped and counted. Gold labels that are invalid for the
-    taxonomy raise before any call. `target` adds PASS/FAIL to the repr. Every call appends one
-    line to the evaluation log (`log=False`: none; a path: that file).
+    taxonomy raise before any call. `target` adds PASS/FAIL to the repr. Every evaluation is
+    appended to `evals.jsonl` beside the gold file, unless the identical one is already there.
     """
     taxonomy = clf.taxonomy
-    rows = [r for r in gold_set.rows if r.labels]
+    every = sample.rows
+    rows = [r for r in every if r.labels]
     bad = []
     for r in rows:
         try:
@@ -178,14 +198,12 @@ async def aevaluate(
     sources = {"goldlabel-ui": 0, "imported": 0, "unstamped": 0}
     for r in rows:
         sources[r.labelled_by if r.labelled_by in sources else "unstamped"] += 1
-    splits = {r.split for r in rows}
-    split = "mixed" if len(splits) > 1 else (splits.pop() if splits else gold_set.name)
     evaluation = Evaluation(
         metrics=metrics,
         metric=metric,
         target=target,
         n=len(rows),
-        skipped_pending=len(gold_set.rows) - len(rows),
+        skipped_pending=len(every) - len(rows),
         sources=sources,
         digest=clf.digest,
         disagreements=[
@@ -199,100 +217,37 @@ async def aevaluate(
             for i in metrics.disagreements
         ],
         labels=taxonomy.names,
-        split=split,
+        samples=tuple(sample.names),
     )
-    if log is not False:
-        line = {
-            "time": datetime.now(UTC).isoformat(),
-            "split": split,
-            "n": evaluation.n,
-            "gold": None if gold_set.path is None else str(gold_set.path),
-            "model": _model_name(clf.model),
-            "digest": clf.digest,
-            "prompt": clf.prompt,
-            "taxonomy": taxonomy.model_dump(),
-            "metric": metric,
-            "target": target,
-            "score": evaluation.score(),
-            "metrics": asdict(metrics),
-            "dollars": preds.cost,
-            "live_calls": preds.live,
-            "cached_calls": preds.cached,
-            "goldlabel": _goldlabel_version(),
-        }
-        path = resolve(log, "evals.jsonl")
+    line = {
+        "time": datetime.now(UTC).isoformat(),
+        "samples": list(sample.names),
+        "rows_digest": _rows_digest(rows),
+        "n": evaluation.n,
+        "gold": str(sample.path),
+        "model": _model_name(clf.model),
+        "digest": clf.digest,
+        "prompt": clf.prompt,
+        "taxonomy": taxonomy.model_dump(),
+        "metric": metric,
+        "target": target,
+        "score": evaluation.score(),
+        "metrics": asdict(metrics),
+        "dollars": preds.cost,
+        "live_calls": preds.live,
+        "cached_calls": preds.cached,
+        "goldlabel": _goldlabel_version(),
+    }
+    path = sample.path.parent / "evals.jsonl"
+    same = ("samples", "rows_digest", "digest", "model", "metric", "target")
+    if not any(
+        all(r.get(k) == line[k] for k in same) for r in _history(path, sample.path)
+    ):
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a") as f:
             f.write(json.dumps(line) + "\n")
             f.flush()
     return evaluation
-
-
-@dataclass
-class EvalLog:
-    """`rows` are the evaluations; `folds` are the `test_folded` events (`Gold.fold_test`)."""
-
-    rows: list[dict]
-    folds: list[dict] = field(default_factory=list)
-
-    def to_polars(self):
-        return _frame.to_polars(self.rows)
-
-    def to_pandas(self):
-        return _frame.to_pandas(self.rows)
-
-    def _test_line(self) -> str:
-        since = (
-            self.folds[-1]["time"] if self.folds else ""
-        )  # a fresh split starts at 0
-        test = [r for r in self.rows if r["split"] == "test" and r["time"] > since]
-        line = (
-            f"test split evaluated {len(test)} times "
-            f"({len({r['digest'] for r in test})} distinct prompts)"
-        )
-        if self.folds:
-            line += f"; {sum(f['rows'] for f in self.folds)} test rows folded into dev"
-        return line
-
-    def _repr_html_(self) -> str:
-        if not self.rows:
-            return _html.line("no evaluations logged yet")
-        rows = [
-            (
-                r["time"][:16],
-                r["split"],
-                r["n"],
-                f"{r['score']:.4f}",
-                r["digest"][:8],
-                r["model"],
-            )
-            for r in self.rows
-        ]
-        return _html.table(
-            ["time", "split", "n", "score", "digest", "model"], rows
-        ) + _html.line(self._test_line())
-
-    def __repr__(self) -> str:
-        lines = ["time              split  n     score   digest    model"]
-        for r in self.rows:
-            lines.append(
-                f"{r['time'][:16]}  {r['split']:5}  {r['n']:<4}  {r['score']:.4f}  "
-                f"{r['digest'][:8]}  {r['model']}"
-            )
-        lines.append(self._test_line())
-        return "\n".join(lines)
-
-
-def eval_log(path=None) -> EvalLog:
-    """Read the evaluation log (default `<root>/evals.jsonl`); empty when there is none yet."""
-    path = resolve(path, "evals.jsonl")
-    if not path.exists():
-        return EvalLog([])
-    lines = [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
-    return EvalLog(
-        [r for r in lines if "event" not in r],
-        [r for r in lines if r.get("event") == "test_folded"],
-    )
 
 
 @dataclass
@@ -329,17 +284,21 @@ class BandReport:
         return "\n".join(lines)
 
 
-def band_sample(clf: Classifier, candidates, *, per_band=30, seed=None) -> BandReport:
-    """Classify up to `per_band` random candidates per similarity band and report the off-topic rate.
+async def _aband_sample(clf: Classifier, candidates, *, per_band=30) -> BandReport:
+    """Classify up to `per_band` candidates per similarity band and report the off-topic rate.
 
-    Off-topic means the predicted labels are exactly `{off_topic}`. Nothing is written.
+    The rows of a band are picked in the id-fixed order (`order_by_id`), so a rerun picks the same
+    ones. Off-topic means the predicted labels are exactly `{off_topic}`. Nothing is written.
     """
+    if isinstance(per_band, bool) or not isinstance(per_band, int) or per_band < 1:
+        raise ValueError(
+            f"per_band must be a whole number of at least 1, not {per_band!r}"
+        )
     if candidates.source != "seeds":
         raise ValueError(
             f"band_sample needs similarity scores, but this list was built from "
             f"{candidates.source}, not from seeds"
         )
-    rng = random.Random(seed)
     names = [
         f"{BANDS[i]:.3f}-{BANDS[i + 1]:.3f}"
         if i + 1 < len(BANDS)
@@ -349,8 +308,8 @@ def band_sample(clf: Classifier, candidates, *, per_band=30, seed=None) -> BandR
     picked: list[tuple[int, dict]] = []
     for band in range(len(BANDS)):
         pool = [r for r in candidates.rows if band_of(r["max_similarity"]) == band]
-        picked += [(band, r) for r in rng.sample(pool, min(per_band, len(pool)))]
-    preds = clf.classify(
+        picked += [(band, r) for r in order_by_id(pool)[:per_band]]
+    preds = await clf.aclassify(
         [{"id": r["id"], "text": r["text"]} for _, r in picked], progress=False
     )
     rows = []

@@ -5,7 +5,7 @@ Do this when the user says the classifier is final. It is for notebooks and auto
 ## Save a bundle
 
 ```python
-final = gl.evaluate(clf, gold.test)  # the one reported number; see tuning.md
+final = clf.evaluate(test)  # the one reported number; see tuning.md
 clf.save("classifiers/scams/", evaluation=final)
 ```
 
@@ -50,9 +50,10 @@ Other notebooks then `from classifiers.scams import classifier`. Use a bundle wh
 
 ## Recording the evaluation
 
-`gl.evaluate` appends every run to `.goldlabel/evals.jsonl` with the full prompt, so the history of what was tried is in the file. `gl.eval_log()` reads it back. If a report is written for others, state the evaluation honestly: the split, `n`, who labelled the gold rows (`final.sources` counts rows by `goldlabel-ui`, `imported` and unstamped), and how many times the test split was evaluated.
+`clf.evaluate` appends every evaluation to `.goldlabel/evals.jsonl` with the full prompt (an identical rerun is not written twice, and nothing can switch the log off), so the history of what was tried is in the file; read it as a table with polars. If a report is written for others, state the evaluation honestly: the sample, `n`, who labelled the gold rows (`final.sources` counts rows by `goldlabel-ui`, `imported` and unstamped), and how many times the held-out sample was evaluated (its summary says so).
 
 ```python
 final.sources
-gl.eval_log()
+test  # 'evaluated 1 time (1 prompt)'
+pl.read_ndjson(".goldlabel/evals.jsonl")
 ```

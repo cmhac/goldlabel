@@ -13,7 +13,6 @@ import pytest
 from goldlabel import candidates, classifier
 from goldlabel.classifier import Classifier
 from goldlabel.cost import breakdown, cache_get, cache_key
-from goldlabel.gold import Gold
 from goldlabel.search import Table, search_table, table_rows
 from goldlabel.settings import settings
 from goldlabel.taxonomy import Taxonomy
@@ -58,13 +57,7 @@ def test_files_are_well_formed(project):
             project / ".goldlabel" / "candidates.jsonl"
         ).rows
     ] == ["a1", "a2"]
-    gold = Gold(project / ".goldlabel" / "gold.jsonl").all.rows
-    assert [(g.id, g.split, g.labels) for g in gold] == [
-        ("a1", "dev", ["alpha"]),
-        ("b1", "dev", ["beta"]),
-        ("a2", "test", ["alpha"]),
-        ("c1", "test", []),  # no labels yet (pre-006 wrote [] for pending)
-    ]
+    # the pre-006 gold file was removed in 014: gold files from before 014 are not read
     results = read_jsonl(project, "results.jsonl")
     assert [("run" in r) for r in results] == [True, False]
 

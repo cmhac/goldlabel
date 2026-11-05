@@ -158,6 +158,10 @@ DOCS = [
 VARS = {
     "clf": goldlabel.Classifier,
     "gold": goldlabel.Gold,
+    "dev": goldlabel.Sample,
+    "test": goldlabel.Sample,
+    "tuning": goldlabel.Sample,
+    "test_2": goldlabel.Sample,
     "ev": goldlabel.Evaluation,
     "final": goldlabel.Evaluation,
     "candidates": goldlabel.Candidates,
@@ -221,16 +225,16 @@ def test_the_samples_cover_the_main_calls():
         "gl.Taxonomy(",
         "gl.Classifier(",
         "gl.Gold(",
-        "gold.draw(",
+        "gold.draw_sample(",
+        "dev + test",
         "gl.label(",
-        "gl.evaluate(",
+        "clf.evaluate(",
         "clf.estimate(",
         "clf.classify(",
         "max_cost=",
         "clf.save(",
         "gl.Classifier.load(",
-        "gl.band_sample(",
-        "gl.eval_log(",
+        "clf.band_sample(",
         "gold.import_rows(",
         "clf.with_prompt(",
         ".to_polars()",
@@ -362,14 +366,14 @@ def test_taxonomy_skill_example_builds_a_taxonomy_and_writes_no_file(
     assert list(tmp_path.iterdir()) == []  # the taxonomy lives in the notebook
 
 
-def test_folding_the_test_split_always_comes_with_the_explicit_yes():
+def test_combining_a_spent_test_sample_always_comes_with_the_explicit_yes():
     files = [p / "SKILL.md" for p in ALL_SKILLS] + [
         SKILL_DIR / "references" / n for n in REFS
     ]
-    mentions = [p for p in files if "fold_test" in p.read_text()]
+    mentions = [p for p in files if "dev + test" in p.read_text()]
     assert SKILLS / "goldlabel-tune" / "SKILL.md" in mentions
     for path in mentions:
-        assert "explicit yes" in path.read_text(), f"{path.name} folds without a yes"
+        assert "explicit yes" in path.read_text(), f"{path.name} combines without a yes"
 
 
 # --- corpus filters (010) ------------------------------------------------------------------------
@@ -419,3 +423,53 @@ def test_connect_skill_table_filter_example_runs(tmp_path, monkeypatch):
         "several": ["1", "2", "4"],  # politics or opinion
         "since": ["2", "3", "4"],  # year 2024 on, cast from CSV text
     }
+
+
+# --- 014: removed names, the test discipline, a second corpus -----------------------------------
+
+REMOVED = [
+    r"\.draw\(",
+    r"\bdraw_dev\b",
+    r"\bdraw_test\b",
+    r"\bfold_test\b",
+    r"\bgl\.a?evaluate\(",
+    r"\bgl\.band_sample\(",
+    r"\bgl\.eval_log\(",
+    r"\bEvalLog\b",
+    r"\blog=",
+    r"\bGold\(\s*path",
+    r"\bgl\.label\(\s*gold\b",
+    r"draw_sample\([^)]*seed=",
+]
+
+
+@pytest.mark.parametrize(
+    "path", [*DOCS, INSTRUCTIONS, STEERING], ids=lambda p: f"{p.parent.name}/{p.name}"
+)
+def test_no_agent_doc_uses_a_removed_name(path):
+    text = path.read_text()
+    for pattern in REMOVED:
+        assert not re.search(pattern, text), f"{path.name} still uses {pattern}"
+
+
+def test_the_tune_skill_and_the_tuning_reference_state_the_test_discipline():
+    for path in (
+        SKILLS / "goldlabel-tune" / "SKILL.md",
+        SKILL_DIR / "references" / "tuning.md",
+    ):
+        text = path.read_text()
+        for needle in (
+            "held out",
+            "once",
+            "explicit yes",
+            "tuning = dev + test",
+            'draw_sample("test-2")',
+        ):
+            assert needle in text, f"{path.name} does not say {needle!r}"
+
+
+def test_the_tune_and_run_skills_give_a_second_corpus_its_own_dataset():
+    for name in ("goldlabel-tune", "goldlabel-run"):
+        text = (SKILLS / name / "SKILL.md").read_text()
+        assert re.search(r'gl\.Gold\([^)]*name="', text), name
+        assert 'draw_sample("test"' in text, name

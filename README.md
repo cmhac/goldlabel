@@ -80,26 +80,36 @@ clf = gl.Classifier(
     prompt="Choose the one label that fits the post best.",
 )
 
-# 3. Label a dev dataset: opens the web app, returns when you press Done
-gold = gl.Gold()
-gold.draw(candidates, n=50, split="dev")
-gl.label(gold, taxonomy)
+# 3. Label a dev sample: opens the web app, returns when you press Done
+gold = gl.Gold(candidates)  # .goldlabel/gold.jsonl, 50 rows per sample by default
+dev = gold.draw_sample("dev")  # safe to rerun: it draws only what is missing
+gl.label(dev, taxonomy)
 
 # 4. Evaluate, read the disagreements, tune the prompt, evaluate again
-ev = gl.evaluate(clf, gold.dev, target=0.9)
+ev = clf.evaluate(dev, target=0.9)
 ev.disagreements_to_polars()
 clf = clf.with_prompt(
     "Choose the one label that fits the post best. Rumoured redundancies count as layoff."
 )
-ev = gl.evaluate(clf, gold.dev, target=0.9)
+ev = clf.evaluate(dev, target=0.9)
 
-# 5. Label and evaluate a test dataset, once
-gold.draw(candidates, n=50, split="test")
-gl.label(gold, taxonomy)
-gl.evaluate(clf, gold.test, target=0.9)
+# 5. Label and evaluate a held-out test sample, once
+test = gold.draw_sample("test")
+gl.label(test, taxonomy)
+clf.evaluate(test, target=0.9)
 
 # 6. Classify everything: the estimate calls no model, and max_cost refuses to overspend
 clf.estimate(candidates)
 results = clf.classify(candidates, out="results.jsonl", max_cost=25.0)
 results.to_polars()
 ```
+
+### Gold samples
+
+A gold dataset is one file in `.goldlabel/` (`gl.Gold(candidates)` is `gold.jsonl`; `gl.Gold(candidates_b, name="corpus-b")` is
+`gold-corpus-b.jsonl`, for a second corpus). It holds samples, each a name you choose: `gold.draw_sample("dev")` makes sure
+the sample "dev" has 50 rows (or `n=`), so rerunning the cell draws nothing, and the rows come in an order fixed by their ids,
+so there is no seed. `gl.label(dev, taxonomy)` shows only that sample's pending rows. Every `clf.evaluate` is logged in
+`.goldlabel/evals.jsonl`, and a sample's summary says how often it was evaluated: keep your test sample held out and score it
+once. If you decide to keep tuning after scoring it, `tuning = dev + test` adds it to the tuning set (nothing is written) and
+`gold.draw_sample("test-2")` draws a fresh one.

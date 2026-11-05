@@ -36,16 +36,16 @@ candidates
 # stage 5: classifier, gold (people label), evaluation
 prompt = "Classify each post by what it is doing, not by its topic."
 clf = gl.Classifier("anthropic:claude-haiku-5-5", taxonomy, prompt=prompt)
-gold = gl.Gold()
-gold.draw(candidates, n=50, split="dev", seed=1)  # run-once
-gl.label(gold, taxonomy)
-ev = gl.evaluate(clf, gold.dev, target=0.80)
+gold = gl.Gold(candidates)  # 50 rows per sample by default
+dev = gold.draw_sample("dev")  # safe to rerun: draws only what is missing
+gl.label(dev, taxonomy)
+ev = clf.evaluate(dev, target=0.80)
 ev
 
-# stage 5, last: the test split, once
-gold.draw(candidates, n=50, split="test", seed=2)  # run-once
-gl.label(gold, taxonomy)
-final = gl.evaluate(clf, gold.test)  # run-once
+# stage 5, last: the held-out test sample, once
+test = gold.draw_sample("test")
+gl.label(test, taxonomy)
+final = clf.evaluate(test)  # run-once
 
 # stage 6: estimate, then (after the user's yes) run
 est = clf.estimate(candidates)

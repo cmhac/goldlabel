@@ -8,9 +8,10 @@ import goldlabel
 from goldlabel.candidates import Candidates
 from goldlabel.classifier import Classifier, Estimate, Predictions
 from goldlabel.cost import Cost
-from goldlabel.evaluation import BandReport, EvalLog, Evaluation
+from goldlabel.evaluation import BandReport, Evaluation
 from goldlabel.gold import Gold, GoldRow, GoldSet
 from goldlabel.metrics import compute_metrics
+from goldlabel.settings import settings
 from goldlabel.taxonomy import Label, Taxonomy
 
 HOSTILE = "<script>alert(1)</script> & co"
@@ -60,9 +61,9 @@ def gold_set():
     return GoldSet(
         [
             GoldRow(
-                id="1", text=HOSTILE, labels=["a"], split="dev", labelled_by="imported"
+                id="1", text=HOSTILE, labels=["a"], sample="dev", labelled_by="imported"
             ),
-            GoldRow(id="2", text="t2", labels=None, split="dev"),
+            GoldRow(id="2", text="t2", labels=None, sample="dev"),
         ],
         name="dev",
     )
@@ -95,20 +96,8 @@ def evaluation():
             },
         ],
         labels=["a", "b", "off_topic"],
-        split="dev",
+        samples=("dev",),
     )
-
-
-def eval_log():
-    row = {
-        "time": "2026-01-02T03:04:05+00:00",
-        "split": "test",
-        "n": 7,
-        "score": 0.5,
-        "digest": "abcdef0123456789",
-        "model": "<i>m</i>",
-    }
-    return EvalLog([row, {**row, "split": "dev", "n": 9}])
 
 
 def band_report(cost=None):
@@ -137,12 +126,12 @@ def classifier(evaluation=None):
 
 
 def gold(tmp_path):
-    path = tmp_path / "gold.jsonl"
-    path.write_text(
-        '{"id": "1", "text": "x", "labels": ["a"], "split": "dev", "labelled_by": "goldlabel-ui"}\n'
-        '{"id": "2", "text": "y", "labels": null, "split": "test"}\n'
+    settings.root = tmp_path  # conftest resets it after the test
+    (tmp_path / "gold.jsonl").write_text(
+        '{"id": "1", "text": "x", "labels": ["a"], "sample": "dev", "labelled_by": "goldlabel-ui"}\n'
+        '{"id": "2", "text": "y", "labels": null, "sample": "test"}\n'
     )
-    return Gold(path)
+    return Gold()
 
 
 def everything(tmp_path):
@@ -154,8 +143,8 @@ def everything(tmp_path):
         "Estimate": Estimate(10, 4, 6, None, None),
         "Gold": gold(tmp_path),
         "GoldSet": gold_set(),
+        "Sample": gold(tmp_path)["dev"],
         "Evaluation": evaluation(),
-        "EvalLog": eval_log(),
         "BandReport": band_report(),
         "Cost": cost_obj(),
     }
@@ -171,7 +160,6 @@ def test_every_object_returns_a_string_and_escapes_item_text(tmp_path):
     for name, c in other_sources().items():
         out = c._repr_html_()
         assert ESCAPED in out and "<script" not in out, name
-    assert "&lt;i&gt;m&lt;/i&gt;" in eval_log()._repr_html_()
     assert "m&lt;1&gt;" in cost_obj()._repr_html_()
     assert ESCAPED in classifier()._repr_html_()
 
@@ -180,7 +168,7 @@ def test_no_colour_anywhere(tmp_path):
     bad = re.compile(r"color\s*:|background|#[0-9a-fA-F]{3,8}\b|rgb|hsl", re.IGNORECASE)
     with_eval = classifier(
         {
-            "split": "dev",
+            "samples": ["dev"],
             "n": 2,
             "score": 0.5,
             "metric": "macro_f1",
@@ -232,7 +220,7 @@ def test_classifier_preview_digest_and_evaluation():
     assert "8 more" in out
     assert "evaluation" not in out.lower() or "no evaluation" in out.lower()
     rec = {
-        "split": "dev",
+        "samples": ["dev"],
         "n": 2,
         "score": 0.5,
         "metric": "macro_f1",
@@ -293,11 +281,7 @@ def test_evaluation_numbers_pass_fail_and_bounded_disagreements():
     assert "10 more" in out  # disagreement list capped at 20
 
 
-def test_evallog_bandreport_cost():
-    out = eval_log()._repr_html_()
-    assert "2026-01-02T03:04" in out and "abcdef01" in out and "0.5000" in out
-    assert "test split evaluated 1 times" in out
-    assert "no evaluations logged yet" in EvalLog([])._repr_html_()
+def test_bandreport_cost():
     out = band_report(cost=0.1)._repr_html_()
     assert "0.600-0.625" in out and "25%" in out and "cost $0.1000" in out
     assert "2 errors" in out and "WARNING" not in out
@@ -331,12 +315,12 @@ def tables(tmp_path):
         "Candidates": (candidates(), "to_polars", "to_pandas"),
         "Predictions": (predictions(), "to_polars", "to_pandas"),
         "GoldSet": (gold_set(), "to_polars", "to_pandas"),
+        "Sample": (gold(tmp_path)["dev"], "to_polars", "to_pandas"),
         "Evaluation": (
             evaluation(),
             "disagreements_to_polars",
             "disagreements_to_pandas",
         ),
-        "EvalLog": (eval_log(), "to_polars", "to_pandas"),
         "BandReport": (band_report(), "to_polars", "to_pandas"),
     }
 
@@ -389,7 +373,7 @@ def test_numbers_and_types_candidates_and_gold():
         "id",
         "text",
         "labels",
-        "split",
+        "sample",
         "labelled_by",
         "labelled_at",
         "note",
@@ -418,7 +402,7 @@ def test_later_keys_are_not_lost():
 
 
 def test_empty_tables_export():
-    for empty in (EvalLog([]), Candidates([]), Predictions([])):
+    for empty in (Candidates([]), Predictions([])):
         assert empty.to_polars().shape == (0, 0) and empty.to_pandas().shape == (0, 0)
 
 
@@ -454,7 +438,6 @@ def test_public_result_classes_have_both_exports():
     assert sorted(found) == [
         "BandReport",
         "Candidates",
-        "EvalLog",
         "GoldSet",
         "Predictions",
     ]
@@ -468,8 +451,8 @@ def test_public_result_classes_have_both_exports():
         "Estimate",
         "Gold",
         "GoldSet",
+        "Sample",
         "Evaluation",
-        "EvalLog",
         "BandReport",
         "Cost",
     ):

@@ -10,19 +10,26 @@ from urllib.parse import urlparse
 import pytest
 
 from goldlabel import _label
+from goldlabel.gold import Gold
+from goldlabel.settings import settings
 from goldlabel.taxonomy import Label, Taxonomy
 
 
 def rows(*specs):
     """specs: (id, labels-or-None, split)."""
     return [
-        {"id": i, "text": f"text {i}", "labels": labels, "split": split}
+        {"id": i, "text": f"text {i}", "labels": labels, "sample": split}
         for i, labels, split in specs
     ]
 
 
 def write_gold(path, rows_):
     path.write_text("".join(json.dumps(r) + "\n" for r in rows_))
+
+
+@pytest.fixture(autouse=True)
+def root(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "root", tmp_path)
 
 
 def taxonomy(mode="multi"):
@@ -51,8 +58,8 @@ def gold_path(tmp_path):
 def start(gold_path):
     handles = []
 
-    def go(mode="multi", **kw):
-        h = _label.serve(_label.Gold(gold_path), taxonomy(mode), **kw)
+    def go(mode="multi", sample="dev", **kw):
+        h = _label.serve(Gold()[sample], taxonomy(mode), **kw)
         handles.append(h)
         return h
 
@@ -160,7 +167,8 @@ def test_state_shows_first_pending_row_and_counts(start):
     s = Client(start()).state()
     assert s["item"] == {"id": "1", "text": "text 1", "labels": None, "note": None}
     assert s["position"] == 1
-    assert (s["done"], s["total"]) == (0, 4)
+    assert (s["done"], s["total"]) == (0, 3)  # the pass: the dev sample's pending rows
+    assert s["sample"] == "dev"
     assert s["mode"] == "multi"
     assert s["labels"] == [
         {"name": "a", "description": "the a one"},
@@ -174,19 +182,21 @@ def test_state_shows_first_pending_row_and_counts(start):
     assert s["finished"] is False
 
 
-def test_split_restricts_rows(start):
-    s = Client(start(split="test")).state()
-    assert s["item"]["id"] == "t1"
+def test_a_sample_restricts_rows(start):
+    s = Client(start(sample="test")).state()
+    assert s["item"]["id"] == "t1" and s["sample"] == "test"
     assert (s["done"], s["total"]) == (0, 1)
 
 
-def test_bad_split_is_refused(gold_path):
-    with pytest.raises(ValueError, match="split"):
-        _label.serve(_label.Gold(gold_path), taxonomy(), split="train")
+def test_only_a_sample_can_be_served(gold_path):
+    with pytest.raises(_label.GoldError, match=r'gold\.draw_sample\("dev"\)'):
+        _label.serve(Gold(), taxonomy())  # ty: ignore[invalid-argument-type]
+    with pytest.raises(_label.GoldError):
+        _label.serve(Gold().all, taxonomy())  # ty: ignore[invalid-argument-type]
 
 
-def test_already_labelled_rows_are_skipped_and_counted(tmp_path):
-    p = tmp_path / "g.jsonl"
+def test_already_labelled_rows_are_not_in_the_pass(tmp_path):
+    p = tmp_path / "gold.jsonl"
     write_gold(
         p,
         rows(
@@ -196,13 +206,13 @@ def test_already_labelled_rows_are_skipped_and_counted(tmp_path):
             ("4", [], "dev"),
         ),
     )
-    h = _label.serve(_label.Gold(p), taxonomy())
+    h = _label.serve(Gold()["dev"], taxonomy())
     try:
         s = Client(h).state()
         assert s["item"]["id"] == "3"
-        assert s["position"] == 3
-        assert (s["done"], s["total"]) == (2, 4)
-        assert s["counts"] == {"a": 2, "b": 1, "off_topic": 0}
+        assert s["position"] == 1
+        assert (s["done"], s["total"]) == (0, 2)  # rows 3 and 4 ([] is pending)
+        assert s["counts"] == {"a": 0, "b": 0, "off_topic": 0}
     finally:
         h.stop()
 
@@ -260,13 +270,13 @@ def test_label_writes_and_stamps_and_leaves_other_rows_identical(start, gold_pat
     assert row["labels"] == ["b"]
     assert row["labelled_by"] == "goldlabel-ui"
     datetime.fromisoformat(row["labelled_at"])
-    assert (row["id"], row["text"], row["split"]) == ("2", "text 2", "dev")
+    assert (row["id"], row["text"], row["sample"]) == ("2", "text 2", "dev")
     assert s["counts"]["b"] == 1
     assert not list(gold_path.parent.glob("*.tmp"))
 
 
 def test_label_advances_in_file_order_then_finishes(start):
-    c = Client(start(split="dev"))
+    c = Client(start())
     assert c.label("1", ["a"])[1]["item"]["id"] == "2"
     s = c.label("2", ["a"])[1]
     assert s["item"]["id"] == "3" and (s["done"], s["total"]) == (2, 3)
@@ -277,12 +287,14 @@ def test_label_advances_in_file_order_then_finishes(start):
 
 
 def test_extra_keys_survive_labelling(tmp_path):
-    p = tmp_path / "g.jsonl"
+    p = tmp_path / "gold.jsonl"
     p.write_text(
-        json.dumps({"id": "1", "text": "t", "labels": None, "split": "dev", "src": "x"})
+        json.dumps(
+            {"id": "1", "text": "t", "labels": None, "sample": "dev", "src": "x"}
+        )
         + "\n"
     )
-    h = _label.serve(_label.Gold(p), taxonomy())
+    h = _label.serve(Gold()["dev"], taxonomy())
     try:
         Client(h).label("1", ["a"])
     finally:
@@ -297,7 +309,7 @@ def test_resume_after_stop(start, gold_path):
     h.stop()
     h2 = start()
     s = Client(h2).state()
-    assert s["item"]["id"] == "2" and s["done"] == 1
+    assert s["item"]["id"] == "2" and (s["done"], s["total"]) == (0, 2)  # a new pass
     assert on_disk(gold_path)[0]["labels"] == ["a"]
 
 
@@ -326,7 +338,7 @@ def test_back_at_start_stays(start):
 
 
 def test_back_from_finished_returns_last_row(start):
-    c = Client(start(split="test"))
+    c = Client(start(sample="test"))
     assert c.label("t1", ["a"])[1]["finished"] is True
     s = c.call("POST", "/api/back")[1]
     assert s["item"]["id"] == "t1" and s["finished"] is False
@@ -339,14 +351,13 @@ def test_skip_leaves_pending_and_moves_on(start, gold_path):
     assert s["item"]["id"] == "2" and s["done"] == 0
     assert gold_path.read_bytes() == before
     c.label("2", ["a"])
-    c.label("3", ["a"])
-    s = c.label("t1", ["a"])[1]
+    s = c.label("3", ["a"])[1]
     # the skipped row is offered again at the end
     assert s["item"]["id"] == "1" and s["finished"] is False
 
 
 def test_skip_with_one_pending_row_stays(start):
-    c = Client(start(split="test"))
+    c = Client(start(sample="test"))
     assert c.call("POST", "/api/skip")[1]["item"]["id"] == "t1"
 
 
@@ -399,12 +410,12 @@ def test_stale_lock_is_replaced(start, gold_path):
 
 def test_garbage_lock_counts_as_stale(start, gold_path):
     gold_path.with_name("gold.jsonl.lock").write_text("not json")
-    assert Client(start()).state()["total"] == 4
+    assert Client(start()).state()["total"] == 3
 
 
 def test_failed_start_leaves_no_lock(gold_path):
     with pytest.raises(ValueError):
-        _label.serve(_label.Gold(gold_path), taxonomy(), split="x")
+        _label.serve(Gold(), taxonomy())  # ty: ignore[invalid-argument-type]
     assert not gold_path.with_name("gold.jsonl.lock").exists()
 
 
@@ -489,3 +500,105 @@ def test_a_note_that_is_not_a_string_is_refused_and_nothing_is_written(
     status, body = label_with(c, "1", ["a"], note=5)
     assert status == 400 and "note" in body["error"]
     assert gold_path.read_text() == before
+
+
+# --- the pass (014) -----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fifty_and_fifty(tmp_path):
+    """50 labelled dev rows d0..d49 and 50 pending test rows t0..t49."""
+    p = tmp_path / "gold.jsonl"
+    write_gold(
+        p,
+        rows(*[(f"d{i}", ["a"], "dev") for i in range(50)])
+        + rows(*[(f"t{i}", None, "test") for i in range(50)]),
+    )
+    return p
+
+
+def serve(name, **kw):
+    return _label.serve(Gold()[name], taxonomy(), **kw)
+
+
+def test_the_pass_is_the_samples_pending_rows_and_never_another_sample(
+    fifty_and_fifty,
+):
+    h = serve("test")
+    try:
+        c = Client(h)
+        s = c.state()
+        assert (s["total"], s["done"], s["sample"]) == (50, 0, "test")
+        served = []
+        while s["item"] is not None:
+            served.append(s["item"]["id"])
+            s = c.label(s["item"]["id"], ["b"])[1]
+        assert served == [f"t{i}" for i in range(50)]
+        assert (s["done"], s["total"], s["finished"]) == (50, 50, True)
+    finally:
+        h.stop()
+
+
+def test_a_new_pass_holds_only_what_is_still_pending(fifty_and_fifty):
+    h = serve("test")
+    try:
+        c = Client(h)
+        for i in range(20):
+            c.label(f"t{i}", ["b"])
+    finally:
+        h.stop()
+    h = serve("test")
+    try:
+        s = Client(h).state()
+        assert (s["total"], s["done"], s["item"]["id"]) == (30, 0, "t20")
+    finally:
+        h.stop()
+
+
+def test_force_open_ui_passes_every_row_of_the_sample(fifty_and_fifty):
+    h = serve("dev", force_open_ui=True)
+    try:
+        s = Client(h).state()
+        assert (s["total"], s["done"], s["item"]["id"]) == (50, 50, "d0")
+    finally:
+        h.stop()
+
+
+def test_back_returns_to_a_row_labelled_in_this_pass(fifty_and_fifty):
+    h = serve("test")
+    try:
+        c = Client(h)
+        c.label("t0", ["a"])
+        s = c.call("POST", "/api/back")[1]
+        assert s["item"]["id"] == "t0" and s["item"]["labels"] == ["a"]
+        assert (s["total"], s["done"]) == (50, 1)
+    finally:
+        h.stop()
+
+
+def test_a_row_outside_the_pass_cannot_be_labelled(fifty_and_fifty):
+    before = fifty_and_fifty.read_bytes()
+    h = serve("test")
+    try:
+        status, _ = Client(h).label("d0", ["b"])
+        assert status == 404
+    finally:
+        h.stop()
+    assert fifty_and_fifty.read_bytes() == before
+
+
+def test_a_review_pass_walks_every_row_in_file_order(fifty_and_fifty):
+    h = serve("dev", force_open_ui=True)
+    try:
+        c = Client(h)
+        s = c.label("d0", ["b"])[1]
+        assert (s["item"]["id"], s["position"]) == ("d1", 2)
+        s = c.call("POST", "/api/skip")[1]
+        assert s["item"]["id"] == "d2"
+        for i in range(2, 49):
+            s = c.label(f"d{i}", ["a"])[1]
+        assert s["item"]["id"] == "d49"
+        s = c.label("d49", ["a"])[1]
+        assert s["finished"] is True and s["item"] is None
+    finally:
+        h.stop()

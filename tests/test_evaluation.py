@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 from datetime import UTC, datetime
@@ -9,17 +10,10 @@ from pydantic_ai.usage import RequestUsage
 from pytest import approx
 
 from goldlabel import classifier
+from goldlabel._gold_rule import GoldError
 from goldlabel.candidates import Candidates
-from goldlabel.evaluation import (
-    BandReport,
-    EvalLog,
-    Evaluation,
-    aevaluate,
-    band_sample,
-    eval_log,
-    evaluate,
-)
-from goldlabel.gold import Gold
+from goldlabel.evaluation import BandReport, Evaluation
+from goldlabel.gold import Gold, Sample
 from goldlabel.settings import settings
 from goldlabel.taxonomy import Label, Taxonomy
 
@@ -71,11 +65,11 @@ def write_gold(rows, path=None):
     path = path or settings.root / "gold.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(r) + "\n" for r in rows))
-    return Gold(path)
+    return Gold()
 
 
 def g(id, labels, split="dev", **extra):
-    return {"id": id, "text": f"t{id}", "labels": labels, "split": split, **extra}
+    return {"id": id, "text": f"t{id}", "labels": labels, "sample": split, **extra}
 
 
 # gold a,a,b,b,off_topic  vs predicted a,b,b,off_topic,off_topic
@@ -103,7 +97,7 @@ def five():
 
 def test_metrics_and_disagreements_match_hand_computed_values():
     gold, c, _ = five()
-    ev = evaluate(c, gold.dev)
+    ev = c.evaluate(gold["dev"])
     assert isinstance(ev, Evaluation)
     assert ev.n == 5 and ev.skipped_pending == 0
     assert ev.score("accuracy") == approx(0.6)
@@ -132,7 +126,7 @@ def test_metrics_and_disagreements_match_hand_computed_values():
 def test_pending_rows_are_skipped_and_counted():
     model, calls = answering({"t1": ["a"]})
     gold = write_gold([g("1", ["a"]), g("2", None), g("3", [])])
-    ev = evaluate(clf(model), gold.all)
+    ev = clf(model).evaluate(gold["dev"])
     assert ev.n == 1 and ev.skipped_pending == 2
     assert calls == ["t1"]
     assert "2 pending rows skipped" in repr(ev)
@@ -140,29 +134,29 @@ def test_pending_rows_are_skipped_and_counted():
 
 def test_default_metric_per_mode_and_target_pass_fail():
     gold, c, _ = five()
-    ev = evaluate(c, gold.dev, target=0.5)
+    ev = c.evaluate(gold["dev"], target=0.5)
     assert ev.metric == "accuracy"
     assert "PASS" in repr(ev) and "FAIL" not in repr(ev)
     assert "accuracy 0.6000" in repr(ev)
-    ev = evaluate(c, gold.dev, target=0.9)
+    ev = c.evaluate(gold["dev"], target=0.9)
     assert "FAIL" in repr(ev) and "PASS" not in repr(ev)
-    ev = evaluate(c, gold.dev, metric="micro_f1", target=0.6)
+    ev = c.evaluate(gold["dev"], metric="micro_f1", target=0.6)
     assert ev.metric == "micro_f1" and "PASS" in repr(ev)
-    assert "PASS" not in repr(evaluate(c, gold.dev)) and "FAIL" not in repr(
-        evaluate(c, gold.dev)
+    assert "PASS" not in repr(c.evaluate(gold["dev"])) and "FAIL" not in repr(
+        c.evaluate(gold["dev"])
     )
 
 
 def test_multi_mode_defaults_to_macro_f1():
     model, _ = answering({"t1": ["a"]})
     gold = write_gold([g("1", ["a"])])
-    assert evaluate(clf(model, mode="multi"), gold.dev).metric == "macro_f1"
+    assert clf(model, mode="multi").evaluate(gold["dev"]).metric == "macro_f1"
 
 
 def test_an_item_that_failed_is_a_disagreement_with_no_prediction():
     model, _ = answering({"t1": ["a"], "t2": []})  # an empty list never validates
     gold = write_gold([g("1", ["a"]), g("2", ["b"])])
-    ev = evaluate(clf(model), gold.dev)
+    ev = clf(model).evaluate(gold["dev"])
     assert ev.n == 2 and ev.score("accuracy") == approx(0.5)
     [d] = ev.disagreements
     assert d["id"] == "2" and d["gold"] == ["b"] and d["predicted"] is None
@@ -171,11 +165,11 @@ def test_an_item_that_failed_is_a_disagreement_with_no_prediction():
 
 def test_second_evaluate_is_all_cache_and_a_new_prompt_is_live_again():
     gold, c, calls = five()
-    evaluate(c, gold.dev)
+    c.evaluate(gold["dev"])
     assert len(calls) == 5
-    evaluate(c, gold.dev)
+    c.evaluate(gold["dev"])
     assert len(calls) == 5  # SC-3: zero live calls
-    evaluate(c.with_prompt("another prompt"), gold.dev)
+    c.with_prompt("another prompt").evaluate(gold["dev"])
     assert len(calls) == 10  # one live call per item
 
 
@@ -183,7 +177,7 @@ def test_invalid_gold_labels_raise_with_ids_before_any_call():
     model, calls = answering({})
     gold = write_gold([g("1", ["a"]), g("2", ["zzz"]), g("3", ["a", "b"])])
     with pytest.raises(ValueError, match=r"\['2', '3'\].*orphaned"):
-        evaluate(clf(model), gold.dev)
+        clf(model).evaluate(gold["dev"])
     assert calls == [] and not (settings.root / "evals.jsonl").exists()
 
 
@@ -197,7 +191,7 @@ def test_rows_without_a_stamp_and_imported_rows_are_accepted_and_counted():
             g("4", ["b"], labelled_by="hand", extra="kept"),
         ]
     )
-    ev = evaluate(clf(model), gold.dev)
+    ev = clf(model).evaluate(gold["dev"])
     assert ev.n == 4 and ev.score("accuracy") == 1
     assert ev.sources == {"goldlabel-ui": 1, "imported": 1, "unstamped": 2}
     assert "goldlabel-ui 1, imported 1, unstamped 2" in repr(ev)
@@ -205,7 +199,7 @@ def test_rows_without_a_stamp_and_imported_rows_are_accepted_and_counted():
 
 def test_repr_shows_the_per_label_table():
     gold, c, _ = five()
-    text = repr(evaluate(c, gold.dev))
+    text = repr(c.evaluate(gold["dev"]))
     assert "macro_f1 0.6111" in text and "micro_f1 0.6000" in text
     assert re.search(r"\ba\s+1\.00\s+0\.50\s+0\.67\s+2\s+1\b", text)
     assert re.search(r"\bb\s+0\.50\s+0\.50\s+0\.50\s+2\s+2\b", text)
@@ -214,7 +208,7 @@ def test_repr_shows_the_per_label_table():
 
 def test_write_stores_the_numbers_as_json(tmp_path):
     gold, c, _ = five()
-    ev = evaluate(c, gold.dev, target=0.5)
+    ev = c.evaluate(gold["dev"], target=0.5)
     ev.write(tmp_path / "out" / "ev.json")
     data = json.loads((tmp_path / "out" / "ev.json").read_text())
     assert data["n"] == 5 and data["digest"] == c.digest
@@ -224,9 +218,17 @@ def test_write_stores_the_numbers_as_json(tmp_path):
     datetime.fromisoformat(data["time"])
 
 
+def test_the_module_functions_are_gone():
+    import goldlabel
+
+    for name in ("evaluate", "aevaluate", "band_sample", "eval_log", "EvalLog"):
+        assert not hasattr(goldlabel, name), name
+    assert goldlabel.Sample is Sample
+
+
 async def test_aevaluate_matches_evaluate():
     gold, c, _ = five()
-    ev = await aevaluate(c, gold.dev)
+    ev = await c.aevaluate(gold["dev"])
     assert ev.score("accuracy") == approx(0.6)
 
 
@@ -241,15 +243,26 @@ def log_rows(path=None):
 def test_each_call_appends_one_line_with_every_field():
     gold, c, _ = five()
     before = datetime.now(UTC)
-    evaluate(c, gold.dev, target=0.5)
+    c.evaluate(gold["dev"], target=0.5)
     [row] = log_rows()
     assert set(row) == {
-        "time", "split", "n", "gold", "model", "digest", "prompt", "taxonomy", "metric",
-        "target", "score", "metrics", "dollars", "live_calls", "cached_calls", "goldlabel",
+        "time", "samples", "rows_digest", "n", "gold", "model", "digest", "prompt",
+        "taxonomy", "metric", "target", "score", "metrics", "dollars", "live_calls",
+        "cached_calls", "goldlabel",
     }  # fmt: skip
     assert before <= datetime.fromisoformat(row["time"])
-    assert (row["split"], row["n"], row["model"]) == ("dev", 5, "m")
+    assert (row["samples"], row["n"], row["model"]) == (["dev"], 5, "m")
     assert row["gold"] == str(gold.path)
+    by_hand = [
+        ["1", ["a"]],
+        ["2", ["a"]],
+        ["3", ["b"]],
+        ["4", ["b"]],
+        ["5", ["off_topic"]],
+    ]
+    assert (
+        row["rows_digest"] == hashlib.sha256(json.dumps(by_hand).encode()).hexdigest()
+    )
     assert row["digest"] == c.digest and row["prompt"] == "prompt"
     assert row["taxonomy"] == {
         "mode": "single",
@@ -266,89 +279,99 @@ def test_each_call_appends_one_line_with_every_field():
     assert (row["live_calls"], row["cached_calls"]) == (5, 0)
 
 
-def test_log_is_append_only_and_records_cached_calls():
-    gold, c, _ = five()
-    evaluate(c, gold.dev)
-    first = (settings.root / "evals.jsonl").read_text()
-    evaluate(c, gold.dev)
+def test_an_identical_rerun_writes_no_line_and_a_new_target_does():
+    gold, c, calls = five()
+    first = c.evaluate(gold["dev"])
     text = (settings.root / "evals.jsonl").read_text()
-    assert text.startswith(first) and len(log_rows()) == 2
+    again = c.evaluate(gold["dev"])
+    assert len(calls) == 5 and again.score() == first.score()
+    assert (settings.root / "evals.jsonl").read_text() == text  # nothing appended
+    c.evaluate(gold["dev"], target=0.9)
+    assert len(log_rows()) == 2 and len(calls) == 5
     assert (log_rows()[1]["live_calls"], log_rows()[1]["cached_calls"]) == (0, 5)
+    assert (settings.root / "evals.jsonl").read_text().startswith(text)
 
 
-def test_log_false_writes_nothing_and_a_path_moves_it(tmp_path):
-    gold, c, _ = five()
-    evaluate(c, gold.dev, log=False)
-    assert not (settings.root / "evals.jsonl").exists()
-    evaluate(c, gold.dev, log=tmp_path / "deep" / "dir" / "mine.jsonl")
-    assert len(log_rows(tmp_path / "deep" / "dir" / "mine.jsonl")) == 1
-    assert not (settings.root / "evals.jsonl").exists()
+def test_there_is_no_way_to_skip_or_move_the_log():
+    gold, c, calls = five()
+    with pytest.raises(TypeError):
+        c.evaluate(gold["dev"], log=False)
+    for bad in (gold.all, gold.pending):
+        with pytest.raises(GoldError, match="evaluate a Sample"):
+            c.evaluate(bad)
+    assert calls == [] and not (settings.root / "evals.jsonl").exists()
 
 
-def test_a_set_spanning_both_splits_is_logged_as_mixed():
+def test_a_combination_is_logged_with_every_sample_in_it():
     model, _ = answering({"t1": ["a"], "t2": ["b"]})
     gold = write_gold([g("1", ["a"]), g("2", ["b"], split="test")])
-    evaluate(clf(model), gold.all)
-    assert log_rows()[0]["split"] == "mixed"
-    evaluate(clf(model), gold.test)
-    assert log_rows()[1]["split"] == "test"
+    ev = clf(model).evaluate(gold["dev"] + gold["test"])
+    assert ev.samples == ("dev", "test")
+    assert log_rows()[0]["samples"] == ["dev", "test"]
+    assert clf(model).evaluate(gold["test"]).samples == ("test",)
+    assert log_rows()[1]["samples"] == ["test"]
 
 
 def test_priced_calls_log_dollars():
     model, _ = answering({"t1": ["a"]}, name="gpt-4o-mini", priced=True)
     gold = write_gold([g("1", ["a"])])
-    evaluate(clf(model), gold.dev)
+    clf(model).evaluate(gold["dev"])
     assert log_rows()[0]["dollars"] == approx(
         0.00021
     )  # 1000 in / 100 out of gpt-4o-mini
 
 
-def test_eval_log_counts_test_evaluations_and_distinct_prompts():
+def test_a_sample_shows_how_often_exactly_it_was_evaluated():
     model, _ = answering({"t1": ["a"], "t2": ["b"]})
     gold = write_gold([g("1", ["a"]), g("2", ["b"], split="test")])
     c = clf(model)
-    evaluate(c, gold.dev)
-    evaluate(c, gold.test)
-    evaluate(c, gold.test)
-    evaluate(c.with_prompt("other"), gold.test)
-    log = eval_log()
-    assert isinstance(log, EvalLog) and len(log.rows) == 4
-    text = repr(log)
-    assert "test split evaluated 3 times (2 distinct prompts)" in text
-    first = log.rows[0]
-    assert first["digest"][:8] in text and "1.0000" in text and "dev" in text
-
-
-def test_fold_events_are_kept_apart_and_reset_the_test_count(tmp_path):
-    path = tmp_path / "evals.jsonl"
-    ev = {"split": "test", "n": 2, "score": 0.5, "digest": "abcdef012", "model": "m"}
-    lines = [
-        {**ev, "time": "2026-02-01T00:00:00+00:00"},
-        {"event": "test_folded", "time": "2026-02-02T00:00:00+00:00", "rows": 40},
-        {**ev, "time": "2026-02-03T00:00:00+00:00"},
-    ]
-    path.write_text("".join(json.dumps(x) + "\n" for x in lines))
-    log = eval_log(path)
-    assert [r["time"][:10] for r in log.rows] == ["2026-02-01", "2026-02-03"]
-    assert [f["rows"] for f in log.folds] == [40]
-    text = repr(log)
-    assert "test split evaluated 1 times (1 distinct prompts)" in text
-    assert "40 test rows folded into dev" in text
-    assert set(log.to_polars().columns) == {
-        "time",
-        "split",
-        "n",
-        "score",
-        "digest",
-        "model",
-    }  # no event columns
-
-
-def test_eval_log_with_a_path_and_when_empty(tmp_path):
-    assert eval_log().rows == []
-    assert "test split evaluated 0 times (0 distinct prompts)" in repr(
-        eval_log(tmp_path / "x.jsonl")
+    assert repr(gold["test"]).splitlines()[0].endswith("; not evaluated")
+    c.evaluate(gold["dev"])
+    c.evaluate(gold["test"])
+    c.evaluate(gold["test"])  # identical: not a second look
+    c.evaluate(gold["test"], target=0.5)  # a new line, the same prompt
+    c.with_prompt("other").evaluate(gold["test"])
+    assert len(log_rows()) == 4
+    assert (
+        repr(gold["test"]).splitlines()[0].endswith("; evaluated 3 times (2 prompts)")
     )
+    assert repr(gold["dev"]).splitlines()[0].endswith("; evaluated 1 time (1 prompt)")
+    c.evaluate(gold["dev"] + gold["test"])  # a combination counts for itself only
+    assert repr(gold["dev"]).splitlines()[0].endswith("; evaluated 1 time (1 prompt)")
+    both = gold["dev"] + gold["test"]
+    assert repr(both).splitlines()[0].endswith("; evaluated 1 time (1 prompt)")
+
+
+def test_counts_are_per_gold_file_and_older_lines_count_for_nothing():
+    model, _ = answering({"t1": ["a"]})
+    gold = write_gold([g("1", ["a"], split="test")])
+    other = Gold(name="b")
+    other.import_rows([{"id": "1", "text": "t1", "labels": ["a"]}], "test")
+    clf(model).evaluate(other["test"])
+    assert log_rows()[0]["gold"] == str(other.path)
+    assert repr(gold["test"]).splitlines()[0].endswith("; not evaluated")
+    with (settings.root / "evals.jsonl").open("a") as f:
+        old = {"split": "test", "gold": str(gold.path), "digest": "x", "model": "m"}
+        f.write(json.dumps(old) + "\n")
+        f.write(json.dumps({"event": "test_folded", "rows": 1}) + "\n")
+    assert repr(gold["test"]).splitlines()[0].endswith("; not evaluated")
+    assert repr(other["test"]).splitlines()[0].endswith("; evaluated 1 time (1 prompt)")
+
+
+def test_a_sample_made_before_its_labels_sees_them():
+    model, _ = answering({"t1": ["a"], "t2": ["b"]})
+    gold = write_gold([g("1", None), g("2", None)])
+    dev = gold["dev"]
+    write_gold([g("1", ["a"]), g("2", ["b"])])  # a person labelled them meanwhile
+    ev = clf(model).evaluate(dev)
+    assert (ev.n, ev.skipped_pending, ev.score()) == (2, 0, 1.0)
+
+
+async def test_the_sync_methods_work_inside_a_running_loop():
+    gold, c, _ = five()
+    assert c.evaluate(gold["dev"]).score("accuracy") == approx(0.6)
+    report = clf(answering(BAND_ANSWERS)[0]).band_sample(banded(), per_band=1)
+    assert sum(r["n"] for r in report.rows) == 3
 
 
 # --- band_sample ---------------------------------------------------------------------------------
@@ -375,7 +398,7 @@ BAND_ANSWERS = {
 
 def test_band_sample_rates_match_hand_computed_values():
     model, calls = answering(BAND_ANSWERS, name="gpt-4o-mini", priced=True)
-    report = band_sample(clf(model), banded(), per_band=30, seed=1)
+    report = clf(model).band_sample(banded(), per_band=30)
     assert isinstance(report, BandReport)
     # per_band 30 is larger than every band, so each band is taken whole
     assert report.rows == [
@@ -391,28 +414,31 @@ def test_band_sample_rates_match_hand_computed_values():
     assert "0.600-0.625" in repr(report) and "50%" in repr(report)
 
 
-def test_band_sample_takes_at_most_per_band_and_is_deterministic_for_a_seed():
+def test_band_sample_takes_at_most_per_band_in_the_id_order_with_no_seed():
     model, calls = answering({f"c{i}": ["a"] for i in range(10)})
     rows = [cand(i, 0.61) for i in range(10)]
-    c = clf(model)
-    one = band_sample(c, Candidates(rows), per_band=3, seed=7)
+    one = clf(model).band_sample(Candidates(rows), per_band=3)
     assert one.rows == [{"band": "0.600-0.625", "n": 3, "off_topic": 0, "rate": 0.0}]
-    first = sorted(set(calls))
-    assert len(first) == 3
+    ids = [f"c{i}" for i in range(10)]
+    by_hand = sorted(ids, key=lambda i: hashlib.sha256(f"\0{i}".encode()).hexdigest())
+    assert sorted(calls) == sorted(by_hand[:3])
     calls.clear()
-    again = band_sample(
-        clf(model, prompt="other"), Candidates(rows), per_band=3, seed=7
-    )
-    assert again.rows == one.rows and sorted(calls) == first
-    calls.clear()
-    band_sample(clf(model, prompt="third"), Candidates(rows), per_band=3, seed=8)
-    assert sorted(calls) != first
+    again = clf(model, prompt="other").band_sample(Candidates(rows), per_band=3)
+    assert again.rows == one.rows and sorted(calls) == sorted(by_hand[:3])
+    with pytest.raises(TypeError):
+        clf(model).band_sample(Candidates(rows), seed=1)
+
+
+async def test_aband_sample_matches_band_sample():
+    model, _ = answering(BAND_ANSWERS)
+    report = await clf(model).aband_sample(banded(), per_band=30)
+    assert [r["n"] for r in report.rows] == [4, 2, 3]
 
 
 def test_band_sample_off_topic_means_exactly_off_topic():
     model, _ = answering({"c0": ["off_topic"], "c1": ["a", "b"]})
     c = clf(model, mode="multi")
-    report = band_sample(c, Candidates([cand(0, 0.61), cand(1, 0.61)]))
+    report = c.band_sample(Candidates([cand(0, 0.61), cand(1, 0.61)]))
     assert report.rows[0]["off_topic"] == 1 and report.rows[0]["rate"] == 0.5
 
 
@@ -420,7 +446,7 @@ def test_band_sample_refuses_a_list_without_similarity_scores():
     model, calls = answering({})
     other = Candidates([{"id": "a", "text": "t"}], source="all")
     with pytest.raises(ValueError, match="band_sample needs similarity scores.*all"):
-        band_sample(clf(model), other)
+        clf(model).band_sample(other)
     assert calls == []
 
 
@@ -428,8 +454,16 @@ def test_a_note_on_a_gold_row_never_reaches_the_model():
     # guard (013): green before the notes feature too, and it keeps the notes out of prompts
     gold = write_gold([g("1", ["a"], note="secret edge case"), g("2", ["b"])])
     model, calls = answering({"t1": ["a"], "t2": ["b"]})
-    evaluate(clf(model), gold.dev)
+    clf(model).evaluate(gold["dev"])
     assert sorted(calls) == [
         "t1",
         "t2",
     ]  # items run concurrently: arrival order is not fixed
+
+
+@pytest.mark.parametrize("bad", [0, -1, 1.5, True])
+def test_band_sample_refuses_a_per_band_below_one(bad):
+    model, calls = answering(BAND_ANSWERS)
+    with pytest.raises(ValueError, match="per_band"):
+        clf(model).band_sample(banded(), per_band=bad)
+    assert calls == []
