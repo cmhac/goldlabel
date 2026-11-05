@@ -141,7 +141,7 @@
   - Stale: a row of the sample with a `revisions[].at` later than the line's `time` → `stale: true` and its id in `stale_rows`; a revision earlier than the line, a first label (no entry), a revision in another sample, or none → `stale: false`; `dev + test` is stale after a revision in either; times are compared as parsed datetimes.
   - No route runs an evaluation or a model call (the existing "server never touches a model" test still passes).
 
-- [ ] T012 [US3] Add the evaluation views to `src/goldlabel/web/app.js`, then rebuild `app.css`.
+- [X] T012 [US3] Add the evaluation views to `src/goldlabel/web/app.js`, then rebuild `app.css`.
 
   **Tests first (red)** in `tests/test_label_page.py`: the served JS renders, on the sample route, the list from `/api/evals` with the words **STALE** and **PASS**/**FAIL** (state in words, never colour alone), a disagreement table (id, text, gold, predicted, reasoning, note), a "revised since" line showing the current label, "no longer in the file", and "disagreements were not recorded by this version"; each disagreement links to `#/d/<dataset>/r/<id>`; there is no button, key or `fetch` that runs an evaluation or classification; text is set with `textContent`.
 

@@ -490,6 +490,69 @@ async function datasetView(name) {
   return [datasetCard(d, false)];
 }
 
+function disagreementTable(name, e) {
+  if (e.disagreements === null) return el("p", MUTED, "disagreements were not recorded by this version");
+  if (!e.disagreements.length) return el("p", MUTED, "The classifier agreed with every gold label it scored.");
+  return table(
+    "Where the classifier disagreed with the gold label",
+    ["ID", "Text", "Gold then", "Predicted", "Reasoning", "Note", "Now"],
+    e.disagreements.map((d) => {
+      const now = d.missing ? "no longer in the file" : d.revised ? "revised since: " + (d.labels || []).join(", ") : "";
+      return [
+        el("a", LINK, d.id, { href: rowHref(name, d.id) }),
+        text(d.text === null ? "" : d.text),
+        text((d.gold || []).join(", ")),
+        text(d.predicted ? d.predicted.join(", ") : "no prediction (the item failed)"),
+        text(d.reasoning || ""),
+        text(d.note || ""),
+        text(now),
+      ];
+    }),
+  );
+}
+
+function evaluationCard(name, e) {
+  const box = el("details", "rounded-lg border border-zinc-300 p-3 dark:border-zinc-700");
+  const verdict = e.passed === null ? "no target" : e.passed ? "PASS" : "FAIL";
+  const score = e.score === null ? "?" : Number(e.score).toFixed(3);
+  const target = e.target === null ? "" : " against " + e.target;
+  const sum = el("summary", "cursor-pointer " + FOCUS);
+  sum.append(
+    text(
+      e.time + " · " + e.samples.join(" + ") + " · score " + score + target + " · " + verdict +
+        (e.stale ? " · STALE" : ""),
+    ),
+  );
+  box.append(sum);
+  const facts = [
+    "rows scored: " + (e.n === null ? "?" : e.n),
+    "skipped as pending: " + (e.skipped_pending === null ? "not recorded" : e.skipped_pending),
+    "model: " + (e.model || "?"),
+    "prompt digest: " + (e.digest || "?").slice(0, 12),
+  ];
+  box.append(el("p", "mt-2 text-sm " + MUTED, facts.join(" · ")));
+  if (e.stale) {
+    box.append(
+      el("p", "mt-2 font-medium", "STALE: a row was revised after this ran (" + e.stale_rows.join(", ") + "). Run the evaluation again for a current score."),
+    );
+  }
+  const wrap = el("div", "mt-3 overflow-x-auto");
+  wrap.append(disagreementTable(name, e));
+  box.append(wrap);
+  return box;
+}
+
+async function evalsSection(name, sample) {
+  const list = await getJson("/api/evals?dataset=" + enc(name) + "&sample=" + enc(sample));
+  const box = el("section", CARD + " flex flex-col gap-3", undefined, { "aria-label": "Evaluations of " + sample });
+  box.append(el("h2", "text-lg font-semibold", "Evaluations of " + sample));
+  if (!list.length) {
+    box.append(el("p", MUTED, "Not evaluated yet. Evaluations are run from code (clf.evaluate), never from this page."));
+  }
+  list.forEach((e) => box.append(evaluationCard(name, e)));
+  return box;
+}
+
 async function rowsView(name, sample) {
   const rows = await getJson("/api/rows?dataset=" + enc(name) + "&sample=" + enc(sample));
   const d = (await getJson("/api/datasets")).find((x) => x.name === name);
@@ -514,7 +577,7 @@ async function rowsView(name, sample) {
       ]),
     ),
   );
-  return [box];
+  return [box, await evalsSection(name, sample)];
 }
 
 // The hash picks the view: #/ datasets, #/d/<dataset>, #/d/<dataset>/s/<sample>, #/pass/<id>.

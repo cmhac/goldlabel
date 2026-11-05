@@ -130,8 +130,15 @@ def test_js_posts_only_to_the_existing_routes_and_shows_no_prediction():
         "/api/datasets",
         "/api/rows",
         "/api/row",
+        "/api/evals",
     }
-    assert "predict" not in (js + packaged("index.html")).lower()
+    # a prediction appears only in the evaluation review, beside the gold label, never while labelling
+    review = js[
+        js.index("function disagreementTable") : js.index("async function evalsSection")
+    ]
+    outside = js.replace(review, "")
+    assert "predict" in review.lower()
+    assert "predict" not in (outside + packaged("index.html")).lower()
     assert '"X-Goldlabel": "1"' in js and "token" not in js.lower()
 
 
@@ -425,3 +432,40 @@ def test_the_editor_names_labels_outside_the_taxonomy_and_a_missing_taxonomy():
 def test_done_returns_to_the_list_when_the_server_keeps_running():
     js = packaged("app.js")
     assert "closing" in js and '"#/"' in js
+
+
+# --- the evaluation views (015) ---------------------------------------------------------------
+
+
+def test_the_sample_page_lists_evaluations_with_stale_and_pass_fail_in_words():
+    js = packaged("app.js")
+    assert "/api/evals?dataset=" in js
+    for word in ("STALE", "PASS", "FAIL", "no target"):
+        assert word in js
+    assert "a row was revised after this ran" in js
+
+
+def test_the_disagreement_table_names_every_column_and_every_special_case():
+    js = packaged("app.js")
+    for word in (
+        "Gold then",
+        "Predicted",
+        "Reasoning",
+        "Note",
+        "revised since",
+        "no longer in the file",
+    ):
+        assert word in js
+    assert "disagreements were not recorded by this version" in js
+    assert "Not evaluated yet" in js
+    assert "rowHref(" in js  # each disagreement opens its row
+
+
+def test_the_page_has_no_way_to_run_an_evaluation():
+    js = packaged("app.js")
+    assert "/api/eval" not in js.replace("/api/evals", "")
+    said = "Not evaluated yet. Evaluations are run from code (clf.evaluate), never from this page."
+    assert said in js
+    for word in ("evaluate", "classify", "estimate", "predict("):
+        assert word not in js.replace(said, "")
+    assert "<details" in js or '"details"' in js
