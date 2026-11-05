@@ -34,6 +34,8 @@ The issue's checklist is the scope of this spec. Its three "open decisions" are 
 
 - Q: Where do the label options come from for a page started from the terminal? → A: The user's decision: not a separate snapshot file; the gold file itself changes from one JSON line per row to a single JSON document holding the taxonomy and the rows, and `gl.label` writes the taxonomy into it. Files in the 014 format are not read and not migrated (early alpha, as 014 decided).
 
+- Q: Where is the page's access token kept? → A: The user's decision: there is no token. The Host check stays, and writes need a fixed custom header (FR-027) so another web page cannot post to the port.
+
 Run `/speckit-clarify` again to overturn any of the three decisions above.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -128,7 +130,7 @@ Every change to an already-labelled row's labels or note adds an entry to that r
 2. **Given** an imported row, **When** it is revised in the page, **Then** the gold row becomes `labelled_by: "goldlabel-ui"` and the entry keeps `imported` as the previous stamp.
 3. **Given** a row saved with the same labels and the same note, **When** it is posted, **Then** no entry is added and the file is not rewritten.
 4. **Given** a row revised twice, **Then** it holds two entries, oldest first, each with the values from just before its own change.
-5. **Given** the page's API, **Then** no endpoint accepts a label from anything but a person's request carrying the session's token, and no endpoint returns a model's prediction as a suggestion for a label.
+5. **Given** the page's API, **Then** no endpoint accepts a label from anything but a request that passes the page's local-origin checks (FR-027), and no endpoint returns a model's prediction as a suggestion for a label.
 6. **Given** a pending row labelled for the first time, **Then** it gets no revision entry and no evaluation becomes stale because of it.
 
 ---
@@ -145,7 +147,7 @@ Every change to an already-labelled row's labels or note adds an entry to that r
 - A gold file with no taxonomy yet (drawn or imported, never labelled with `gl.label`): the page says the labels shown are the ones already used, and a first label for a pending row can only choose among them.
 - A saved label that is not in the stored taxonomy (a row labelled under an older taxonomy): shown in the row as-is, and a revision can only choose among the stored taxonomy's labels; the page flags it as "not in this taxonomy".
 - `labelled_by` of a row is something other than the three known values: the entry copies it unchanged.
-- The server never listens beyond 127.0.0.1 and keeps the Host and token checks of 013; the lock file that carries the token is created readable only by its owner.
+- The server never listens beyond 127.0.0.1 and drops the access token of 013 (FR-027); the printed URL has no secret in it.
 
 ## Requirements *(mandatory)*
 
@@ -160,9 +162,9 @@ Every change to an already-labelled row's labels or note adds an entry to that r
 
 **Joining a running server**
 
-- **FR-005**: A running server MUST be discoverable by the storage folder through one lock file holding its process id, port, start time and access token, created readable only by its owner and removed when the server stops.
+- **FR-005**: A running server MUST be discoverable by the storage folder through one lock file holding its process id, port, and start time, removed when the server stops.
 - **FR-006**: `gl.label(sample, taxonomy, ...)` MUST, when a server for that folder is already running, print that server's URL aimed at the pass over the rows pending in `sample` at the call (every row of `sample` with `force_open_ui=True`), start no server, and wait until none of those rows is still pending, then return the `Sample`; an interrupt stops the wait and writes nothing. With `force_open_ui=True` there is nothing pending to wait for, so it prints the URL and returns at once. With none running it MUST behave as in 012-014.
-- **FR-007**: A lock whose process is gone, or whose port does not answer a request carrying its token, MUST be treated as stale and replaced. The per-gold-file lock and its "already being labelled" refusal are removed.
+- **FR-007**: A lock whose process is gone, or whose port does not answer a request, MUST be treated as stale and replaced. The per-gold-file lock and its "already being labelled" refusal are removed.
 - **FR-008**: `gl.label` MUST write the taxonomy it was called with into the gold file; a running server MUST read the stored taxonomy at each request. Only the labelling server (`gl.label` and the page) writes it; `draw_sample`, `Gold.import_rows` and `clf.evaluate` keep whatever the file holds.
 
 **Browse and navigate**
@@ -177,6 +179,10 @@ Every change to an already-labelled row's labels or note adds an entry to that r
 - **FR-013**: On any row the user MUST be able to change its labels (within the stored taxonomy and its `single`/`multi` mode) and its note, with the same keyboard behaviour as 013, and the change MUST be saved at once.
 - **FR-014**: The server MUST validate every revision exactly as it validates a first label (known labels, mode, body size) and MUST be the only writer of gold labels besides `Gold.import_rows`.
 - **FR-015**: A revised row MUST be restamped `labelled_by: "goldlabel-ui"` with a new `labelled_at`; the gold-file format changes as FR-026 says, and no other way to set a label is added.
+
+**Local access**
+
+- **FR-027**: The 013 access token is removed: no token in the URL, the lock file or the served pages. The server MUST still listen only on 127.0.0.1, MUST still refuse a request whose Host is not `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding), and MUST refuse any request that changes data unless it carries a fixed custom header that only the page's own script sends. That header makes a browser send a permission check first, which the server never grants, so a web page from another site cannot post a label even though it can reach the port.
 
 **Gold file format**
 
@@ -207,7 +213,7 @@ Every change to an already-labelled row's labels or note adds an entry to that r
 ### Key Entities
 
 - **Storage folder**: the folder named by `--dir`, `GOLDLABEL_DIR` or `.goldlabel/`; holds the gold files (each with its taxonomy), `evals.jsonl` and the server lock.
-- **Server lock**: process id, port, start time and token of the one running labelling server for a storage folder.
+- **Server lock**: process id, port and start time of the one running labelling server for a storage folder.
 - **Stored taxonomy**: the taxonomy `gl.label` last wrote into a gold dataset's file; the page uses it for label options.
 - **Revision entry**: an item in a gold row's `revisions` list: the time of a change and the labels, note and `labelled_by` the row had just before it.
 - **Evaluation line (extended)**: an existing `evals.jsonl` line plus its disagreements; **stale** is derived from it and the rows' revision times, never stored.
@@ -232,7 +238,7 @@ Every change to an already-labelled row's labels or note adds an entry to that r
 - `gold-<name>.json` and `gold.json` are the only gold files; `*.removed.jsonl` and `*.tmp` are not datasets.
 - The labelling flow, keys and counts of 013-014 are unchanged and keep their tests, except the per-file lock tests, which move to the folder lock.
 - `evals.jsonl` lines written before this feature name a `.jsonl` gold file, so the page does not list them under the new file; they stay in the log.
-- A person who can read the lock file can already edit the gold file; the token's job is to stop other local processes and web pages, as in 013.
+- The page runs on the user's own computer for the user alone (the user's decision, 2026-11-05), so it has no access token; other local programs are trusted as much as the user's own files are.
 
 ## Human checks (agents report these and stop)
 
@@ -251,4 +257,5 @@ Open the command's page in a real browser at 1280px and 390px, light and dark, w
 - A sticky or floating text on the one-column layout, and a new layout below 1024px.
 - Accounts, names for reviewers, or any "who revised" beyond the `labelled_by` stamp.
 - Any reading or migration of 014-format gold files, and of older logs, or reading disagreements back out of the cache for old evaluation lines.
+- A secret, token, password or login for the page.
 - Any change to the classifier, cache, cost ledger, metrics, or to what an evaluation scores.
