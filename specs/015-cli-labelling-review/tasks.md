@@ -49,7 +49,7 @@
 
 **Independent test**: the Independent Tests of Stories 1 and 5 in `spec.md`; [quickstart.md](quickstart.md) scenarios 1 to 4 of section 2.
 
-- [ ] T004 [US5] Record revisions when the server saves a row, in `src/goldlabel/_label.py`.
+- [X] T004 [US5] Record revisions when the server saves a row, in `src/goldlabel/_label.py`.
 
   **Tests first (red)** in `tests/test_label_server.py` (hand-built gold file, `POST /api/label` over HTTP, expected files written in the test):
   - Row with labels `["yes"]`, saved as `["no"]`: the row's labels are `["no"]`, `labelled_by` is `"goldlabel-ui"`, `labelled_at` is new, and `revisions` has exactly one entry whose `labels` is `["yes"]`, `note` is the previous note, `labelled_by` is the previous stamp, and `at` is an ISO time not before the request.

@@ -3,7 +3,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -740,3 +740,121 @@ def test_the_lock_is_per_storage_folder_so_two_datasets_share_it(start, tmp_path
     g.path = other / "gold.json"
     h = _label.serve(g["dev"], taxonomy())  # a different folder has its own lock
     h.stop()
+
+
+# --- revisions (015) ----------------------------------------------------------------------------
+
+
+def labelled(id_, labels, by="goldlabel-ui", note=None, at="2026-01-01T00:00:00+00:00"):
+    row = {"id": id_, "text": f"text {id_}", "labels": labels, "sample": "dev"}
+    row |= {"labelled_by": by, "labelled_at": at}
+    if note is not None:
+        row["note"] = note
+    return row
+
+
+def review(tmp_path, *rows_, mode="multi"):
+    """Serve a review pass over a hand-written dev sample of labelled rows."""
+    p = tmp_path / "gold.json"
+    write_gold(p, list(rows_))
+    h = _label.serve(Gold()["dev"], taxonomy(mode), force_open_ui=True)
+    return p, h, Client(h)
+
+
+def post_label(c, id_, labels, **extra):
+    return c.call("POST", "/api/label", {"id": id_, "labels": labels, **extra})[:2]
+
+
+def test_changing_the_labels_of_a_labelled_row_adds_one_revision(tmp_path):
+    p, h, c = review(tmp_path, labelled("1", ["a"], note="old"), labelled("2", ["b"]))
+    try:
+        t0 = datetime.now(UTC)
+        status, _ = post_label(c, "1", ["b"])
+        t1 = datetime.now(UTC)
+    finally:
+        h.stop()
+    assert status == 200
+    row, other = on_disk(p)
+    assert row["labels"] == ["b"] and row["note"] == "old"
+    assert row["labelled_by"] == "goldlabel-ui"
+    assert t0 <= datetime.fromisoformat(row["labelled_at"]) <= t1
+    (entry,) = row["revisions"]
+    assert set(entry) == {"at", "labels", "note", "labelled_by"}
+    assert entry["labels"] == ["a"] and entry["note"] == "old"
+    assert entry["labelled_by"] == "goldlabel-ui"
+    assert t0 <= datetime.fromisoformat(entry["at"]) <= t1
+    assert other == labelled("2", ["b"])  # every other row is untouched
+
+
+def test_revising_an_imported_row_keeps_imported_as_the_previous_stamp(tmp_path):
+    p, h, c = review(tmp_path, labelled("1", ["a"], by="imported"))
+    try:
+        post_label(c, "1", ["b"])
+    finally:
+        h.stop()
+    (row,) = on_disk(p)
+    assert row["labelled_by"] == "goldlabel-ui"
+    assert row["revisions"][0]["labelled_by"] == "imported"
+
+
+def test_a_note_only_change_is_a_revision_with_the_old_note(tmp_path):
+    p, h, c = review(tmp_path, labelled("1", ["a"], note="old"))
+    try:
+        post_label(c, "1", ["a"], note="new")
+    finally:
+        h.stop()
+    (row,) = on_disk(p)
+    assert row["labels"] == ["a"] and row["note"] == "new"
+    assert (
+        row["revisions"][0]["labels"] == ["a"] and row["revisions"][0]["note"] == "old"
+    )
+
+
+def test_a_save_that_changes_nothing_adds_nothing_and_rewrites_nothing(tmp_path):
+    p, h, c = review(
+        tmp_path, labelled("1", ["a", "b"], note="n"), labelled("2", ["a"])
+    )
+    try:
+        before = p.read_bytes()
+        assert post_label(c, "1", ["a", "b"], note="n")[0] == 200
+        assert post_label(c, "1", ["b", "a"])[0] == 200  # same labels, other order
+        assert (
+            post_label(c, "2", ["a"], note="   ")[0] == 200
+        )  # an empty note is no note
+        assert p.read_bytes() == before
+    finally:
+        h.stop()
+
+
+def test_the_first_label_of_a_pending_row_is_not_a_revision(start, gold_path):
+    c = Client(start())
+    post_label(c, "1", ["a"], note="why")
+    row = on_disk(gold_path)[0]
+    assert row["labels"] == ["a"] and "revisions" not in row
+
+
+def test_two_revisions_make_two_entries_oldest_first(tmp_path):
+    p, h, c = review(tmp_path, labelled("1", ["a"]))
+    try:
+        post_label(c, "1", ["b"], note="second")
+        post_label(c, "1", ["a", "b"])
+    finally:
+        h.stop()
+    (row,) = on_disk(p)
+    first, second = row["revisions"]
+    assert (first["labels"], first["note"]) == (["a"], None)
+    assert (second["labels"], second["note"]) == (["b"], "second")
+    assert first["at"] <= second["at"] and row["labels"] == ["a", "b"]
+
+
+def test_a_bad_revision_is_refused_like_a_bad_first_label_and_writes_nothing(tmp_path):
+    p, h, c = review(tmp_path, labelled("1", ["a"]), mode="single")
+    try:
+        before = p.read_bytes()
+        assert post_label(c, "1", ["a", "b"])[0] == 400
+        assert post_label(c, "1", ["zzz"])[0] == 400
+        assert post_label(c, "1", [])[0] == 400
+        assert post_label(c, "1", ["a"], note=5)[0] == 400
+        assert p.read_bytes() == before
+    finally:
+        h.stop()

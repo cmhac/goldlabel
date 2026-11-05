@@ -114,6 +114,45 @@ def _taxonomy(gold: Gold) -> Taxonomy:
     )
 
 
+def _save(gold: Gold, id_: str, labels: list[str], note: str | None, only=None):
+    """Write a person's labels (and note) for row `id_`; the only place a label is written.
+
+    A row that already had labels keeps the values from before the change in its `revisions`
+    list, in the same rewrite of the file; a first label, or a save that changes nothing,
+    adds no entry. `only` limits which ids may be saved (a pass's ids). KeyError: no such row.
+    """
+    rows = gold._read()
+    target = next(
+        (r for r in rows if r.id == id_ and (only is None or id_ in only)), None
+    )
+    if target is None:
+        raise KeyError(id_)
+    # shortcut: no note length limit beyond MAX_BODY, add one if gold files grow huge notes.
+    new_note = (
+        target.note if note is None else (note.strip() or None)
+    )  # None: keep the note
+    if target.labels and set(labels) == set(target.labels) and new_note == target.note:
+        return target
+    now = datetime.now(UTC).isoformat()
+    update = {
+        "labels": labels,
+        "labelled_by": "goldlabel-ui",
+        "labelled_at": now,
+        "note": new_note,
+    }
+    if target.labels:
+        before = {
+            "at": now,
+            "labels": target.labels,
+            "note": target.note,
+            "labelled_by": target.labelled_by,
+        }
+        update["revisions"] = [*(target.revisions or []), before]
+    saved = target.model_copy(update=update)
+    gold._write([saved if r is target else r for r in rows])
+    return saved
+
+
 class Pass:
     """One labelling pass: `ids` are the rows it pages, fixed when it starts."""
 
@@ -180,21 +219,7 @@ class Pass:
         self, id_: str, labels: list[str], note: str | None, taxonomy: Taxonomy
     ) -> dict:
         validate_labels(labels, taxonomy)
-        all_rows = self.gold._read()
-        target = next((r for r in all_rows if r.id == id_ and r.id in self.ids), None)
-        if target is None:
-            raise KeyError(id_)
-        stamp = {
-            "labels": labels,
-            "labelled_by": "goldlabel-ui",
-            "labelled_at": datetime.now(UTC).isoformat(),
-        }
-        # shortcut: no note length limit beyond MAX_BODY, add one if gold files grow huge notes.
-        if note is not None:  # None: an older client, keep the row's note
-            stamp["note"] = note.strip() or None
-        self.gold._write(
-            [r.model_copy(update=stamp) if r is target else r for r in all_rows]
-        )
+        _save(self.gold, id_, labels, note, only=self.ids)
         self._move(self._scope(), id_)
         return self.state(taxonomy)
 
