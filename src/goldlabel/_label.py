@@ -67,21 +67,20 @@ def _answers(port: int) -> bool:
     return True
 
 
-def _held(lock: Path) -> tuple[int, str | None] | None:
-    """(pid, started) of a live server holding `lock`: its process exists and its port answers."""
+def _held(lock: Path) -> tuple[int, str | None, int] | None:
+    """(pid, started, port) of a live server holding `lock`: its process exists and its port answers."""
     try:
         info = json.loads(lock.read_text())
         pid, port, started = int(info["pid"]), int(info["port"]), info.get("started")
     except (OSError, ValueError, KeyError, TypeError):
         return None  # missing or unreadable: stale
-    return (pid, started) if _alive(pid) and _answers(port) else None
+    return (pid, started, port) if _alive(pid) and _answers(port) else None
 
 
 def _live(folder: Path) -> int | None:
     """The port of the live labelling server of `folder`, if there is one."""
-    if _held(folder / LOCK) is None:
-        return None
-    return int(json.loads((folder / LOCK).read_text())["port"])
+    held = _held(folder / LOCK)
+    return None if held is None else held[2]
 
 
 def _acquire(lock: Path, port: int) -> None:
@@ -756,6 +755,7 @@ def _join(
             state = _ask(port, f"/api/pass/{pass_id}")
             if state["pending"] == 0 or state["ended"]:
                 return
+            # shortcut: poll once a second (up to a second late), push from the server if waits feel slow
             time.sleep(1)
     except (OSError, GoldRuntimeError):
         print("The labelling page stopped; returning what is labelled so far.")

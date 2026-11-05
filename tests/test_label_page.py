@@ -513,3 +513,14 @@ def test_the_css_has_those_rules_inside_the_1024px_media_query():
     for m in re.finditer(r"\.lg\\:(?:sticky|overflow-y-auto)", css):
         before = css[: m.start()]
         assert before.rfind("@media") > before.rfind("}}") or "@media" in before[-300:]
+
+
+def test_a_slow_reply_cannot_overwrite_a_newer_page_and_a_bad_log_keeps_the_rows():
+    js = packaged("app.js")
+    assert "++nav" in js and "mine !== nav" in js  # a reply for an old route is dropped
+    section = js[
+        js.index("async function evalsSection") : js.index("async function rowsView")
+    ]
+    assert (
+        "catch" in section
+    )  # an evaluation error is shown inside its box, not instead of the rows

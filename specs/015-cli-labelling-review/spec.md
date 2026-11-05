@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-05
 
-**Status**: Draft
+**Status**: Implemented (constitution 1.4.0; human checks listed in AGENTS.md)
 
 **Input**: User description: "Read https://github.com/cmhac/goldlabel/issues/26 and build a spec for this." Issue #26, *Labelling page: start from the CLI, browse samples, review evaluations and revise gold labels*: "A tester was invited to change two gold labels. The page opened generically, he had to page through every row to find the two IDs, and he couldn't go back. Today `gl.label` is the only way to start the server, and it knows only the one sample it was called with. He also couldn't see the text while scrolling a long label list."
 

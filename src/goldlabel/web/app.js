@@ -335,12 +335,7 @@ const LINK =
   FOCUS;
 const CELL = "border-t border-zinc-200 py-2 pr-4 dark:border-zinc-800";
 
-async function getJson(path) {
-  const r = await fetch(path, { headers: { "X-Goldlabel": "1" } });
-  const data = await r.json();
-  if (!r.ok) throw new Error(data.error || "request failed (" + r.status + ")");
-  return data;
-}
+const getJson = (path) => api("GET", path);
 
 const enc = encodeURIComponent;
 const dsHref = (d) => "#/d/" + enc(d);
@@ -548,9 +543,16 @@ function evaluationCard(name, e) {
 }
 
 async function evalsSection(name, sample) {
-  const list = await getJson("/api/evals?dataset=" + enc(name) + "&sample=" + enc(sample));
   const box = el("section", CARD + " flex flex-col gap-3", undefined, { "aria-label": "Evaluations of " + sample });
   box.append(el("h2", "text-lg font-semibold", "Evaluations of " + sample));
+  let list = [];
+  try {
+    list = await getJson("/api/evals?dataset=" + enc(name) + "&sample=" + enc(sample));
+  } catch (e) {
+    // the rows above stay usable when only the evaluation log is damaged
+    box.append(el("p", "text-red-800 dark:text-red-300", "Error: " + e.message, { role: "alert" }));
+    return box;
+  }
   if (!list.length) {
     box.append(el("p", MUTED, "Not evaluated yet. Evaluations are run from code (clf.evaluate), never from this page."));
   }
@@ -598,8 +600,9 @@ function parse() {
 
 const scrolls = new Map(); // route -> scrollY, so Back lands where the list was
 let shownHash = null;
+let nav = 0; // counts navigations, so a slow reply for an old route is dropped
 
-async function browse(r) {
+async function browse(r, mine) {
   app.replaceChildren(el("p", MUTED, "Loading..."));
   try {
     let parts = [el("p", MUTED, "No such page.")];
@@ -607,13 +610,16 @@ async function browse(r) {
     else if (r.kind === "dataset") parts = await datasetView(r.d);
     else if (r.kind === "rows") parts = await rowsView(r.d, r.s);
     else if (r.kind === "row") parts = await rowView(r.d, r.id);
+    if (mine !== nav) return;
     if (parts) app.replaceChildren(...parts);
   } catch (e) {
+    if (mine !== nav) return;
     app.replaceChildren(el("p", "rounded-lg border border-red-700 p-3 text-red-800 dark:border-red-400 dark:text-red-300", "Error: " + e.message, { role: "alert" }));
   }
 }
 
 async function go() {
+  const mine = ++nav;
   if (shownHash !== null) scrolls.set(shownHash, window.scrollY);
   shownHash = location.hash;
   state = null;
@@ -630,9 +636,9 @@ async function go() {
     passId = r.id;
     await load();
   } else {
-    await browse(r);
+    await browse(r, mine);
   }
-  window.scrollTo(0, scrolls.get(shownHash) || 0);
+  if (mine === nav) window.scrollTo(0, scrolls.get(shownHash) || 0);
 }
 
 window.addEventListener("hashchange", go);

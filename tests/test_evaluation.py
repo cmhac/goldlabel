@@ -504,3 +504,25 @@ def test_a_line_written_before_disagreements_were_logged_still_counts():
     with (settings.root / "evals.jsonl").open("a") as f:
         f.write(json.dumps(old) + "\n")
     assert "evaluated 2 times (1 prompt)" in repr(gold["dev"])
+
+
+def test_the_log_is_matched_to_its_gold_file_by_name_not_by_where_it_was_written():
+    gold, c, _ = five()
+    c.evaluate(gold["dev"])
+    row = json.loads((settings.root / "evals.jsonl").read_text().splitlines()[0])
+    row["gold"] = (
+        "/some/other/project/.goldlabel/gold.json"  # a path from another place
+    )
+    (settings.root / "evals.jsonl").write_text(json.dumps(row) + "\n")
+    assert "evaluated 1 time (1 prompt)" in repr(gold["dev"])
+    row["gold"] = "/some/other/project/.goldlabel/gold-b.json"  # another dataset's line
+    (settings.root / "evals.jsonl").write_text(json.dumps(row) + "\n")
+    assert repr(gold["dev"]).splitlines()[0].endswith("; not evaluated")
+
+
+def test_a_damaged_line_in_the_log_is_skipped():
+    gold, c, _ = five()
+    c.evaluate(gold["dev"])
+    with (settings.root / "evals.jsonl").open("a") as f:
+        f.write('{"samples": ["dev"], "gold": "gold.js\n')
+    assert "evaluated 1 time (1 prompt)" in repr(gold["dev"])

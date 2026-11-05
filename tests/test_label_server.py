@@ -1458,3 +1458,14 @@ def test_the_server_still_never_runs_a_model_or_returns_a_prediction_as_a_label(
     )
     src = Path(_label.__file__).read_text()
     assert "classifier" not in src and "pydantic_ai" not in src
+
+
+def test_evals_match_the_gold_file_by_name_and_skip_a_damaged_line(
+    tmp_path, gold_path, start
+):
+    relative = eval_line("/some/other/project/.goldlabel/gold.json", digest="relative")
+    write_log(tmp_path, relative)
+    with (tmp_path / "evals.jsonl").open("a") as f:
+        f.write('{"samples": ["dev"], "gold": "gold.js\n')
+    [line] = evals(Client(start()))[1]
+    assert line["digest"] == "relative"

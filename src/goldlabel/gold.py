@@ -262,6 +262,8 @@ class Gold:
         return rows
 
     def _write(self, rows: list[GoldRow], taxonomy=_KEEP) -> None:
+        # shortcut: the whole file is rewritten on every save, fine for hundreds of rows, switch to
+        # appending changes when a gold set reaches tens of thousands
         if taxonomy is _KEEP:
             taxonomy = self._doc().get("taxonomy")
         self.path.parent.mkdir(parents=True, exist_ok=True)
