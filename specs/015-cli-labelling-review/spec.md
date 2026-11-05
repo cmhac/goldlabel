@@ -36,6 +36,8 @@ The issue's checklist is the scope of this spec. Its three "open decisions" are 
 
 - Q: Where is the page's access token kept? → A: The user's decision: there is no token. The Host check stays, and writes need a fixed custom header (FR-027) so another web page cannot post to the port.
 
+- Q: If a notebook cell is waiting on a running page and the user presses **Done** with rows still pending, does it keep waiting? → A: No. It returns when no row of the pass is pending or **Done** is pressed on that pass, whichever comes first.
+
 Run `/speckit-clarify` again to overturn any of the three decisions above.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -61,20 +63,20 @@ A colleague is told "labels for rows `a17` and `b203` in the trump dataset are w
 
 ### User Story 2 - `gl.label` joins a server that is already running (Priority: P1)
 
-A notebook user has the page open from the terminal, then runs `gl.label(dev, taxonomy)`. No second server starts. The cell prints the running server's URL, pointed at the dev sample's pending rows, and waits until none of those rows is pending any more (or the user interrupts the cell), then returns the Sample. If nothing is running, `gl.label` behaves as in 012-014 (it opens a page and waits for **Done**).
+A notebook user has the page open from the terminal, then runs `gl.label(dev, taxonomy)`. No second server starts. The cell prints the running server's URL, pointed at the dev sample's pending rows, and waits until none of those rows is pending any more or the user presses **Done** on that pass (or interrupts the cell), then returns the Sample. If nothing is running, `gl.label` behaves as in 012-014 (it opens a page and waits for **Done**).
 
 **Why this priority**: today a second labelling call fails with an error; with one server per folder it must instead lead the user to the page they already have.
 
-**Independent Test**: with a server running for a storage folder (started by the library, so no process is needed), call `label` for another sample and check that the number of listening servers has not changed, the printed URL is the running server's, and the call waits while a row of the pass is pending and returns once none is (label the rows over the page's API in the test). Then stop the server, leave a lock for a dead process, and check that the next call replaces the lock and starts a server.
+**Independent Test**: with a server running for a storage folder (started by the library, so no process is needed), call `label` for another sample and check that the number of listening servers has not changed, the printed URL is the running server's, and the call waits while a row of the pass is pending and returns once none is, or once Done is posted for the pass (drive both over the page's API in the test). Then stop the server, leave a lock for a dead process, and check that the next call replaces the lock and starts a server.
 
 **Acceptance Scenarios**:
 
-1. **Given** a running server for the folder, **When** `gl.label(sample, taxonomy)` runs, **Then** it prints that server's URL, starts no server, writes no gold file itself, and returns the Sample once no row of the pass is pending; interrupting the cell stops the wait and changes nothing.
+1. **Given** a running server for the folder, **When** `gl.label(sample, taxonomy)` runs, **Then** it prints that server's URL, starts no server, writes no gold file itself, and returns the Sample once no row of the pass is pending or **Done** is pressed on it; interrupting the cell stops the wait and changes nothing.
 2. **Given** that call, **When** the page is opened from the printed URL, **Then** it opens on the pass over the sample's rows that were pending at the call, so the labelling flow of 013-014 is unchanged.
 3. **Given** a lock naming a process that no longer exists, or a port that does not answer, **When** `gl.label` or `goldlabel label` runs, **Then** the lock is replaced and a server starts.
 4. **Given** two storage folders, **When** a server runs for one, **Then** the other is unaffected.
 5. **Given** the taxonomy passed to `gl.label` differs from the one stored in the gold file, **When** it runs, **Then** the stored taxonomy is replaced with the new one, rows and their labels are untouched, and a running server uses it from its next request.
-6. **Given** a server started by `gl.label`, **When** the user presses **Done**, **Then** the server stops as today. A server started by `goldlabel label` ignores **Done** for stopping and runs until the terminal process is interrupted.
+6. **Given** a server started by `gl.label`, **When** the user presses **Done**, **Then** the server stops as today. A server started by `goldlabel label` does not stop on **Done**: the page returns to the dataset list, any waiting `gl.label` call for that pass returns, and the server runs until the terminal process is interrupted.
 
 ---
 
@@ -163,7 +165,7 @@ Every change to an already-labelled row's labels or note adds an entry to that r
 **Joining a running server**
 
 - **FR-005**: A running server MUST be discoverable by the storage folder through one lock file holding its process id, port, and start time, removed when the server stops.
-- **FR-006**: `gl.label(sample, taxonomy, ...)` MUST, when a server for that folder is already running, print that server's URL aimed at the pass over the rows pending in `sample` at the call (every row of `sample` with `force_open_ui=True`), start no server, and wait until none of those rows is still pending, then return the `Sample`; an interrupt stops the wait and writes nothing. With `force_open_ui=True` there is nothing pending to wait for, so it prints the URL and returns at once. With none running it MUST behave as in 012-014.
+- **FR-006**: `gl.label(sample, taxonomy, ...)` MUST, when a server for that folder is already running, print that server's URL aimed at the pass over the rows pending in `sample` at the call (every row of `sample` with `force_open_ui=True`), start no server, and wait until none of those rows is still pending or the user presses **Done** on that pass, whichever comes first, then return the `Sample`; an interrupt stops the wait and writes nothing. With `force_open_ui=True` there is nothing pending to wait for, so it prints the URL and returns at once. With none running it MUST behave as in 012-014.
 - **FR-007**: A lock whose process is gone, or whose port does not answer a request, MUST be treated as stale and replaced. The per-gold-file lock and its "already being labelled" refusal are removed.
 - **FR-008**: `gl.label` MUST write the taxonomy it was called with into the gold file; a running server MUST read the stored taxonomy at each request. Only the labelling server (`gl.label` and the page) writes it; `draw_sample`, `Gold.import_rows` and `clf.evaluate` keep whatever the file holds.
 
