@@ -124,8 +124,8 @@ Adding Samples gives a combined Sample over the union of their rows, from the sa
 When the user holds a sample out as their test set, scores it, and then decides to keep tuning, this is how the spent rows join the tuning set in plain sight:
 
 ```python
-tuning = dev + test                     # nothing is written; no row changes
-test_2 = gold.draw_sample("test-2")     # a fresh held-out sample
+tuning = dev + test  # nothing is written; no row changes
+test_2 = gold.draw_sample("test-2")  # a fresh held-out sample
 gl.label(test_2, taxonomy)
 clf2.evaluate(tuning, target=0.95)
 clf2.evaluate(test_2, target=0.95)

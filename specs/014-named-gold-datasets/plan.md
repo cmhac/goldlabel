@@ -124,7 +124,9 @@ Docs and tests:
 ```python
 def order_by_id(rows, salt: str = "") -> list[dict]:
     """Rows in an order fixed by each id: the same everywhere, unmoved by other rows."""
-    return sorted(rows, key=lambda r: hashlib.sha256(f"{salt}\0{r['id']}".encode()).hexdigest())
+    return sorted(
+        rows, key=lambda r: hashlib.sha256(f"{salt}\0{r['id']}".encode()).hexdigest()
+    )
 ```
 
 ### `gold.py`
@@ -164,12 +166,19 @@ class Gold:
 ### `classifier.py`
 
 ```python
-def evaluate(self, sample, **kwargs): return _sync.run(self.aevaluate(sample, **kwargs))
+def evaluate(self, sample, **kwargs):
+    return _sync.run(self.aevaluate(sample, **kwargs))
+
+
 async def aevaluate(self, sample, *, metric=None, target=None):
     from goldlabel.evaluation import _aevaluate  # evaluation imports classifier
     from goldlabel.gold import Sample
-    if not isinstance(sample, Sample): raise GoldError('evaluate a Sample: dev = gold.draw_sample("dev")')
+
+    if not isinstance(sample, Sample):
+        raise GoldError('evaluate a Sample: dev = gold.draw_sample("dev")')
     return await _aevaluate(self, sample, metric=metric, target=target)
+
+
 # band_sample / aband_sample likewise
 ```
 
