@@ -1,12 +1,12 @@
 # Sample
 
-A tiny end-to-end run you can try on a fresh clone, with no API key and no setup beyond `uv`.
+A tiny end-to-end run you can try on a fresh clone.
 
 `walkthrough.py` (plain script; `# %%` marks the cells) and `walkthrough.ipynb` (the same cells for
 Jupyter, marimo or Colab) walk the whole chain over `corpus.jsonl`: eight short posts with hand-built
-2-D vectors, not real embeddings. **You** are the person who labels the gold rows; the classifier is a
-crude keyword stand-in that gets some rows wrong on purpose, so there is something to review. Put
-`ANTHROPIC_API_KEY` in the environment and a real model answers instead.
+2-D vectors, not real embeddings. Search runs offline. The classifier is `openai:gpt-6-luna`, so put
+`OPENAI_API_KEY` in your environment first (nothing here reads or writes a key file). **You** are the
+person who labels the gold rows.
 
 ## Run it
 
@@ -14,6 +14,7 @@ crude keyword stand-in that gets some rows wrong on purpose, so there is somethi
 git clone https://github.com/cmhac/goldlabel && cd goldlabel
 uv sync
 cd examples/sample
+export OPENAI_API_KEY=...     # your key
 uv run python walkthrough.py  # the walkthrough; for the notebook: uv run --with jupyterlab jupyter lab walkthrough.ipynb
 ```
 
@@ -33,8 +34,7 @@ Run `uv run goldlabel label` (from this folder) once the script has finished:
 - **Datasets and samples:** the default dataset with its `dev` and `test` samples and how many rows are
   labelled. Open `dev` for its rows; type an id such as `burnout-2` in **Jump to id** to open one row.
 - **Evaluations:** under the rows, each evaluation of the sample with its score and the rows the
-  classifier got wrong, next to your label. The stand-in calls any post that mentions work or a job a
-  layoff, so `burnout-2` ("Working weekends...") is one of them.
+  classifier got wrong, next to your label.
 - **Revise a label:** open a row, pick a different label, then go back to the sample. The evaluation is
   now marked **STALE**, because a row was revised after it ran. Run `uv run python walkthrough.py` again
   (nothing is pending, so it only re-evaluates) and a new, current evaluation appears. The row in

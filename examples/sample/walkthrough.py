@@ -4,46 +4,18 @@
 # Eight short posts with hand-built 2-D vectors live in `corpus.jsonl`. Every cell below is one step of
 # the analysis; run them in order, in Jupyter, marimo, or as a plain script (`# %%` marks the cells).
 #
-# What needs you: **a person** to label the gold rows in the labelling page. The classifier is a
-# real model when `ANTHROPIC_API_KEY` is in the environment (nothing here reads or writes a key
-# file); without it, a crude keyword stand-in answers instead, so the whole walkthrough runs offline
-# and you can try the labelling page, the evaluations and the revisions without a key. When the
-# script has run, `uv run goldlabel label` (from this folder) opens the same page on every dataset,
-# to browse the rows, read the evaluations and revise a label.
+# What needs you: a classifier model and its key (`OPENAI_API_KEY` in the environment; nothing
+# here reads or writes a key file), and **a person** to label the gold rows in the labelling page.
+# Everything before the classifier runs offline. When the script has run, `uv run goldlabel label`
+# (from this folder) opens the same page on every dataset, to browse the rows, read the evaluations
+# and revise a label.
 
 # %%
-import os
-
 from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
-from pydantic_ai.messages import ModelResponse, ToolCallPart, UserPromptPart
-from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.usage import RequestUsage
 
 import goldlabel as gl
-
-LIVE = (
-    "ANTHROPIC_API_KEY" in os.environ
-)  # a real classifier, or the offline stand-in below
-
-
-def keyword_stand_in():
-    """A deliberately crude classifier that needs no key: any post that mentions work or a job
-    is a layoff. It gets some rows wrong, which gives the evaluation something to show."""
-
-    def answer(messages, info: AgentInfo):
-        post = next(
-            p.content
-            for m in reversed(messages)
-            for p in reversed(m.parts)
-            if isinstance(p, UserPromptPart)
-        )
-        words = ("laid off", "job", "work", "cut")
-        label = "layoff" if any(w in post.lower() for w in words) else "burnout"
-        reply = {"reasoning": f"keyword match in: {post}", "labels": [label]}
-        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, reply)])
-
-    return FunctionModel(answer, model_name="keyword-stand-in")
 
 
 class HandEmbedder(Embedder):
@@ -91,8 +63,7 @@ candidates.to_polars()  # .to_pandas() works the same way
 # ## 2. Labels and a first prompt
 #
 # `single` means one label per post; `off_topic` is built in. The classifier is immutable: a new
-# prompt is a new classifier (`with_prompt`), so you can keep both and compare them. (Offline, the
-# stand-in ignores the prompt, so a new prompt will not move its score; a real model can.)
+# prompt is a new classifier (`with_prompt`), so you can keep both and compare them.
 
 # %%
 taxonomy = gl.Taxonomy(
@@ -103,7 +74,7 @@ taxonomy = gl.Taxonomy(
     },
 )
 clf = gl.Classifier(
-    "anthropic:claude-haiku-4-5" if LIVE else keyword_stand_in(),
+    "openai:gpt-6-luna",
     taxonomy,
     prompt="Read the post and choose the one label that fits it best.",
 )
@@ -187,8 +158,7 @@ clf2.estimate(chosen)
 
 # %%
 # max_cost refuses before spending anything if the estimate is over it or the price is unknown.
-# (Offline, the stand-in has no price, so there is nothing to cap.)
-results = clf2.classify(chosen, out="results.jsonl", max_cost=1.00 if LIVE else None)
+results = clf2.classify(chosen, out="results.jsonl", max_cost=1.00)
 results.to_polars()
 
 # %% [markdown]

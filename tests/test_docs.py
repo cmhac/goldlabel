@@ -203,4 +203,4 @@ def test_the_sample_readme_shows_how_to_try_the_page_on_a_fresh_clone():
         "revisions",
     ):
         assert needle in text, needle
-    assert "ANTHROPIC_API_KEY" in text and "no API key" in text
+    assert "OPENAI_API_KEY" in text and "openai:gpt-6-luna" in text
