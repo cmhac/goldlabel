@@ -163,8 +163,11 @@ names.
   labelling page, Tailwind CSS pre-built into `src/goldlabel/web/app.css`. No Textual, keyring,
   platformdirs, python-dotenv, nbformat or Playwright in the project; a build or example script
   that needs one runs it with `uv run --with`. Adding a dependency requires the plan to justify it.
-  The package has one console command, `goldlabel` (the skills installer, standard library only);
-  there is no other command and no application.
+  The package has two console commands, both subcommands of `goldlabel`: `goldlabel install` (the
+  skills installer, standard library only) and `goldlabel label` (starts or joins the labelling page
+  for a storage folder; it writes gold labels only through the labelling server, and `cli.py` imports
+  the server lazily, so `install` and `import goldlabel` stay free of it). There is no other command
+  and no application.
 - **External APIs**: every Pydantic AI, `Embedder`, psycopg, boto3 and standard-library API MUST
   be checked against the installed version and the current docs before use, never coded from memory.
 - **pgvector is read-only**; SQL identifiers go through `psycopg.sql.Identifier`.
@@ -214,4 +217,4 @@ semantic: MAJOR for removing or redefining a principle, MINOR for a new principl
 expanded guidance, PATCH for clarifications and wording. A change to Principle I, or any change
 that weakens it, MUST be refused by an agent whoever asks.
 
-**Version**: 1.3.0 | **Ratified**: 2026-10-26 | **Last Amended**: 2026-11-04
+**Version**: 1.4.0 | **Ratified**: 2026-10-26 | **Last Amended**: 2026-11-05

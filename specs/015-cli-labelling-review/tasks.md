@@ -12,7 +12,7 @@
 
 ## Phase 1: Setup
 
-- [ ] T001 Amend the constitution to 1.4.0 and `AGENTS.md` with `/speckit-constitution` (the user approved on 2026-11-05): "Additional Constraints" says the package has two console commands, `goldlabel install` (skills installer) and `goldlabel label` (starts or joins the labelling page, which writes gold labels only through the labelling server); `cli.py` imports the server lazily. Also fix the matching sentences in `AGENTS.md` ("What this repo is", "Commands", "Layout") and add a one-paragraph "015 in progress" line under "Current state". Update the Sync Impact Report. Tests: `tests/test_docs.py` and `tests/test_cli.py` still pass.
+- [X] T001 Amend the constitution to 1.4.0 and `AGENTS.md` with `/speckit-constitution` (the user approved on 2026-11-05): "Additional Constraints" says the package has two console commands, `goldlabel install` (skills installer) and `goldlabel label` (starts or joins the labelling page, which writes gold labels only through the labelling server); `cli.py` imports the server lazily. Also fix the matching sentences in `AGENTS.md` ("What this repo is", "Commands", "Layout") and add a one-paragraph "015 in progress" line under "Current state". Update the Sync Impact Report. Tests: `tests/test_docs.py` and `tests/test_cli.py` still pass.
 
 ## Phase 2: Foundational (blocks every story)
 
