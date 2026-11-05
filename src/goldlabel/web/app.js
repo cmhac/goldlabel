@@ -174,8 +174,12 @@ function finished() {
   return box;
 }
 
+// From 1024px each card scrolls on its own inside the window, so the text stays in view while the
+// label list scrolls (and the other way round). Below that the page is one column and scrolls as one.
+const SCROLL = "lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto";
+
 function textCard() {
-  const box = el("section", CARD + " flex flex-col gap-4 p-5 lg:p-8", undefined, { "aria-label": "Item to label" });
+  const box = el("section", CARD + " flex flex-col gap-4 p-5 lg:p-8 " + SCROLL + " " + FOCUS, undefined, { "aria-label": "Item to label", tabindex: "0" });
   box.append(
     el("p", "text-sm tabular-nums " + MUTED, editing ? "Row id " + state.item.id + " in " + state.sample : "Row " + state.position + " of " + state.total + " in " + state.sample + " · id " + state.item.id),
     el("p", "max-w-[68ch] whitespace-pre-wrap break-words text-xl leading-relaxed", state.item.text),
@@ -220,7 +224,7 @@ function noteField() {
 
 function panel() {
   const multi = state.mode === "multi";
-  const box = el("section", CARD + " flex flex-col gap-4 lg:sticky lg:top-4");
+  const box = el("section", CARD + " flex flex-col gap-4 " + SCROLL + " " + FOCUS, undefined, { "aria-label": "Labels", tabindex: "0" });
   const nav = el("div", "grid grid-cols-2 gap-2");
   const b = el("button", BTN + (editing ? " col-span-2" : ""), "← Back", { type: "button" });
   b.onclick = back;
@@ -246,6 +250,7 @@ function panel() {
   box.append(
     noteField(),
     nav,
+    el("p", "text-sm lg:hidden " + MUTED, "In this one-column layout the text is above the labels and the whole page scrolls. From 1024px wide each scrolls on its own."),
     el(
       "p",
       "border-t border-zinc-200 pt-3 text-sm dark:border-zinc-800 " + MUTED,

@@ -147,7 +147,7 @@
 
 ## Phase 6: User Story 4 (P2) — the text stays in view
 
-- [ ] T013 [US4] Make the cards scroll independently from 1024px in `src/goldlabel/web/app.js` (`textCard`, `panel`), then rebuild `app.css`.
+- [X] T013 [US4] Make the cards scroll independently from 1024px in `src/goldlabel/web/app.js` (`textCard`, `panel`), then rebuild `app.css`.
 
   **Tests first (red)** in `tests/test_label_page.py`: the served JS gives the text card and the controls card each `lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto`, `tabindex="0"` and the focus classes; the one-column layout adds no sticky, fixed or `max-h` class below `lg`; the served `app.css` contains the rules for those classes inside the 1024px media query (`min-width:64rem`) and none without a query. The page's help text says what happens below 1024px.
 

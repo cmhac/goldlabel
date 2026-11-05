@@ -469,3 +469,47 @@ def test_the_page_has_no_way_to_run_an_evaluation():
     for word in ("evaluate", "classify", "estimate", "predict("):
         assert word not in js.replace(said, "")
     assert "<details" in js or '"details"' in js
+
+
+# --- independent scrolling from 1024px (015) --------------------------------------------------
+
+SCROLL = "lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto"
+
+
+def test_both_cards_scroll_on_their_own_from_1024px_and_are_keyboard_reachable():
+    js = packaged("app.js")
+    cards = {
+        "text": js[js.index("function textCard") : js.index("function options")],
+        "controls": js[js.index("function panel") : js.index("function ended")],
+    }
+    assert f'const SCROLL = "{SCROLL}"' in js
+    for name, body in cards.items():
+        assert "SCROLL" in body, name
+        assert 'tabindex: "0"' in body, (
+            name
+        )  # a scrolling area must be reachable by keyboard
+        assert "FOCUS" in body, name  # and show where the focus is
+
+
+def test_nothing_floats_or_scrolls_in_the_one_column_layout():
+    js = packaged("app.js")
+    classes = " ".join(re.findall(r'"([^"]*(?:sticky|max-h|overflow-y)[^"]*)"', js))
+    for token in classes.split():
+        if any(w in token for w in ("sticky", "max-h", "overflow-y", "top-4")):
+            assert token.startswith("lg:"), token  # below lg the page scrolls as one
+    assert "lg:hidden" in js and "one column" in js  # the page says so
+
+
+def test_the_css_has_those_rules_inside_the_1024px_media_query():
+    css = packaged("app.css")
+    assert "64rem" in css  # Tailwind's lg
+    for cls in (
+        r"lg\:overflow-y-auto",
+        r"lg\:sticky",
+        r"lg\:max-h-\[calc\(100vh-2rem\)\]",
+    ):
+        assert cls in css
+    assert "overflow-y:auto" in css and "max-height:calc(100vh - 2rem)" in css
+    for m in re.finditer(r"\.lg\\:(?:sticky|overflow-y-auto)", css):
+        before = css[: m.start()]
+        assert before.rfind("@media") > before.rfind("}}") or "@media" in before[-300:]
