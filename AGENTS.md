@@ -66,6 +66,7 @@ Python 3.12+, `uv`, `pydantic-ai-slim` (Agent, Embedder; anthropic and openai ex
 ## Commands
 
 ```
+scripts/dev-setup.sh           # what every Claude Code session runs first (SessionStart hook): uv sync --all-extras, pre-commit install
 uv sync --all-extras
 uv run ruff check
 uv run ruff format --check

@@ -2,6 +2,7 @@
 
 import ast
 import json
+import os
 import re
 from pathlib import Path
 
@@ -163,3 +164,13 @@ def test_agents_md_holds_the_rule_and_claude_md_is_its_symlink():
     assert (
         "# agents.md" in text and "textual tui" not in text.split("## current state")[0]
     )
+
+
+def test_every_session_starts_with_the_dev_setup_script():
+    settings = json.loads((ROOT / ".claude" / "settings.json").read_text())
+    [hook] = [h for entry in settings["hooks"]["SessionStart"] for h in entry["hooks"]]
+    assert hook["command"] == '"$CLAUDE_PROJECT_DIR"/scripts/dev-setup.sh'
+    script = ROOT / "scripts" / "dev-setup.sh"
+    assert os.access(script, os.X_OK)
+    assert "uv sync --all-extras" in script.read_text()
+    assert "pre-commit install" in script.read_text()
