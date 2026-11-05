@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from goldlabel._gold_rule import GOLD_RULE_SHORT, GoldError, GoldRuntimeError
 from goldlabel.gold import Gold, GoldSet, Sample
@@ -99,6 +99,10 @@ NOT_A_SAMPLE = 'label a Sample, not {kind}: dev = gold.draw_sample("dev"), then 
 def _need_sample(sample) -> None:
     if not isinstance(sample, Sample):
         raise GoldError(NOT_A_SAMPLE.format(kind=type(sample).__name__))
+
+
+def _title(stem: str) -> str:
+    return "default" if stem == "gold" else stem.removeprefix("gold-")
 
 
 def _taxonomy(gold: Gold) -> Taxonomy:
@@ -293,11 +297,15 @@ class Server:
     def store_taxonomy(self, stem: str, taxonomy: dict) -> None:
         with self._mutex:
             g = self.gold(stem)
+            Taxonomy.model_validate(taxonomy)
             if g._doc().get("taxonomy") != taxonomy:
-                Taxonomy.model_validate(taxonomy)
                 g._write(g._read(), taxonomy=taxonomy)
 
-    def new_pass(self, stem: str, names: list[str], force: bool = False) -> str:
+    def new_pass(
+        self, stem: str, names: list[str], force: bool = False, taxonomy=None
+    ) -> str:
+        if taxonomy is not None:
+            self.store_taxonomy(stem, taxonomy)
         with self._mutex:
             g = self.gold(stem)
             rows = [r for r in g._read() if r.sample in names]
@@ -338,6 +346,81 @@ class Server:
             p = self._pass(pass_id)
             p.ended = True
             return p.state(_taxonomy(p.gold))
+
+    def datasets(self) -> list[dict]:
+        """Every gold file of the folder (`gold.json`, `gold-<name>.json`) with its samples."""
+        out = []
+        with self._mutex:
+            for f in sorted(self.folder.glob("gold*.json"), key=lambda f: f.stem):
+                if not re.fullmatch(r"gold(-[a-z0-9_-]+)?\.json", f.name):
+                    continue
+                entry = {"name": f.stem, "title": _title(f.stem)}
+                try:
+                    g = self.gold(f.stem)
+                    samples: dict[str, list] = {}
+                    for r in g._read():
+                        samples.setdefault(r.sample, []).append(r)
+                    entry["taxonomy"] = bool(g._doc().get("taxonomy"))
+                    entry["samples"] = [
+                        {
+                            "name": n,
+                            "rows": len(rs),
+                            "labelled": sum(1 for r in rs if r.labels),
+                            "pending": sum(1 for r in rs if not r.labels),
+                        }
+                        for n, rs in samples.items()
+                    ]
+                except GoldError as e:
+                    entry = {**entry, "error": getattr(e, "text", str(e))}
+                out.append(entry)
+        return out
+
+    def rows(self, stem: str, sample: str) -> list[dict]:
+        with self._mutex:
+            rows = [r for r in self.gold(stem)._read() if r.sample == sample]
+            if not rows:
+                raise KeyError(sample)
+            return [
+                {
+                    "id": r.id,
+                    "labels": r.labels or None,
+                    "note": bool(r.note),
+                    "revised": bool(r.revisions),
+                }
+                for r in rows
+            ]
+
+    def row(self, stem: str, id_: str) -> dict:
+        with self._mutex:
+            return self._row(self.gold(stem), id_)
+
+    def _row(self, g: Gold, id_: str) -> dict:
+        r = next((r for r in g._read() if r.id == id_), None)
+        if r is None:
+            raise KeyError(id_)
+        taxonomy = _taxonomy(g)
+        options = [(x.name, x.description) for x in taxonomy.labels]
+        options.append((OFF_TOPIC, OFF_TOPIC_DESCRIPTION))
+        return {
+            "id": r.id,
+            "text": r.text,
+            "sample": r.sample,
+            "labels": r.labels or None,
+            "note": r.note,
+            "labelled_by": r.labelled_by,
+            "revisions": r.revisions or [],
+            "options": [{"name": n, "description": d} for n, d in options],
+            "mode": taxonomy.mode,
+            "stored_taxonomy": bool(g._doc().get("taxonomy")),
+        }
+
+    def revise(self, stem: str, id_: str, labels: list[str], note: str | None) -> dict:
+        """A person's label or revision for any row of a dataset, with or without a pass."""
+        with self._mutex:
+            g = self.gold(stem)
+            validate_labels(labels, _taxonomy(g))
+            _save(g, id_, labels, note)
+            return self._row(g, id_)
 
 
 class _Request(BaseHTTPRequestHandler):
@@ -384,11 +467,28 @@ class _Request(BaseHTTPRequestHandler):
             page = resources.files("goldlabel").joinpath("web", name).read_text("utf-8")
             return self._send(200, page, kind)
         parts = path.split("/")
-        if len(parts) == 4 and parts[:3] == ["", "api", "pass"]:
-            try:
+        query = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
+        try:
+            if path == "/api/datasets":
+                return self._send(200, server.datasets())
+            if path in ("/api/rows", "/api/row"):
+                need = {
+                    "/api/rows": ("dataset", "sample"),
+                    "/api/row": ("dataset", "id"),
+                }
+                if not set(need[path]) <= set(query):
+                    return self._send(
+                        400, {"error": f"send {' and '.join(need[path])}"}
+                    )
+                call = server.rows if path == "/api/rows" else server.row
+                return self._send(200, call(*(query[k] for k in need[path])))
+            if len(parts) == 4 and parts[:3] == ["", "api", "pass"]:
                 return self._send(200, server.state(parts[3]))
-            except KeyError:
-                return self._send(404, {"error": "this pass has ended"})
+        except KeyError:
+            gone = (
+                "this pass has ended" if path.startswith("/api/pass/") else "not found"
+            )
+            return self._send(404, {"error": gone})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -420,34 +520,38 @@ class _Request(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def _label(self, server: Server, body: dict) -> None:
-        pass_id, id_ = body.get("pass"), body.get("id")
+        pass_id, dataset, id_ = body.get("pass"), body.get("dataset"), body.get("id")
         labels, note = body.get("labels"), body.get("note")
         if (
-            not isinstance(pass_id, str)
-            or not isinstance(id_, str)
+            not isinstance(id_, str)
+            or not (isinstance(pass_id, str) or isinstance(dataset, str))
             or not (
                 isinstance(labels, list) and all(isinstance(x, str) for x in labels)
             )
             or not isinstance(note, str | None)
         ):
             return self._send(
-                400, {"error": "send {pass: str, id: str, labels: [str], note?: str}"}
+                400,
+                {
+                    "error": "send {pass or dataset: str, id: str, labels: [str], note?: str}"
+                },
             )
         try:
-            return self._send(200, server.label(pass_id, id_, labels, note))
+            if isinstance(pass_id, str):
+                return self._send(200, server.label(pass_id, id_, labels, note))
+            if isinstance(dataset, str):
+                return self._send(200, server.revise(dataset, id_, labels, note))
         except KeyError as e:
-            if e.args == (id_,):
-                return self._send(404, {"error": f"no row {id_!r} in this pass"})
-            raise
+            if isinstance(pass_id, str) and e.args != (id_,):
+                raise  # an unknown pass
+            where = "this pass" if isinstance(pass_id, str) else f"dataset {dataset!r}"
+            return self._send(404, {"error": f"no row {id_!r} in {where}"})
         except ValueError as e:
             return self._send(400, {"error": getattr(e, "text", str(e))})
 
     def _new_pass(self, server: Server, body: dict) -> None:
-        dataset, samples, force = (
-            body.get("dataset"),
-            body.get("samples"),
-            body.get("force"),
-        )
+        dataset, samples = body.get("dataset"), body.get("samples")
+        force, taxonomy = body.get("force"), body.get("taxonomy")
         if (
             not isinstance(dataset, str)
             or not (
@@ -456,14 +560,20 @@ class _Request(BaseHTTPRequestHandler):
                 and all(isinstance(x, str) for x in samples)
             )
             or not isinstance(force, bool | None)
+            or not isinstance(taxonomy, dict | None)
         ):
             return self._send(
-                400, {"error": "send {dataset: str, samples: [str], force?: bool}"}
+                400,
+                {
+                    "error": "send {dataset, samples: [str], force?: bool, taxonomy?: object}"
+                },
             )
         try:
             return self._send(
-                200, {"pass": server.new_pass(dataset, samples, bool(force))}
+                200, {"pass": server.new_pass(dataset, samples, bool(force), taxonomy)}
             )
+        except ValueError as e:
+            return self._send(400, {"error": getattr(e, "text", str(e))})
         except KeyError:
             return self._send(
                 404, {"error": f"no dataset {dataset!r} with samples {samples}"}
@@ -484,8 +594,9 @@ def serve(
     path = sample.gold.path
     server = Server(path.parent, stop_on_done=stop_on_done, port=port)
     try:
-        server.store_taxonomy(path.stem, taxonomy.model_dump())
-        server.pass_id = server.new_pass(path.stem, list(sample.names), force_open_ui)
+        server.pass_id = server.new_pass(
+            path.stem, list(sample.names), force_open_ui, taxonomy.model_dump()
+        )
     except BaseException:
         server.stop()
         raise

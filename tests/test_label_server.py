@@ -84,7 +84,7 @@ class Client:
             "/api/skip": me + "/skip",
             "/api/done": me + "/done",
         }.get(path, path)
-        if path == "/api/label" and isinstance(body, dict):
+        if path == "/api/label" and isinstance(body, dict) and "dataset" not in body:
             body = {"pass": self.pass_id, **body}
         conn = http.client.HTTPConnection(self.host, self.port, timeout=5)
         headers = {"Host": host} if host else {}
@@ -858,3 +858,247 @@ def test_a_bad_revision_is_refused_like_a_bad_first_label_and_writes_nothing(tmp
         assert p.read_bytes() == before
     finally:
         h.stop()
+
+
+# --- datasets, rows and rows by id (015) ---------------------------------------------------------
+
+
+def get_json(c, path):
+    status, body, _ = c.call("GET", path)
+    return status, body
+
+
+def mixed_folder(tmp_path):
+    write_gold(
+        tmp_path / "gold.json",
+        rows(
+            ("1", ["a"], "dev"),
+            ("2", ["b"], "dev"),
+            ("3", None, "dev"),
+            ("t1", None, "test"),
+            ("t2", None, "test"),
+        ),
+    )
+    other = [
+        {"id": "x", "text": "text x", "labels": ["q"], "sample": "dev"},
+    ]
+    (tmp_path / "gold-corpus-b.json").write_text(
+        json.dumps(
+            {"taxonomy": {"mode": "single", "labels": [{"name": "q"}]}, "rows": other}
+        )
+    )
+    return tmp_path
+
+
+def test_datasets_lists_each_gold_file_keyed_by_stem_with_sample_counts(
+    tmp_path, start
+):
+    mixed_folder(tmp_path)
+    (tmp_path / "gold.removed.jsonl").write_text("{}\n")  # not datasets
+    (tmp_path / "gold.json.tmp").write_text("x")
+    (tmp_path / "gold.jsonl").write_text("{}\n")
+    (tmp_path / "other.json").write_text("{}")
+    status, out = get_json(Client(start()), "/api/datasets")
+    assert status == 200
+    assert [d["name"] for d in out] == ["gold", "gold-corpus-b"]
+    by = {d["name"]: d for d in out}
+    assert (
+        by["gold"]["title"] == "default" and by["gold-corpus-b"]["title"] == "corpus-b"
+    )
+    assert by["gold"]["taxonomy"] is True and by["gold-corpus-b"]["taxonomy"] is True
+    assert by["gold"]["samples"] == [
+        {"name": "dev", "rows": 3, "labelled": 2, "pending": 1},
+        {"name": "test", "rows": 2, "labelled": 0, "pending": 2},
+    ]
+    assert by["gold-corpus-b"]["samples"] == [
+        {"name": "dev", "rows": 1, "labelled": 1, "pending": 0}
+    ]
+
+
+def test_a_dataset_really_named_default_is_not_the_default_dataset(tmp_path, start):
+    mixed_folder(tmp_path)
+    write_gold(tmp_path / "gold-default.json", rows(("z", None, "dev")))
+    c = Client(start())
+    out = get_json(c, "/api/datasets")[1]
+    assert [d["name"] for d in out] == ["gold", "gold-corpus-b", "gold-default"]
+    assert [d["title"] for d in out] == ["default", "corpus-b", "default"]
+    assert get_json(c, "/api/rows?dataset=gold&sample=dev")[1][0]["id"] == "1"
+    assert get_json(c, "/api/rows?dataset=gold-default&sample=dev")[1][0]["id"] == "z"
+    assert get_json(c, "/api/row?dataset=gold-default&id=z")[0] == 200
+    assert get_json(c, "/api/row?dataset=gold&id=z")[0] == 404
+
+
+def test_a_bad_file_lists_as_an_error_and_the_others_still_list(tmp_path, start):
+    mixed_folder(tmp_path)
+    (tmp_path / "gold-bad.json").write_text("{not json")
+    out = get_json(Client(start()), "/api/datasets")[1]
+    bad = next(d for d in out if d["name"] == "gold-bad")
+    assert "not a gold file" in bad["error"] and "samples" not in bad
+    assert [d["name"] for d in out if "error" not in d] == ["gold", "gold-corpus-b"]
+
+
+def test_rows_of_a_sample_in_file_order(tmp_path, start):
+    mixed_folder(tmp_path)
+    write_gold(
+        tmp_path / "gold.json",
+        [
+            labelled("1", ["a"], note="n"),
+            {"id": "3", "text": "t3", "labels": None, "sample": "dev"},
+            labelled("2", ["b"])
+            | {
+                "revisions": [
+                    {"at": "x", "labels": ["a"], "note": None, "labelled_by": None}
+                ]
+            },
+            {"id": "t1", "text": "t", "labels": None, "sample": "test"},
+        ],
+    )
+    c = Client(start())
+    status, out = get_json(c, "/api/rows?dataset=gold&sample=dev")
+    assert status == 200
+    assert out == [
+        {"id": "1", "labels": ["a"], "note": True, "revised": False},
+        {"id": "3", "labels": None, "note": False, "revised": False},
+        {"id": "2", "labels": ["b"], "note": False, "revised": True},
+    ]
+    assert get_json(c, "/api/rows?dataset=nope&sample=dev")[0] == 404
+    assert get_json(c, "/api/rows?dataset=gold&sample=nope")[0] == 404
+
+
+def test_a_row_by_id_carries_its_options_and_revisions(tmp_path, start):
+    mixed_folder(tmp_path)
+    c = Client(start())
+    status, row = get_json(c, "/api/row?dataset=gold&id=2")
+    assert status == 200
+    assert row == {
+        "id": "2",
+        "text": "text 2",
+        "sample": "dev",
+        "labels": ["b"],
+        "note": None,
+        "labelled_by": None,
+        "revisions": [],
+        "options": [
+            {"name": "a", "description": "the a one"},
+            {"name": "b", "description": ""},
+            {
+                "name": "off_topic",
+                "description": "the item matches none of the labels above",
+            },
+        ],
+        "mode": "multi",
+        "stored_taxonomy": True,
+    }
+    assert get_json(c, "/api/row?dataset=gold&id=nope")[0] == 404
+    assert get_json(c, "/api/row?dataset=nope&id=1")[0] == 404
+    assert get_json(c, "/api/row?dataset=gold")[0] == 400
+
+
+def test_without_a_stored_taxonomy_the_options_are_the_labels_already_used(
+    tmp_path, start
+):
+    c = Client(start())
+    write_gold(
+        tmp_path / "gold-u.json",
+        rows(
+            ("1", ["y"], "dev"),
+            ("2", ["n", "y"], "dev"),
+            ("3", ["off_topic"], "dev"),
+            ("4", None, "dev"),
+        ),
+    )
+    status, row = get_json(c, "/api/row?dataset=gold-u&id=4")
+    assert status == 200 and row["stored_taxonomy"] is False and row["mode"] == "multi"
+    assert [o["name"] for o in row["options"]] == ["n", "y", "off_topic"]
+    assert [o["description"] for o in row["options"][:2]] == ["", ""]
+    write_gold(tmp_path / "gold-s.json", rows(("1", ["y"], "dev"), ("2", None, "dev")))
+    assert get_json(c, "/api/row?dataset=gold-s&id=2")[1]["mode"] == "single"
+    out = get_json(c, "/api/datasets")[1]
+    assert {d["name"]: d["taxonomy"] for d in out} == {
+        "gold": True,
+        "gold-s": False,
+        "gold-u": False,
+    }
+    # it is a person who picks among those labels; the page can revise a row with them
+    body = {"dataset": "gold-u", "id": "4", "labels": ["n"]}
+    assert c.call("POST", "/api/label", body)[0] == 200
+    body = {"dataset": "gold-u", "id": "4", "labels": ["zzz"]}
+    assert c.call("POST", "/api/label", body)[0] == 400
+
+
+def test_a_row_can_be_revised_without_a_pass(tmp_path, start):
+    mixed_folder(tmp_path)
+    c = Client(start())
+    body = {"dataset": "gold", "id": "2", "labels": ["a"], "note": "fixed"}
+    status, row, _ = c.call("POST", "/api/label", body)
+    assert status == 200 and row["labels"] == ["a"] and row["note"] == "fixed"
+    assert row["revisions"][0]["labels"] == ["b"]
+    saved = on_disk(tmp_path / "gold.json")[1]
+    assert saved["labels"] == ["a"] and len(saved["revisions"]) == 1
+    # a pending row of any sample can be labelled the same way, with no revision
+    status, row, _ = c.call(
+        "POST", "/api/label", {"dataset": "gold", "id": "t1", "labels": ["b"]}
+    )
+    assert status == 200 and row["revisions"] == []
+    # validation is the same as in a pass, and unknown datasets and ids are 404
+    assert (
+        c.call("POST", "/api/label", {"dataset": "gold", "id": "1", "labels": ["zzz"]})[
+            0
+        ]
+        == 400
+    )
+    assert (
+        c.call(
+            "POST", "/api/label", {"dataset": "gold", "id": "nope", "labels": ["a"]}
+        )[0]
+        == 404
+    )
+    assert (
+        c.call("POST", "/api/label", {"dataset": "nope", "id": "1", "labels": ["a"]})[0]
+        == 404
+    )
+    body = {"pass": None, "id": "1", "labels": ["a"]}  # neither a pass nor a dataset
+    assert c.call("POST", "/api/label", body)[0] == 400
+
+
+def test_post_pass_stores_a_valid_taxonomy_and_refuses_a_bad_one(tmp_path, start):
+    mixed_folder(tmp_path)
+    c = Client(start())
+    new = {"mode": "single", "labels": [{"name": "q", "description": "d"}]}
+    before = on_disk(tmp_path / "gold-corpus-b.json")
+    status, out = new_pass(c, dataset="gold-corpus-b", taxonomy=new)
+    assert status == 200 and "pass" in out
+    doc = json.loads((tmp_path / "gold-corpus-b.json").read_text())
+    assert doc["taxonomy"] == new and doc["rows"] == before
+    raw = (tmp_path / "gold-corpus-b.json").read_bytes()
+    assert new_pass(c, dataset="gold-corpus-b", taxonomy={"mode": "x"})[0] == 400
+    assert new_pass(c, dataset="gold-corpus-b", taxonomy="no")[0] == 400
+    assert (tmp_path / "gold-corpus-b.json").read_bytes() == raw
+
+
+def test_gl_label_stores_its_taxonomy_and_a_second_call_replaces_it(
+    tmp_path, press_done_on_open
+):
+    from goldlabel import label
+
+    write_gold(tmp_path / "gold.json", rows(("1", None, "dev")))
+    label(Gold()["dev"], taxonomy("single"))
+    assert (
+        json.loads((tmp_path / "gold.json").read_text())["taxonomy"]
+        == taxonomy("single").model_dump()
+    )
+    label(Gold()["dev"], taxonomy("multi"))
+    doc = json.loads((tmp_path / "gold.json").read_text())
+    assert doc["taxonomy"] == taxonomy("multi").model_dump()
+    assert doc["rows"] == rows(("1", None, "dev"))
+
+
+def test_nothing_but_the_labelling_server_writes_a_taxonomy(tmp_path):
+    from goldlabel.candidates import Candidates
+    from goldlabel.gold import Gold as G
+
+    g = G(Candidates([{"id": str(i), "text": "t"} for i in range(5)]), sample_size=2)
+    g.draw_sample("dev")
+    g.import_rows([{"id": "z", "text": "t", "labels": ["a"]}], "test")
+    g.remove(["z"])
+    assert json.loads(g.path.read_text())["taxonomy"] is None

@@ -64,7 +64,7 @@
 
   **Implementation:** one `_save(gold, id, labels, note)` used by `Pass.label` and `POST /api/label` without `pass`. Revisions are only appended by the server, never edited or removed.
 
-- [ ] T005 [US1] Add the dataset, rows and row routes and store the taxonomy from `gl.label`, in `src/goldlabel/_label.py`.
+- [X] T005 [US1] Add the dataset, rows and row routes and store the taxonomy from `gl.label`, in `src/goldlabel/_label.py`.
 
   **Tests first (red)** in `tests/test_label_server.py` and `tests/test_gold.py`:
   - `GET /api/datasets` over a folder with `gold.json` (samples `dev` 3 rows 2 labelled, `test` 2 rows 0 labelled) and `gold-corpus-b.json` returns datasets keyed by file stem, `gold` and `gold-corpus-b`, each with a display `title` (`default`, `corpus-b`) and each sample's `rows`, `labelled`, `pending` (hand-written: dev 3/2/1, test 2/0/2) and `taxonomy: true/false`; a file with bad JSON lists as `{name, error}` and the other datasets still list; `gold.removed.jsonl`, `*.tmp`, `gold.jsonl` and `labelling.lock` are not datasets (match `gold(-[a-z0-9_-]+)?\.json` fully). A folder with both `gold.json` and `gold-default.json` (a dataset really named `default`) lists two datasets, `gold` and `gold-default`, and every route reaches each one separately.
