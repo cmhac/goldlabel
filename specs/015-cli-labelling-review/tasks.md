@@ -76,7 +76,7 @@
 
   **Implementation:** a small `_datasets(folder)` scan; routes on `Server`; the server, not the calling process, writes the taxonomy, either at start (no live server: `label()` hands `taxonomy.model_dump()` to its own `Server` before serving) or on `POST /api/pass`.
 
-- [ ] T006 [US1] Build the browse views in `src/goldlabel/web/app.js` and `index.html` (router, datasets, samples, row lists), then rebuild `src/goldlabel/web/app.css`.
+- [X] T006 [US1] Build the browse views in `src/goldlabel/web/app.js` and `index.html` (router, datasets, samples, row lists), then rebuild `src/goldlabel/web/app.css`.
 
   **Tests first (red)** in `tests/test_label_page.py` (text checks of the served files; no browser):
   - The served JS routes `location.hash` for `#/`, `#/d/<dataset>`, `#/d/<dataset>/s/<sample>` and `#/pass/<id>`, with a `hashchange` listener; a `Map` stores and restores `scrollY` per route.

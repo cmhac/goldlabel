@@ -124,7 +124,12 @@ def test_no_external_urls_storage_or_scheme_scripts(name):
 def test_js_posts_only_to_the_existing_routes_and_shows_no_prediction():
     js = packaged("app.js")
     posted = set(re.findall(r"/api/[a-z]+", js))
-    assert posted == {"/api/pass", "/api/label"}
+    assert posted == {
+        "/api/pass",
+        "/api/label",
+        "/api/datasets",
+        "/api/rows",
+    }
     assert "predict" not in (js + packaged("index.html")).lower()
     assert '"X-Goldlabel": "1"' in js and "token" not in js.lower()
 
@@ -349,3 +354,44 @@ def test_label_takes_only_a_sample(tmp_path, no_page):
 def test_the_page_names_the_sample():
     js = packaged("app.js")
     assert '" in " + state.sample' in js
+
+
+# --- the browse views (015) -----------------------------------------------------------------
+
+
+def test_the_page_routes_the_hash_and_remembers_the_scroll_of_each_route():
+    js = packaged("app.js")
+    assert "hashchange" in js and "location.hash" in js
+    for route in (
+        '"pass"',
+        '"d"',
+        '"s"',
+    ):  # #/pass/<id>, #/d/<ds>[/s/<sample> | /r/<id>]
+        assert route in js
+    assert "new Map()" in js and "window.scrollY" in js and "window.scrollTo" in js
+
+
+def test_the_page_lists_datasets_by_title_and_shows_a_bad_file_as_an_error():
+    js = packaged("app.js")
+    assert '"/api/datasets"' in js and "d.title" in js and "d.error" in js
+    assert "'/api/rows?dataset='" in js.replace('"', "'") or "/api/rows?dataset=" in js
+    # the dataset key in a route is the file stem the API returns, not the title
+    assert "d.name" in js
+
+
+def test_a_pass_that_is_gone_says_so_and_links_home():
+    js = packaged("app.js")
+    assert "this pass has ended" in js.lower() and 'href: "#/"' in js
+
+
+def test_the_page_never_writes_html_from_data():
+    for name in WEB:
+        text = packaged(name)
+        assert "innerHTML" not in text and "insertAdjacentHTML" not in text
+        assert "document.write" not in text and "outerHTML" not in text
+
+
+def test_the_css_was_rebuilt_for_the_browse_views():
+    css = packaged("app.css")
+    for cls in ("underline-offset-2", "text-blue-700", "border-collapse"):
+        assert cls in css

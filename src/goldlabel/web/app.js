@@ -1,7 +1,7 @@
 // Renders the server's `state` and posts the person's actions. No rules live here: the server
 // validates labels, picks the next item and writes the file.
-const passId = location.hash.replace(/^#\/pass\//, ""); // the pass this page walks
-const pass = "/api/pass/" + passId;
+let passId = ""; // the pass this page walks, from #/pass/<id>
+const passPath = () => "/api/pass/" + encodeURIComponent(passId);
 const app = document.getElementById("app");
 const head = document.getElementById("head");
 const statusEl = document.getElementById("status");
@@ -74,9 +74,9 @@ async function call(method, path, body, onOk) {
   return ok;
 }
 
-const load = () => call("GET", pass);
-const back = () => call("POST", pass + "/back");
-const skip = () => call("POST", pass + "/skip");
+const load = () => call("GET", passPath());
+const back = () => call("POST", passPath() + "/back");
+const skip = () => call("POST", passPath() + "/skip");
 const save = () => {
   if (!selected.length) return;
   const id = state.item.id;
@@ -84,7 +84,7 @@ const save = () => {
   return call("POST", "/api/label", { pass: passId, id, labels, note }, () => (saved = { id, labels }));
 };
 const done = async () => {
-  if (await call("POST", pass + "/done")) {
+  if (await call("POST", passPath() + "/done")) {
     head.replaceChildren();
     statusEl.hidden = true;
     app.replaceChildren(
@@ -240,8 +240,21 @@ function panel() {
   return box;
 }
 
+function ended() {
+  const box = el("section", CARD + " flex flex-col gap-3");
+  box.append(
+    el("h2", "text-lg font-semibold", "This pass has ended"),
+    el("p", MUTED, "The server that ran it was stopped, or the link is from an earlier session."),
+    el("a", LINK, "Open the dataset list", { href: "#/" }),
+  );
+  return box;
+}
+
 function render() {
-  if (!state) return;
+  if (!state) {
+    if (error) app.replaceChildren(ended());
+    return;
+  }
   if (!state.finished && shown !== state.item.id) {
     shown = state.item.id;
     selected = state.item.labels || [];
@@ -288,4 +301,165 @@ document.addEventListener("keydown", (e) => {
   e.preventDefault();
 });
 
-load();
+// --- browse views: datasets, samples and rows ---------------------------------------------------
+
+const LINK =
+  "text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-300 " +
+  "dark:hover:text-blue-100 " +
+  FOCUS;
+const CELL = "border-t border-zinc-200 py-2 pr-4 dark:border-zinc-800";
+
+async function getJson(path) {
+  const r = await fetch(path, { headers: { "X-Goldlabel": "1" } });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || "request failed (" + r.status + ")");
+  return data;
+}
+
+const enc = encodeURIComponent;
+const dsHref = (d) => "#/d/" + enc(d);
+const sampleHref = (d, s) => dsHref(d) + "/s/" + enc(s);
+const rowHref = (d, id) => dsHref(d) + "/r/" + enc(id);
+
+function crumbs(parts) {
+  const nav = el("nav", "flex flex-wrap items-center gap-2 " + MUTED, undefined, { "aria-label": "Breadcrumb" });
+  nav.append(el("span", undefined, "goldlabel /"));
+  parts.forEach(([text, href], i) => {
+    if (i) nav.append(el("span", undefined, "/", { "aria-hidden": "true" }));
+    nav.append(href ? el("a", LINK, text, { href }) : el("span", "font-semibold text-zinc-900 dark:text-zinc-100", text, { "aria-current": "page" }));
+  });
+  return nav;
+}
+
+function table(caption, heads, rows) {
+  const t = el("table", "w-full border-collapse text-left");
+  t.append(el("caption", "pb-2 text-left text-sm font-medium " + MUTED, caption));
+  const tr = el("tr");
+  heads.forEach((h) => tr.append(el("th", "pb-2 pr-4 text-sm font-medium " + MUTED, h, { scope: "col" })));
+  const thead = el("thead");
+  thead.append(tr);
+  t.append(thead);
+  const body = el("tbody");
+  rows.forEach((cells) => {
+    const row = el("tr");
+    cells.forEach((c) => {
+      const td = el("td", CELL + " tabular-nums");
+      td.append(c);
+      row.append(td);
+    });
+    body.append(row);
+  });
+  t.append(body);
+  return t;
+}
+
+const text = (s) => document.createTextNode(String(s));
+
+function datasetCard(d, linkTitle) {
+  const box = el("section", CARD + " flex flex-col gap-3", undefined, { "aria-label": "Dataset " + d.title });
+  const title = el("h2", "text-lg font-semibold");
+  title.append(linkTitle ? el("a", LINK, d.title, { href: dsHref(d.name) }) : text(d.title));
+  box.append(title);
+  if (d.error) {
+    box.append(el("p", "rounded-lg border border-red-700 p-3 text-red-800 dark:border-red-400 dark:text-red-300", "Error: " + d.error, { role: "alert" }));
+    return box;
+  }
+  if (!d.taxonomy) {
+    box.append(el("p", MUTED, "No taxonomy is stored in this file yet, so the labels offered are the ones already used. gl.label stores one."));
+  }
+  box.append(
+    table(
+      "Samples in " + d.title,
+      ["Sample", "Rows", "Labelled", "Pending"],
+      d.samples.map((s) => {
+        const a = el("a", LINK, s.name, { href: sampleHref(d.name, s.name) });
+        return [a, text(s.rows), text(s.labelled), text(s.pending)];
+      }),
+    ),
+  );
+  return box;
+}
+
+async function datasetsView() {
+  head.replaceChildren(crumbs([["Datasets"]]));
+  const list = await getJson("/api/datasets");
+  if (!list.length) return [el("p", MUTED, "No gold dataset in this folder yet. Make one with gl.Gold and gold.draw_sample.")];
+  return list.map((d) => datasetCard(d, true));
+}
+
+async function datasetView(name) {
+  const d = (await getJson("/api/datasets")).find((x) => x.name === name);
+  if (!d) throw new Error("no dataset " + name + " in this folder");
+  head.replaceChildren(crumbs([["Datasets", "#/"], [d.title]]));
+  return [datasetCard(d, false)];
+}
+
+async function rowsView(name, sample) {
+  const rows = await getJson("/api/rows?dataset=" + enc(name) + "&sample=" + enc(sample));
+  const d = (await getJson("/api/datasets")).find((x) => x.name === name);
+  head.replaceChildren(crumbs([["Datasets", "#/"], [d ? d.title : name, dsHref(name)], [sample]]));
+  const box = el("section", CARD + " flex flex-col gap-3");
+  box.append(
+    table(
+      "Rows of " + sample,
+      ["ID", "Labels", "Note", "Revised"],
+      rows.map((r) => [
+        el("a", LINK, r.id, { href: rowHref(name, r.id) }),
+        text(r.labels ? r.labels.join(", ") : "pending"),
+        text(r.note ? "yes" : "no"),
+        text(r.revised ? "yes" : "no"),
+      ]),
+    ),
+  );
+  return [box];
+}
+
+// The hash picks the view: #/ datasets, #/d/<dataset>, #/d/<dataset>/s/<sample>, #/pass/<id>.
+function parse() {
+  const p = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  if (p[0] === "pass" && p[1]) return { kind: "pass", id: p[1] };
+  if (p[0] === "d" && p[1] && p[2] === "s" && p[3]) return { kind: "rows", d: p[1], s: p[3] };
+  if (p[0] === "d" && p[1] && !p[2]) return { kind: "dataset", d: p[1] };
+  if (!p.length) return { kind: "datasets" };
+  return { kind: "unknown" };
+}
+
+const scrolls = new Map(); // route -> scrollY, so Back lands where the list was
+let shownHash = null;
+
+async function browse(r) {
+  app.replaceChildren(el("p", MUTED, "Loading..."));
+  try {
+    let parts = [el("p", MUTED, "No such page.")];
+    if (r.kind === "datasets") parts = await datasetsView();
+    else if (r.kind === "dataset") parts = await datasetView(r.d);
+    else if (r.kind === "rows") parts = await rowsView(r.d, r.s);
+    app.replaceChildren(...parts);
+  } catch (e) {
+    app.replaceChildren(el("p", "rounded-lg border border-red-700 p-3 text-red-800 dark:border-red-400 dark:text-red-300", "Error: " + e.message, { role: "alert" }));
+  }
+}
+
+async function go() {
+  if (shownHash !== null) scrolls.set(shownHash, window.scrollY);
+  shownHash = location.hash;
+  state = null;
+  shown = null;
+  error = "";
+  saved = null;
+  note = "";
+  selected = [];
+  const r = parse();
+  statusEl.hidden = r.kind !== "pass";
+  head.replaceChildren();
+  if (r.kind === "pass") {
+    passId = r.id;
+    await load();
+  } else {
+    await browse(r);
+  }
+  window.scrollTo(0, scrolls.get(shownHash) || 0);
+}
+
+window.addEventListener("hashchange", go);
+go();
