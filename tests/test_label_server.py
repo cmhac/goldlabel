@@ -1265,3 +1265,196 @@ def test_a_refused_pass_is_reported_not_swallowed(start):
     h = start()
     with pytest.raises(_label.GoldRuntimeError, match="refused.*gold-nope"):
         _label._ask(h.port, "/api/pass", {"dataset": "gold-nope", "samples": ["dev"]})
+
+
+# --- evaluations of a sample, and when they go stale (015) -----------------------------------------
+
+T0 = "2026-03-01T12:00:00+00:00"
+EARLIER, LATER = "2026-03-01T11:00:00+00:00", "2026-03-01T13:00:00+00:00"
+
+
+def eval_line(gold_path, samples=("dev",), time=T0, **extra):
+    line = {
+        "time": time,
+        "samples": list(samples),
+        "rows_digest": "d",
+        "n": 3,
+        "skipped_pending": 1,
+        "gold": str(gold_path),
+        "model": "m",
+        "digest": "p1",
+        "metric": "accuracy",
+        "target": 0.5,
+        "score": 0.75,
+        "disagreements": [],
+    }
+    return line | extra
+
+
+def write_log(tmp_path, *lines):
+    (tmp_path / "evals.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines))
+
+
+def revised(row, at):
+    entry = {"at": at, "labels": ["a"], "note": None, "labelled_by": None}
+    return row | {"revisions": [entry]}
+
+
+def evals(c, sample="dev", dataset="gold"):
+    return get_json(c, f"/api/evals?dataset={dataset}&sample={sample}")
+
+
+def test_evals_lists_the_lines_that_include_the_sample_newest_first(
+    tmp_path, gold_path, start
+):
+    other = tmp_path / "gold-b.json"
+    write_log(
+        tmp_path,
+        eval_line(gold_path, time=EARLIER, digest="old"),
+        eval_line(gold_path, samples=("test",), digest="other-sample"),
+        eval_line(gold_path, samples=("dev", "test"), time=LATER, digest="combo"),
+        eval_line(other, digest="other-file"),
+        eval_line(gold_path, time=T0, digest="new", score=0.25, target=None),
+        {"time": T0, "not": "an evaluation"},
+    )
+    c = Client(start())
+    status, out = evals(c)
+    assert status == 200
+    assert [x["digest"] for x in out] == ["combo", "new", "old"]
+    assert out[0]["samples"] == ["dev", "test"]
+    new = out[1]
+    assert (new["time"], new["samples"], new["score"], new["target"]) == (
+        T0,
+        ["dev"],
+        0.25,
+        None,
+    )
+    assert (new["n"], new["skipped_pending"], new["model"], new["passed"]) == (
+        3,
+        1,
+        "m",
+        None,
+    )
+    assert evals(c, "test")[1][0]["digest"] == "combo"
+    assert [x["digest"] for x in evals(c, "test")[1]] == ["combo", "other-sample"]
+
+
+def test_pass_and_fail_come_from_the_score_and_the_target(tmp_path, gold_path, start):
+    write_log(
+        tmp_path,
+        eval_line(gold_path, time=EARLIER, score=0.4, target=0.5),
+        eval_line(gold_path, time=T0, score=0.5, target=0.5),
+    )
+    assert [x["passed"] for x in evals(Client(start()))[1]] == [True, False]
+
+
+def test_a_sample_with_no_log_has_no_evaluations_and_unknown_ones_are_404(start):
+    c = Client(start())
+    assert evals(c) == (200, [])
+    assert evals(c, "nope")[0] == 404 and evals(c, dataset="gold-nope")[0] == 404
+    assert get_json(c, "/api/evals?dataset=gold")[0] == 400
+
+
+def test_disagreements_are_joined_to_their_rows(tmp_path, gold_path, start):
+    rows_ = [
+        labelled("1", ["a"], note="hard one"),
+        revised(labelled("2", ["b"]), LATER),
+        {"id": "3", "text": "text 3", "labels": None, "sample": "dev"},
+    ]
+    write_gold(gold_path, rows_)
+    dis = [
+        {"id": "1", "gold": ["b"], "predicted": ["a"], "reasoning": "r1"},
+        {"id": "2", "gold": ["a"], "predicted": None, "reasoning": None},
+        {"id": "gone", "gold": ["a"], "predicted": ["b"], "reasoning": "r"},
+    ]
+    write_log(tmp_path, eval_line(gold_path, disagreements=dis))
+    [line] = evals(Client(start()))[1]
+    one, two, gone = line["disagreements"]
+    assert one == dis[0] | {
+        "text": "text 1",
+        "labels": ["a"],
+        "note": "hard one",
+        "revised": False,
+        "missing": False,
+    }
+    assert (
+        two["predicted"] is None and two["labels"] == ["b"] and two["revised"] is True
+    )
+    assert gone == dis[2] | {
+        "text": None,
+        "labels": None,
+        "note": None,
+        "revised": False,
+        "missing": True,
+    }
+
+
+def test_a_line_written_before_disagreements_were_logged_says_so(
+    tmp_path, gold_path, start
+):
+    line = eval_line(gold_path)
+    del line["disagreements"]
+    del line["skipped_pending"]
+    write_log(tmp_path, line)
+    [out] = evals(Client(start()))[1]
+    assert out["disagreements"] is None and out["skipped_pending"] is None
+
+
+def test_an_evaluation_is_stale_after_a_later_revision_in_its_own_sample(
+    tmp_path, gold_path, start
+):
+    write_gold(
+        gold_path,
+        [
+            revised(labelled("1", ["b"]), LATER),  # revised after the evaluation ran
+            revised(labelled("2", ["b"]), EARLIER),  # revised before it
+            {"id": "3", "text": "t", "labels": None, "sample": "dev"},
+            revised(labelled("t1", ["b"]) | {"sample": "test"}, LATER),
+        ],
+    )
+    write_log(
+        tmp_path,
+        eval_line(gold_path, digest="dev"),
+        eval_line(gold_path, samples=("test",), digest="test"),
+        eval_line(gold_path, samples=("dev", "test"), digest="combo"),
+        eval_line(gold_path, time=LATER, digest="after-everything"),
+    )
+    by = {x["digest"]: x for x in evals(Client(start()))[1]}
+    assert by["dev"]["stale"] is True and by["dev"]["stale_rows"] == ["1"]
+    assert by["combo"]["stale"] is True and by["combo"]["stale_rows"] == ["1", "t1"]
+    assert (
+        by["after-everything"]["stale"] is False
+        and by["after-everything"]["stale_rows"] == []
+    )
+
+
+def test_a_revision_in_another_sample_or_a_first_label_does_not_make_dev_stale(
+    tmp_path, gold_path, start
+):
+    write_gold(
+        gold_path,
+        [
+            labelled("1", ["a"]),  # labelled for the first time after the run: no entry
+            {"id": "2", "text": "t", "labels": None, "sample": "dev"},
+            revised(labelled("t1", ["b"]) | {"sample": "test"}, LATER),
+        ],
+    )
+    write_log(tmp_path, eval_line(gold_path))
+    [line] = evals(Client(start()))[1]
+    assert line["stale"] is False and line["stale_rows"] == []
+
+
+def test_the_server_still_never_runs_a_model_or_returns_a_prediction_as_a_label(
+    tmp_path, gold_path, start
+):
+    write_log(
+        tmp_path,
+        eval_line(
+            gold_path,
+            disagreements=[
+                {"id": "1", "gold": ["a"], "predicted": ["b"], "reasoning": "r"}
+            ],
+        ),
+    )
+    src = Path(_label.__file__).read_text()
+    assert "classifier" not in src and "pydantic_ai" not in src

@@ -224,6 +224,7 @@ async def _aevaluate(
         "samples": list(sample.names),
         "rows_digest": _rows_digest(rows),
         "n": evaluation.n,
+        "skipped_pending": evaluation.skipped_pending,
         "gold": str(sample.path),
         "model": _model_name(clf.model),
         "digest": clf.digest,

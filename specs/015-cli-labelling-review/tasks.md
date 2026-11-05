@@ -132,7 +132,7 @@
   - An identical rerun still appends nothing and makes no model call; a changed prompt appends a second line.
   - Lines already in a log without `disagreements` are still read by `_history` and `Sample` summaries; the `same` keys are unchanged.
 
-- [ ] T011 [US3] Add `GET /api/evals` with the stale flag in `src/goldlabel/_label.py`.
+- [X] T011 [US3] Add `GET /api/evals` with the stale flag in `src/goldlabel/_label.py`.
 
   **Tests first (red)** in `tests/test_label_server.py` with a hand-written `evals.jsonl` and gold file:
   - `GET /api/evals?dataset=&sample=dev` returns the lines whose `samples` include `dev`, newest first, each with `time`, `samples`, `score`, `target`, `passed` (PASS/FAIL, or none with no target), `n`, `skipped_pending`, `model`, `digest`, `stale`, `stale_rows`, `disagreements`; lines for another gold file or another sample are absent; a `dev + test` line appears under both samples with `samples == ["dev", "test"]`.

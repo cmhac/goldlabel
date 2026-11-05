@@ -249,7 +249,7 @@ def test_each_call_appends_one_line_with_every_field():
     assert set(row) == {
         "time", "samples", "rows_digest", "n", "gold", "model", "digest", "prompt",
         "taxonomy", "metric", "target", "score", "metrics", "dollars", "live_calls",
-        "cached_calls", "goldlabel", "disagreements",
+        "cached_calls", "goldlabel", "disagreements", "skipped_pending",
     }  # fmt: skip
     assert before <= datetime.fromisoformat(row["time"])
     assert (row["samples"], row["n"], row["model"]) == (["dev"], 5, "m")

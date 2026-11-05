@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
 from goldlabel._gold_rule import GOLD_RULE_SHORT, GoldError, GoldRuntimeError
+from goldlabel.evaluation import _history
 from goldlabel.gold import Gold, GoldSet, Sample
 from goldlabel.taxonomy import OFF_TOPIC, Label, Taxonomy, validate_labels
 
@@ -131,6 +132,21 @@ def _stems(folder: Path) -> list[str]:
     files = folder.glob("gold*.json") if folder.is_dir() else []
     return sorted(
         f.stem for f in files if re.fullmatch(r"gold(-[a-z0-9_-]+)?\.json", f.name)
+    )
+
+
+def _when(text) -> datetime | None:
+    try:
+        return datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def _revised_after(row, when: datetime | None) -> bool:
+    """Does the row carry a revision made after `when`?"""
+    return when is not None and any(
+        (at := _when(e.get("at"))) is not None and at > when
+        for e in row.revisions or []
     )
 
 
@@ -445,6 +461,61 @@ class Server:
             "stored_taxonomy": bool(g._doc().get("taxonomy")),
         }
 
+    def evals(self, stem: str, sample: str) -> list[dict]:
+        """The logged evaluations whose samples include `sample`, newest first, with the rows
+        revised since each ran (STALE) and each disagreement joined to its row."""
+        with self._mutex:
+            g = self.gold(stem)
+            rows = g._read()
+            if sample not in {r.sample for r in rows}:
+                raise KeyError(sample)
+            by_id = {r.id: r for r in rows}
+            lines = [
+                x
+                for x in _history(self.folder / "evals.jsonl", g.path)
+                if sample in x["samples"]
+            ]
+            out = []
+            for x in sorted(lines, key=lambda x: str(x.get("time")), reverse=True):
+                when = _when(x.get("time"))
+                scored = [r for r in rows if r.sample in x["samples"]]
+                stale_rows = [r.id for r in scored if _revised_after(r, when)]
+                joined = None
+                if x.get("disagreements") is not None:
+                    joined = []
+                    for d in x["disagreements"]:
+                        r = by_id.get(d["id"])
+                        joined.append(
+                            {
+                                **d,
+                                "text": r.text if r else None,
+                                "labels": r.labels if r else None,
+                                "note": r.note if r else None,
+                                "revised": bool(r) and _revised_after(r, when),
+                                "missing": r is None,
+                            }
+                        )
+                score, target = x.get("score"), x.get("target")
+                out.append(
+                    {
+                        "time": x.get("time"),
+                        "samples": x["samples"],
+                        "score": score,
+                        "target": target,
+                        "passed": None
+                        if target is None or score is None
+                        else score >= target,
+                        "n": x.get("n"),
+                        "skipped_pending": x.get("skipped_pending"),
+                        "model": x.get("model"),
+                        "digest": x.get("digest"),
+                        "stale": bool(stale_rows),
+                        "stale_rows": stale_rows,
+                        "disagreements": joined,
+                    }
+                )
+            return out
+
     def revise(self, stem: str, id_: str, labels: list[str], note: str | None) -> dict:
         """A person's label or revision for any row of a dataset, with or without a pass."""
         with self._mutex:
@@ -502,16 +573,21 @@ class _Request(BaseHTTPRequestHandler):
         try:
             if path == "/api/datasets":
                 return self._send(200, server.datasets())
-            if path in ("/api/rows", "/api/row"):
+            if path in ("/api/rows", "/api/row", "/api/evals"):
                 need = {
                     "/api/rows": ("dataset", "sample"),
                     "/api/row": ("dataset", "id"),
+                    "/api/evals": ("dataset", "sample"),
                 }
                 if not set(need[path]) <= set(query):
                     return self._send(
                         400, {"error": f"send {' and '.join(need[path])}"}
                     )
-                call = server.rows if path == "/api/rows" else server.row
+                call = {
+                    "/api/rows": server.rows,
+                    "/api/row": server.row,
+                    "/api/evals": server.evals,
+                }[path]
                 return self._send(200, call(*(query[k] for k in need[path])))
             if len(parts) == 4 and parts[:3] == ["", "api", "pass"]:
                 return self._send(200, server.state(parts[3]))
