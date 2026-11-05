@@ -37,7 +37,7 @@ dev = gold.draw_sample("dev")  # pending rows with no labels; safe to rerun
 dev.counts(taxonomy)  # rows per label
 ```
 
-3. People label. `gl.label(dev, taxonomy)` opens the page on the rows of that sample that are still pending (only those: the page never shows another sample), waits until the person presses Done, and returns the sample. If every row in it is already labelled it prints that and returns at once; pass `force_open_ui=True` to open the page on every row of the sample anyway, to review or relabel. Tell the user to expect the page in their browser and do not run it when they are not there. The page never shows a model's prediction.
+3. People label. `gl.label(dev, taxonomy)` opens the page on the rows of that sample that are still pending (only those: the page never shows another sample), waits until the person presses Done, and returns the sample. If every row in it is already labelled it prints that and returns at once; pass `force_open_ui=True` to open the page on every row of the sample anyway, to review or relabel. Tell the user to expect the page in their browser and do not run it when they are not there. While people label, the page never shows a model's prediction. To fix a label later, tell the user to run `goldlabel label`: it lists every dataset and sample, opens any row by id, and lists each evaluation with its disagreements and a STALE flag when a row was revised after it ran. Evaluating stays in code.
 
 ```python
 gl.label(dev, taxonomy)

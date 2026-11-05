@@ -26,3 +26,4 @@ When working with the `goldlabel` library (content analysis over a corpus: candi
 - Never put API keys or database URLs in a notebook, script or file; they come from environment variables.
 - Never evaluate the held-out test sample to guide edits, and never combine a spent test sample into the tuning set (`dev + test`) without the user's explicit yes.
 - A second corpus gets its own named gold dataset (`name="corpus-b"`), usually just a held-out test sample, labelled by people and evaluated once.
+- To review or revise gold labels, tell the user to run `goldlabel label` (it opens the labelling page on every dataset in the storage folder, and `gl.label` joins it when it is already running); never write or change a label yourself. A revised row keeps its earlier values in `revisions`, and an evaluation made before a revision shows as STALE: evaluate again.
