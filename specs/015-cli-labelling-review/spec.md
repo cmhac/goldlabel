@@ -76,7 +76,8 @@ A notebook user has the page open from the terminal, then runs `gl.label(dev, ta
 3. **Given** a lock naming a process that no longer exists, or a port that does not answer, **When** `gl.label` or `goldlabel label` runs, **Then** the lock is replaced and a server starts.
 4. **Given** two storage folders, **When** a server runs for one, **Then** the other is unaffected.
 5. **Given** the taxonomy passed to `gl.label` differs from the one stored in the gold file, **When** it runs, **Then** the stored taxonomy is replaced with the new one, rows and their labels are untouched, and a running server uses it from its next request.
-6. **Given** a server started by `gl.label`, **When** the user presses **Done**, **Then** the server stops as today. A server started by `goldlabel label` does not stop on **Done**: the page returns to the dataset list, any waiting `gl.label` call for that pass returns, and the server runs until the terminal process is interrupted.
+6. **Given** a server already running for the folder, **When** the user runs `goldlabel label [NAME]`, **Then** it prints that server's URL (on the dataset `NAME`), opens it, and exits 0 without starting another.
+7. **Given** a server started by `gl.label`, **When** the user presses **Done**, **Then** the server stops as today. A server started by `goldlabel label` does not stop on **Done**: the page returns to the dataset list, any waiting `gl.label` call for that pass returns, and the server runs until the terminal process is interrupted.
 
 ---
 
@@ -199,7 +200,7 @@ Every change to an already-labelled row's labels or note adds an entry to that r
 **Evaluations**
 
 - **FR-019**: `evals.jsonl` lines written by `clf.evaluate`/`aevaluate` MUST also store the disagreements: for each, the row id, gold labels, predicted labels and the classifier's reasoning (not the text, which the gold file holds). Lines already in a log, and the identical-rerun rule (same sample, rows digest, prompt digest, model, metric and target), MUST NOT change.
-- **FR-020**: For each sample the page MUST list the evaluations of exactly that sample, newest first, and for an opened evaluation list its disagreements as in Story 3. Combinations (`dev + test`) are listed under the combination's name when the log has any.
+- **FR-020**: For each sample the page MUST list the evaluations whose logged samples include it, newest first, each showing the sample names it scored (so `dev + test` reads as such), and for an opened evaluation list its disagreements as in Story 3.
 - **FR-021**: The page MUST mark an evaluation **STALE** when any row of the evaluated sample has a `revisions` entry whose time is later than the evaluation's logged time, naming the reason in words. Because a revision is a change to labels or note, a note-only revision also counts; the page's reason text says which row.
 - **FR-022**: The page, the server and the command MUST NOT run an evaluation, classification, estimate or any model call.
 
