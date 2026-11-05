@@ -7,10 +7,9 @@
 # What needs you: **a person** to label the gold rows in the labelling page. The classifier is a
 # real model when `ANTHROPIC_API_KEY` is in the environment (nothing here reads or writes a key
 # file); without it, a crude keyword stand-in answers instead, so the whole walkthrough runs offline
-# and you can try the labelling page, the evaluations and the revisions without a key.
-#
-# To look around the page while you work, run `uv run goldlabel label` in a second terminal from
-# this folder: when a cell below calls `gl.label`, it joins that page instead of opening another.
+# and you can try the labelling page, the evaluations and the revisions without a key. When the
+# script has run, `uv run goldlabel label` (from this folder) opens the same page on every dataset,
+# to browse the rows, read the evaluations and revise a label.
 
 # %%
 import os

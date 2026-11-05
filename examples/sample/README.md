@@ -14,12 +14,11 @@ crude keyword stand-in that gets some rows wrong on purpose, so there is somethi
 git clone https://github.com/cmhac/goldlabel && cd goldlabel
 uv sync
 cd examples/sample
-uv run goldlabel label        # optional, in a second terminal: opens the page on the datasets
 uv run python walkthrough.py  # the walkthrough; for the notebook: uv run --with jupyterlab jupyter lab walkthrough.ipynb
 ```
 
-The script opens the labelling page twice (or joins the page from `goldlabel label` if it is already
-running). Press **Done** each time.
+The script opens the labelling page twice (it prints the address if your browser does not open).
+Press **Done** each time.
 
 1. **dev** has three posts: label `layoff-1` as `layoff`, `burnout-1` and `burnout-2` as `burnout`.
 2. **test** has two posts: label `layoff-2` and `layoff-3` as `layoff`.
