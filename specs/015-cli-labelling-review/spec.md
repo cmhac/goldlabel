@@ -14,7 +14,7 @@ The issue's checklist is the scope of this spec. Its three "open decisions" are 
 
 1. **Taxonomy.** `gl.label` saves a snapshot of the taxonomy it was called with, beside the gold file of that dataset. A page started from the command line reads that snapshot. With no snapshot, the page offers only the labels already used in that dataset's gold file and says so on the page. `clf.evaluate` writes no snapshot (the evaluation log already records the taxonomy it ran with, and a second place that stores one would drift). The command line takes no Python import path.
 2. **Running server.** One lock file per storage folder holds the running server's process id, port and start time. A lock whose process is gone, or whose port does not answer, is stale and is replaced. This lock replaces the per-gold-file `.lock` of 012-014.
-3. **Revision record.** A new append-only `revisions.jsonl` beside `evals.jsonl`. The gold-file format of 014 does not change. An evaluation is **stale** when the labels of its sample today differ from the labels it scored (the evaluation log already stores a digest of those), so staleness needs no timestamp comparison and also catches rows labelled for the first time after the evaluation ran.
+3. **Revision record.** On the gold row itself (the user's decision, 2026-11-05). When the page changes a row that already had labels, the row gets a `revisions` entry holding the time of the change and the previous labels, note and `labelled_by`. There is no separate log. An evaluation is **stale** when any row of its sample has a revision entry newer than the evaluation's own time, so a first label never makes one stale.
 
 ## Where things are today
 
@@ -30,23 +30,25 @@ The issue's checklist is the scope of this spec. Its three "open decisions" are 
 
 - Q: When a page is already running and a notebook calls `gl.label`, does the cell return at once or wait? → A: It waits until no row of the pass is still pending (or the user interrupts), then returns the Sample, so the notebook flow of 012-014 is unchanged. With `force_open_ui=True` there is nothing pending to wait for, so it prints the URL and returns at once.
 
+- Q: Where is a revision recorded, and how is an evaluation flagged stale? → A: The user's decision: on the gold row, as a `revisions` list of entries with the time and the previous values (no `revisions.jsonl`, no digest comparison). An evaluation is stale when a row of its sample has a revision newer than the evaluation's time; a first label is not a revision, so it does not make one stale.
+
 Run `/speckit-clarify` again to overturn any of the three decisions above.
 
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Open the page from a terminal and change two labels by id (Priority: P1)
 
-A colleague is told "labels for rows `a17` and `b203` in the trump dataset are wrong". They run `goldlabel label trump` in the project folder. The page opens on that dataset, listing its samples with row counts and how many rows are labelled. They open the sample, type `a17` into **Jump to id**, change the label, add a note, save, go back to where they were, jump to `b203`, change it, and close the page. Each change is saved at once and each is appended to `revisions.jsonl`.
+A colleague is told "labels for rows `a17` and `b203` in the trump dataset are wrong". They run `goldlabel label trump` in the project folder. The page opens on that dataset, listing its samples with row counts and how many rows are labelled. They open the sample, type `a17` into **Jump to id**, change the label, add a note, save, go back to where they were, jump to `b203`, change it, and close the page. Each change is saved at once and recorded on the row.
 
 **Why this priority**: it is the case that prompted the issue, and everything else in the page builds on a page that can open on any row of any dataset without a notebook.
 
-**Independent Test**: build a storage folder with a gold file of two samples, run the command with a fake browser, and over HTTP list datasets and samples, open a row by id, post a revised label and note, read the gold file and `revisions.jsonl`, and use back to return to the previous row.
+**Independent Test**: build a storage folder with a gold file of two samples, run the command with a fake browser, and over HTTP list datasets and samples, open a row by id, post a revised label and note, read the gold file, and use back to return to the previous row.
 
 **Acceptance Scenarios**:
 
 1. **Given** a storage folder with `gold.jsonl` and `gold-corpus-b.jsonl`, **When** the user runs `goldlabel label` (no name), **Then** the page lists both datasets, each with its samples, their row counts and labelled counts, and does not open any row.
 2. **Given** the same folder, **When** the user runs `goldlabel label corpus-b`, **Then** the page opens on that dataset; a name that matches no file prints the datasets that exist and exits non-zero without starting a server.
-3. **Given** a labelled row `a17`, **When** the user opens it by id and saves a different label, **Then** the gold file holds the new label stamped `labelled_by: "goldlabel-ui"` with a new `labelled_at`, and one line is appended to `revisions.jsonl`.
+3. **Given** a labelled row `a17`, **When** the user opens it by id and saves a different label, **Then** the gold file holds the new label stamped `labelled_by: "goldlabel-ui"` with a new `labelled_at`, and the row gains one `revisions` entry holding the time and the previous labels, note and `labelled_by`.
 4. **Given** an id that is not in the dataset, **When** the user submits it in **Jump to id**, **Then** the page says so and stays where it was.
 5. **Given** the user opened row `a17`, then jumped to `b203`, **When** they press Back, **Then** they are on `a17` with their place in the sample list unchanged, and Back again returns to the row before it, one step each, down to the first row they opened.
 6. **Given** `--dir PATH`, **When** the command runs, **Then** it serves `PATH`; without it, `GOLDLABEL_DIR`, then `.goldlabel/`, as every other function resolves the storage folder.
@@ -74,7 +76,7 @@ A notebook user has the page open from the terminal, then runs `gl.label(dev, ta
 
 ### User Story 3 - Review an evaluation and its disagreements (Priority: P2)
 
-For a sample, the page lists its evaluations from `evals.jsonl`, newest first: when, score against target, row count, model, prompt digest. Opening one lists the classifier's disagreements with the gold labels, each with the row's text, the gold label, the predicted label, the classifier's reasoning and the row's note. An evaluation whose sample was revised since it ran is flagged **STALE** in words, with the reason ("labels changed since this ran"). The user can click a disagreement to open the row and revise it, and the flag appears on the list from then on.
+For a sample, the page lists its evaluations from `evals.jsonl`, newest first: when, score against target, row count, model, prompt digest. Opening one lists the classifier's disagreements with the gold labels, each with the row's text, the gold label, the predicted label, the classifier's reasoning and the row's note. An evaluation whose sample was revised since it ran is flagged **STALE** in words, with the reason ("a row was revised after this ran"). The user can click a disagreement to open the row and revise it, and the flag appears on the list from then on.
 
 **Why this priority**: it turns "read the disagreements" into the loop it was meant to be (spot a wrong gold label, fix it, know the number is out of date), but it needs the browse page of Story 1.
 
@@ -88,7 +90,7 @@ For a sample, the page lists its evaluations from `evals.jsonl`, newest first: w
 4. **Given** an evaluation line written before this feature (no disagreements stored), **When** it is opened, **Then** the page says "disagreements were not recorded by this version" and shows its metrics only.
 5. **Given** a disagreement whose row has been removed from the gold file, **When** it is shown, **Then** it says the row is no longer in the file, and still shows the logged gold and predicted labels.
 6. **Given** an evaluation of `dev` and a revision of a `test` row, **When** the lists are shown, **Then** the `dev` evaluation is not stale. An evaluation of `dev + test` is stale after either.
-7. **Given** a note-only revision, **When** the lists are shown, **Then** no evaluation becomes stale (notes never reach a model).
+7. **Given** a pending row labelled for the first time after an evaluation ran, **When** the lists are shown, **Then** that evaluation is not stale (a first label is not a revision).
 8. **Given** the same page, **Then** it has no button or key that runs an evaluation or a classification.
 
 ---
@@ -110,21 +112,22 @@ From 1024px wide, the item text and the label controls scroll independently. The
 
 ---
 
-### User Story 5 - Every revision is recorded and the gold rule still holds (Priority: P1)
+### User Story 5 - Every revision is recorded on the row and the gold rule still holds (Priority: P1)
 
-Every change to an already-labelled row's labels or note is appended to `revisions.jsonl`: time, dataset, sample, row id, labels and note before and after, who labelled it before (`labelled_by`) and the new stamp. Saving a row with nothing changed writes nothing. The first labelling of a pending row is not a revision. The labelling server remains the only writer of gold labels (and `Gold.import_rows`); no code path in the library, the command or the page writes a label from a model's output.
+Every change to an already-labelled row's labels or note adds an entry to that row's `revisions` list in the gold file: the time of the change and the previous labels, note and `labelled_by`. The current values stay in the row's usual fields, so the row reads as its own record of revisions. Saving a row with nothing changed writes nothing. The first labelling of a pending row is not a revision. The labelling server remains the only writer of gold labels (and `Gold.import_rows`); no code path in the library, the command or the page writes a label from a model's output.
 
-**Why this priority**: revising labels is safe only if it can be audited, and the constitution's first principle depends on the server being the one writer.
+**Why this priority**: revising labels is safe only if the old value is kept, and the constitution's first principle depends on the server being the one writer.
 
-**Independent Test**: revise a labelled row, a pending row, an imported row, and a note only; save one row unchanged; check the log lines and that the gold file differs only in that row.
+**Independent Test**: revise a labelled row, a pending row, an imported row, and a note only; save one row unchanged; check the entries and that the gold file differs only in that row.
 
 **Acceptance Scenarios**:
 
-1. **Given** a labelled row, **When** its labels change, **Then** one line is appended before the gold file is rewritten, so a crash between the two leaves a record of a change that did not happen rather than a change with no record.
-2. **Given** an imported row, **When** it is revised in the page, **Then** the gold row becomes `labelled_by: "goldlabel-ui"` and the record keeps `imported` as the previous stamp.
-3. **Given** a row saved with the same labels and the same note, **When** it is posted, **Then** nothing is appended and the file is not rewritten.
-4. **Given** the page's API, **Then** no endpoint accepts a label from anything but a person's request carrying the session's token, and no endpoint returns a model's prediction as a suggestion for a label.
-5. **Given** a pending row labelled for the first time, **Then** no revision line is written and the sample's evaluations become stale (its labels differ from those they scored).
+1. **Given** a labelled row, **When** its labels change, **Then** the new labels and the revision entry are written in the same atomic rewrite of the gold file, so there is never a changed row without its entry.
+2. **Given** an imported row, **When** it is revised in the page, **Then** the gold row becomes `labelled_by: "goldlabel-ui"` and the entry keeps `imported` as the previous stamp.
+3. **Given** a row saved with the same labels and the same note, **When** it is posted, **Then** no entry is added and the file is not rewritten.
+4. **Given** a row revised twice, **Then** it holds two entries, oldest first, each with the values from just before its own change.
+5. **Given** the page's API, **Then** no endpoint accepts a label from anything but a person's request carrying the session's token, and no endpoint returns a model's prediction as a suggestion for a label.
+6. **Given** a pending row labelled for the first time, **Then** it gets no revision entry and no evaluation becomes stale because of it.
 
 ---
 
@@ -135,11 +138,11 @@ Every change to an already-labelled row's labels or note is appended to `revisio
 - A dataset drawn from a notebook while the page is open: the next page load shows it; the page does not poll.
 - A dataset with a sample whose rows are all labelled: the sample's **Label pending** action is disabled and says "nothing pending".
 - `--port` already in use: exit non-zero with the message and start nothing; a bare run picks a free port.
-- Two browser tabs on one server: saves are serialized and both read the file each time, so the later save wins; both are recorded.
+- Two browser tabs on one server: saves are serialized and both read the file each time, so the later save wins; both are recorded as entries.
 - A stale lock found on a read-only folder: the command reports it cannot replace the lock and exits non-zero.
 - A taxonomy snapshot that does not parse: treated as missing, and the page says labels shown are the ones already used.
 - A saved label that is not in the snapshot taxonomy (a row labelled under an older taxonomy): shown in the row as-is, and a revision can only choose among snapshot labels; the page flags it as "not in this taxonomy".
-- `labelled_by` of a row is something other than the three known values: the record copies it unchanged.
+- `labelled_by` of a row is something other than the three known values: the entry copies it unchanged.
 - The server never listens beyond 127.0.0.1 and keeps the Host and token checks of 013; the lock file that carries the token is created readable only by its owner.
 
 ## Requirements *(mandatory)*
@@ -171,19 +174,19 @@ Every change to an already-labelled row's labels or note is appended to `revisio
 
 - **FR-013**: On any row the user MUST be able to change its labels (within the snapshot taxonomy and its `single`/`multi` mode) and its note, with the same keyboard behaviour as 013, and the change MUST be saved at once.
 - **FR-014**: The server MUST validate every revision exactly as it validates a first label (known labels, mode, body size) and MUST be the only writer of gold labels besides `Gold.import_rows`.
-- **FR-015**: A revised row MUST be restamped `labelled_by: "goldlabel-ui"` with a new `labelled_at`; the gold file's format, and the reading of files from 014, MUST NOT change.
+- **FR-015**: A revised row MUST be restamped `labelled_by: "goldlabel-ui"` with a new `labelled_at`; the only change to the gold-file format is the optional `revisions` key (FR-016); files from 014 still read unchanged.
 
 **Revision record**
 
-- **FR-016**: Each revision of an already-labelled row, to its labels or its note, MUST append one JSON line to `revisions.jsonl` in the storage folder holding: time, gold file, sample, row id, labels before and after, note before and after, `labelled_by` before and after, `labelled_at` before. The line MUST be written before the gold file is rewritten.
-- **FR-017**: A save that changes neither labels nor note MUST write nothing. The first labelling of a pending row MUST NOT be recorded as a revision.
-- **FR-018**: `revisions.jsonl` MUST be append-only, with no way to switch it off or send it elsewhere, as `evals.jsonl` is.
+- **FR-016**: Each revision of an already-labelled row, to its labels or its note, MUST append one entry to an optional `revisions` list on that row in the gold file, holding the time of the change (`at`) and the previous `labels`, `note` and `labelled_by`. The entry and the new values MUST be written in the same rewrite of the file. A row with no revisions has no `revisions` key.
+- **FR-017**: A save that changes neither labels nor note MUST add no entry and rewrite nothing. The first labelling of a pending row MUST NOT add an entry.
+- **FR-018**: Entries MUST only be appended by the labelling server, never edited or removed by it; the page does not offer a way to delete one.
 
 **Evaluations**
 
 - **FR-019**: `evals.jsonl` lines written by `clf.evaluate`/`aevaluate` MUST also store the disagreements: for each, the row id, gold labels, predicted labels and the classifier's reasoning (not the text, which the gold file holds). Lines already in a log, and the identical-rerun rule (same sample, rows digest, prompt digest, model, metric and target), MUST NOT change.
 - **FR-020**: For each sample the page MUST list the evaluations of exactly that sample, newest first, and for an opened evaluation list its disagreements as in Story 3. Combinations (`dev + test`) are listed under the combination's name when the log has any.
-- **FR-021**: The page MUST mark an evaluation **STALE** when the labels of the rows that sample holds now differ from the rows digest the evaluation logged, naming the reason in words; a note-only change MUST NOT mark one.
+- **FR-021**: The page MUST mark an evaluation **STALE** when any row of the evaluated sample has a `revisions` entry whose time is later than the evaluation's logged time, naming the reason in words. Because a revision is a change to labels or note, a note-only revision also counts; the page's reason text says which row.
 - **FR-022**: The page, the server and the command MUST NOT run an evaluation, classification, estimate or any model call.
 
 **Layout**
@@ -197,11 +200,11 @@ Every change to an already-labelled row's labels or note is appended to `revisio
 
 ### Key Entities
 
-- **Storage folder**: the folder named by `--dir`, `GOLDLABEL_DIR` or `.goldlabel/`; holds the gold files, `evals.jsonl`, `revisions.jsonl`, taxonomy snapshots and the server lock.
+- **Storage folder**: the folder named by `--dir`, `GOLDLABEL_DIR` or `.goldlabel/`; holds the gold files, `evals.jsonl`, taxonomy snapshots and the server lock.
 - **Server lock**: process id, port, start time and token of the one running labelling server for a storage folder.
 - **Taxonomy snapshot**: the taxonomy `gl.label` last saved for a gold dataset; used only to show label options.
-- **Revision**: an appended record of a change to a labelled row's labels or note, with before and after values.
-- **Evaluation line (extended)**: an existing `evals.jsonl` line plus its disagreements; **stale** is derived from it and the current gold labels, never stored.
+- **Revision entry**: an item in a gold row's `revisions` list: the time of a change and the labels, note and `labelled_by` the row had just before it.
+- **Evaluation line (extended)**: an existing `evals.jsonl` line plus its disagreements; **stale** is derived from it and the rows' revision times, never stored.
 - **Pass**: the rows `gl.label` or **Label pending** walks, fixed when it starts (unchanged from 013-014).
 
 ## Success Criteria *(mandatory)*
@@ -210,8 +213,8 @@ Every change to an already-labelled row's labels or note is appended to `revisio
 
 - **SC-001**: A person given two row ids opens the page from a terminal and saves a new label for both without paging through any other row: 0 rows visited besides the two, and under 60 seconds from the command to the second save.
 - **SC-002**: With a server running for a folder, 100% of `gl.label` calls print its URL and start no second server; with none running, 100% start one.
-- **SC-003**: 100% of changes to a labelled row's labels or note produce exactly one revision line, and 0% of unchanged saves or first labels do.
-- **SC-004**: An evaluation is flagged stale after exactly the label changes in its own sample (including first labels after it ran) and never after a note-only change or a change in another sample.
+- **SC-003**: 100% of changes to a labelled row's labels or note add exactly one `revisions` entry with the previous values, and 0% of unchanged saves or first labels do.
+- **SC-004**: An evaluation is flagged stale after exactly the revisions made to rows of its own sample after it ran, and never after a first label, a revision made before it ran, or a revision in another sample.
 - **SC-005**: At 1280px with a 40-label taxonomy, the full text of a short item stays on screen while the last label is scrolled into view.
 - **SC-006**: The gold-rule tests (`tests/test_gold_rule.py`, `tests/test_skills.py`, `tests/test_docs.py`) pass unchanged: no new way to set a label exists besides the page's person-triggered request.
 
@@ -219,7 +222,7 @@ Every change to an already-labelled row's labels or note is appended to `revisio
 
 - The user runs the command from a terminal with a browser on the same machine, as with `gl.label`; running it for another machine is out of scope.
 - The disagreement list is stored from this version on; older evaluation lines stay readable and show metrics only.
-- Staleness is read from the logged rows digest, which already covers labels, not notes.
+- Staleness compares each evaluation's logged time with the `at` of the rows' revision entries; no digest is compared. Notes never reach a model, so a note-only revision flags an evaluation that did not need it; that is accepted for simplicity.
 - `gold-<name>.jsonl` and `gold.jsonl` are the only gold files; `*.removed.jsonl` and `*.tmp` are not datasets.
 - The labelling flow, keys and counts of 013-014 are unchanged and keep their tests, except the per-file lock tests, which move to the folder lock.
 - A person who can read the lock file can already edit the gold file; the token's job is to stop other local processes and web pages, as in 013.
@@ -234,7 +237,8 @@ Open the command's page in a real browser at 1280px and 390px, light and dark, w
 - Editing the taxonomy in the page, a taxonomy file or Python import path for the command, and `clf.evaluate` writing a taxonomy snapshot.
 - Adding, drawing, removing or moving rows from the page (`draw_sample` and `remove` stay in code).
 - Searching by text, filters, sorting or bulk revision; only list, **Jump to id**, and **Label pending**.
-- Undoing a revision from the page, or showing a row's revision history in the page (the record is a file; read it with polars).
+- Undoing a revision from the page, or showing a row's revision entries in the page (they are in the gold file; read it with polars).
+- A separate revision log, and a digest-based stale check.
 - Live refresh of the page when files change, or a notifier between `gl.label` and the page.
 - `--host`, `--no-browser`, and serving beyond 127.0.0.1.
 - A sticky or floating text on the one-column layout, and a new layout below 1024px.
