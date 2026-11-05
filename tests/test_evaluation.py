@@ -62,9 +62,9 @@ def clf(model, prompt="prompt", mode="single"):
 
 
 def write_gold(rows, path=None):
-    path = path or settings.root / "gold.jsonl"
+    path = path or settings.root / "gold.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    path.write_text(json.dumps({"taxonomy": None, "rows": rows}))
     return Gold()
 
 

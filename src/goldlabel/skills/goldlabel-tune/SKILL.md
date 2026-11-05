@@ -32,7 +32,7 @@ clf
 2. Advise on the gold set, then draw. You never label. 50 dev rows is a sensible start; every label needs more than a handful of rows (`counts` shows it), so for a rare label suggest more seeds that find it or drawing more rows; one row is a large swing on a small set.
 
 ```python
-gold = gl.Gold(candidates)  # .goldlabel/gold.jsonl; 50 rows per sample by default
+gold = gl.Gold(candidates)  # .goldlabel/gold.json; 50 rows per sample by default
 dev = gold.draw_sample("dev")  # pending rows with no labels; safe to rerun
 dev.counts(taxonomy)  # rows per label
 ```
@@ -95,7 +95,7 @@ gl.label(test_2, taxonomy)  # people label the fresh sample
 ```python
 gold_b = gl.Gold(
     candidates_b, name="corpus-b"
-)  # its own file: .goldlabel/gold-corpus-b.jsonl
+)  # its own file: .goldlabel/gold-corpus-b.json
 test_b = gold_b.draw_sample("test", n=30)  # pending; people label them
 gl.label(test_b, taxonomy)
 final_b = clf.evaluate(test_b)  # once, as for any held-out sample

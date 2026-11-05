@@ -16,7 +16,7 @@
 
 ## Phase 2: Foundational (blocks every story)
 
-- [ ] T002 Change the gold file to one JSON document in `src/goldlabel/gold.py`, adapting every caller, test, fixture and doc (`gold.jsonl` → `gold.json`, `gold-<name>.jsonl` → `gold-<name>.json`).
+- [X] T002 Change the gold file to one JSON document in `src/goldlabel/gold.py`, adapting every caller, test, fixture and doc (`gold.jsonl` → `gold.json`, `gold-<name>.jsonl` → `gold-<name>.json`).
 
   **Tests first (red)** in `tests/test_gold.py` (use a shared `write_gold(path, rows, taxonomy=None)` helper in `tests/conftest.py` that writes the document by hand):
   - `Gold()` path is `<root>/gold.json`; `Gold(name="corpus-b")` is `<root>/gold-corpus-b.json`; the removed-rows file is `gold.removed.jsonl` / `gold-corpus-b.removed.jsonl`.

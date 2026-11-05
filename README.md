@@ -81,7 +81,7 @@ clf = gl.Classifier(
 )
 
 # 3. Label a dev sample: opens the web app, returns when you press Done
-gold = gl.Gold(candidates)  # .goldlabel/gold.jsonl, 50 rows per sample by default
+gold = gl.Gold(candidates)  # .goldlabel/gold.json, 50 rows per sample by default
 dev = gold.draw_sample("dev")  # safe to rerun: it draws only what is missing
 gl.label(dev, taxonomy)
 
@@ -106,8 +106,8 @@ results.to_polars()
 
 ### Gold samples
 
-A gold dataset is one file in `.goldlabel/` (`gl.Gold(candidates)` is `gold.jsonl`; `gl.Gold(candidates_b, name="corpus-b")` is
-`gold-corpus-b.jsonl`, for a second corpus). It holds samples, each a name you choose: `gold.draw_sample("dev")` makes sure
+A gold dataset is one file in `.goldlabel/` (`gl.Gold(candidates)` is `gold.json`; `gl.Gold(candidates_b, name="corpus-b")` is
+`gold-corpus-b.json`, for a second corpus). It holds samples, each a name you choose: `gold.draw_sample("dev")` makes sure
 the sample "dev" has 50 rows (or `n=`), so rerunning the cell draws nothing, and the rows come in an order fixed by their ids,
 so there is no seed. `gl.label(dev, taxonomy)` shows only that sample's pending rows. Every `clf.evaluate` is logged in
 `.goldlabel/evals.jsonl`, and a sample's summary says how often it was evaluated: keep your test sample held out and score it

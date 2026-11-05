@@ -29,15 +29,10 @@ def taxonomy():
 
 
 def gold_file(tmp_path, ids=("1", "2")):
-    """Write the default gold file (`<root>/gold.jsonl`) and return its `Gold`."""
-    p = tmp_path / "gold.jsonl"
-    p.write_text(
-        "".join(
-            json.dumps({"id": i, "text": f"t{i}", "labels": None, "sample": "dev"})
-            + "\n"
-            for i in ids
-        )
-    )
+    """Write the default gold file (`<root>/gold.json`) and return its `Gold`."""
+    p = tmp_path / "gold.json"
+    rows = [{"id": i, "text": f"t{i}", "labels": None, "sample": "dev"} for i in ids]
+    p.write_text(json.dumps({"taxonomy": None, "rows": rows}))
     return Gold()
 
 
@@ -110,7 +105,7 @@ def test_rule_file_is_in_the_wheel(tmp_path):
 
 
 def test_repr_of_gold_lists_path_counts_sources_and_ends_with_the_rule(tmp_path):
-    p = tmp_path / "gold.jsonl"
+    p = tmp_path / "gold.json"
     rows = [
         {
             "id": "1",
@@ -128,7 +123,7 @@ def test_repr_of_gold_lists_path_counts_sources_and_ends_with_the_rule(tmp_path)
         },
         {"id": "3", "text": "t", "labels": None, "sample": "dev"},
     ]
-    p.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    p.write_text(json.dumps({"taxonomy": None, "rows": rows}))
     out = repr(Gold())
     assert str(p) in out
     assert "dev 2 (1 labelled)" in out and "test 1 (1 labelled)" in out
@@ -178,8 +173,8 @@ def test_error_types_stay_compatible(tmp_path):
     with pytest.raises(ValueError) as v:
         g.draw_sample("X")
     assert str(v.value).endswith("\n\n" + SHORT)
-    (tmp_path / "gold-bad.jsonl").write_text("nope\n")
-    with pytest.raises(ValueError, match="gold-bad.jsonl:1: not a gold row") as r:
+    (tmp_path / "gold-bad.json").write_text("nope\n")
+    with pytest.raises(ValueError, match="gold-bad.json: not a gold file") as r:
         len(Gold(name="bad").all)
     assert SHORT in str(r.value)
 

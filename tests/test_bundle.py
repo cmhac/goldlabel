@@ -49,9 +49,9 @@ def evaluation(c):
         {"id": "2", "text": "t2", "labels": ["b"], "sample": "dev"},
         {"id": "3", "text": "t3", "labels": ["b"], "sample": "dev"},
     ]
-    path = settings.root / "gold.jsonl"
+    path = settings.root / "gold.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    path.write_text(json.dumps({"taxonomy": None, "rows": rows}))
     c = replace(c, model=answering({"t1": ["a"], "t2": ["b"], "t3": ["a"]}))
     return c.evaluate(Gold()["dev"])
 
@@ -153,4 +153,4 @@ def test_a_script_can_load_and_classify_with_no_gold_and_write_out(tmp_path):
         "1",
         "2",
     ]
-    assert not Path("gold.jsonl").exists()
+    assert not Path("gold.json").exists()

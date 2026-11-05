@@ -24,7 +24,7 @@ def rows(*specs):
 
 
 def write_gold(path, rows_):
-    path.write_text("".join(json.dumps(r) + "\n" for r in rows_))
+    path.write_text(json.dumps({"taxonomy": None, "rows": rows_}))
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ def taxonomy(mode="multi"):
 
 @pytest.fixture
 def gold_path(tmp_path):
-    p = tmp_path / "gold.jsonl"
+    p = tmp_path / "gold.json"
     write_gold(
         p,
         rows(
@@ -103,7 +103,7 @@ class Client:
 
 
 def on_disk(path):
-    return [json.loads(line) for line in path.read_text().splitlines()]
+    return json.loads(path.read_text())["rows"]
 
 
 # --- binding and access ------------------------------------------------------------------------
@@ -196,7 +196,7 @@ def test_only_a_sample_can_be_served(gold_path):
 
 
 def test_already_labelled_rows_are_not_in_the_pass(tmp_path):
-    p = tmp_path / "gold.jsonl"
+    p = tmp_path / "gold.json"
     write_gold(
         p,
         rows(
@@ -261,12 +261,12 @@ def test_bad_requests(start):
 
 def test_label_writes_and_stamps_and_leaves_other_rows_identical(start, gold_path):
     c = Client(start())
-    lines = gold_path.read_text().splitlines()
+    lines = on_disk(gold_path)
     status, s = c.label("2", ["b"])
     assert status == 200
-    new = gold_path.read_text().splitlines()
-    assert new[0] == lines[0] and new[2:] == lines[2:]  # other rows byte-identical
-    row = json.loads(new[1])
+    new = on_disk(gold_path)
+    assert new[0] == lines[0] and new[2:] == lines[2:]  # other rows identical
+    row = new[1]
     assert row["labels"] == ["b"]
     assert row["labelled_by"] == "goldlabel-ui"
     datetime.fromisoformat(row["labelled_at"])
@@ -287,13 +287,9 @@ def test_label_advances_in_file_order_then_finishes(start):
 
 
 def test_extra_keys_survive_labelling(tmp_path):
-    p = tmp_path / "gold.jsonl"
-    p.write_text(
-        json.dumps(
-            {"id": "1", "text": "t", "labels": None, "sample": "dev", "src": "x"}
-        )
-        + "\n"
-    )
+    p = tmp_path / "gold.json"
+    row = {"id": "1", "text": "t", "labels": None, "sample": "dev", "src": "x"}
+    p.write_text(json.dumps({"taxonomy": None, "rows": [row]}))
     h = _label.serve(Gold()["dev"], taxonomy())
     try:
         Client(h).label("1", ["a"])
@@ -366,7 +362,7 @@ def test_skip_with_one_pending_row_stays(start):
 
 def test_done_stops_server_and_removes_lock(start, gold_path):
     h = start()
-    lock = gold_path.with_name("gold.jsonl.lock")
+    lock = gold_path.with_name("gold.json.lock")
     assert lock.exists()
     c = Client(h)
     status, _, _ = c.call("POST", "/api/done")
@@ -381,12 +377,12 @@ def test_stop_releases_lock_and_is_idempotent(start, gold_path):
     h = start()
     h.stop()
     h.stop()
-    assert not gold_path.with_name("gold.jsonl.lock").exists()
+    assert not gold_path.with_name("gold.json.lock").exists()
 
 
 def test_lock_holds_pid_and_start_time(start, gold_path):
     start()
-    lock = json.loads(gold_path.with_name("gold.jsonl.lock").read_text())
+    lock = json.loads(gold_path.with_name("gold.json.lock").read_text())
     assert lock["pid"] == os.getpid()
     datetime.fromisoformat(lock["started"])
 
@@ -400,7 +396,7 @@ def test_second_server_on_same_file_is_refused(start):
 def test_stale_lock_is_replaced(start, gold_path):
     dead = subprocess.Popen([sys.executable, "-c", "pass"])
     dead.wait()
-    lock = gold_path.with_name("gold.jsonl.lock")
+    lock = gold_path.with_name("gold.json.lock")
     lock.write_text(
         json.dumps({"pid": dead.pid, "started": "2020-01-01T00:00:00+00:00"})
     )
@@ -409,14 +405,14 @@ def test_stale_lock_is_replaced(start, gold_path):
 
 
 def test_garbage_lock_counts_as_stale(start, gold_path):
-    gold_path.with_name("gold.jsonl.lock").write_text("not json")
+    gold_path.with_name("gold.json.lock").write_text("not json")
     assert Client(start()).state()["total"] == 3
 
 
 def test_failed_start_leaves_no_lock(gold_path):
     with pytest.raises(ValueError):
         _label.serve(Gold(), taxonomy())  # ty: ignore[invalid-argument-type]
-    assert not gold_path.with_name("gold.jsonl.lock").exists()
+    assert not gold_path.with_name("gold.json.lock").exists()
 
 
 def test_wait_returns_after_stop(start):
@@ -508,7 +504,7 @@ def test_a_note_that_is_not_a_string_is_refused_and_nothing_is_written(
 @pytest.fixture
 def fifty_and_fifty(tmp_path):
     """50 labelled dev rows d0..d49 and 50 pending test rows t0..t49."""
-    p = tmp_path / "gold.jsonl"
+    p = tmp_path / "gold.json"
     write_gold(
         p,
         rows(*[(f"d{i}", ["a"], "dev") for i in range(50)])
