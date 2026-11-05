@@ -204,8 +204,14 @@ def test_http_error_bodies_do_not_carry_the_rule(tmp_path):
         c.request(
             "POST",
             "/api/label",
-            json.dumps({"id": "1", "labels": ["zzz"]}),
-            {"X-Goldlabel-Token": u.query.split("=")[1]},
+            json.dumps(
+                {
+                    "pass": u.fragment.removeprefix("/pass/"),
+                    "id": "1",
+                    "labels": ["zzz"],
+                }
+            ),
+            {"X-Goldlabel": "1"},
         )
         r = c.getresponse()
         body = r.read().decode()

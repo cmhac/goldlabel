@@ -43,12 +43,10 @@ def gold_path(tmp_path):
     return write_gold(tmp_path / "gold.json")
 
 
-def get(url, path, *, token=True, host=None):
+def get(url, path, *, host=None):
     u = urlparse(url)
-    token_value = u.query.removeprefix("token=")
     conn = http.client.HTTPConnection(u.hostname, u.port, timeout=5)
-    q = f"?token={token_value}" if token else ""
-    conn.request("GET", path + q, headers={"Host": host} if host else {})
+    conn.request("GET", path, headers={"Host": host} if host else {})
     r = conn.getresponse()
     return r.status, r.read().decode(), r
 
@@ -56,12 +54,8 @@ def get(url, path, *, token=True, host=None):
 def post(url, path, body=None):
     u = urlparse(url)
     conn = http.client.HTTPConnection(u.hostname, u.port, timeout=5)
-    conn.request(
-        "POST",
-        path,
-        json.dumps(body or {}),
-        {"X-Goldlabel-Token": u.query.removeprefix("token=")},
-    )
+    body = {"pass": u.fragment.removeprefix("/pass/"), **(body or {})}
+    conn.request("POST", path, json.dumps(body), {"X-Goldlabel": "1"})
     r = conn.getresponse()
     return r.status, json.loads(r.read())
 
@@ -82,23 +76,20 @@ def packaged(name):
 # --- the page -------------------------------------------------------------------------------
 
 
-def test_index_has_color_scheme_meta_and_links_assets_with_the_token(handle):
+def test_index_has_color_scheme_meta_and_links_assets_without_a_token(handle):
     status, body, r = get(handle.url, "/")
     assert status == 200
     assert r.getheader("Content-Type").startswith("text/html")
     assert '<meta name="color-scheme" content="light dark">' in body
-    token = handle.token
-    assert f'href="app.css?token={token}"' in body
-    assert f'src="app.js?token={token}"' in body
-    assert "__TOKEN__" not in body
+    assert 'href="app.css"' in body and 'src="app.js"' in body
+    assert "token" not in body.lower()
 
 
-def test_assets_are_served_with_their_types_and_need_the_token(handle):
+def test_assets_are_served_with_their_types_to_the_right_host_only(handle):
     for name, kind in (("app.css", "text/css"), ("app.js", "text/javascript")):
         status, body, r = get(handle.url, "/" + name)
         assert status == 200 and body.strip()
         assert r.getheader("Content-Type").startswith(kind)
-        assert get(handle.url, "/" + name, token=False)[0] == 403
         assert get(handle.url, "/" + name, host="evil.example:80")[0] == 403
     assert get(handle.url, "/index.html")[0] == 404  # only the three known paths
 
@@ -133,9 +124,9 @@ def test_no_external_urls_storage_or_scheme_scripts(name):
 def test_js_posts_only_to_the_existing_routes_and_shows_no_prediction():
     js = packaged("app.js")
     posted = set(re.findall(r"/api/[a-z]+", js))
-    assert posted == {"/api/state", "/api/label", "/api/back", "/api/skip", "/api/done"}
+    assert posted == {"/api/pass", "/api/label"}
     assert "predict" not in (js + packaged("index.html")).lower()
-    assert "X-Goldlabel-Token" in js
+    assert '"X-Goldlabel": "1"' in js and "token" not in js.lower()
 
 
 def test_page_is_mobile_first_and_has_the_controls():
@@ -231,13 +222,13 @@ def test_label_blocks_until_done_and_returns_the_labelled_rows(
     status, state = post(url, "/api/label", {"id": "2", "labels": ["a", "b"]})
     assert status == 200 and state["finished"] is True
     assert t.is_alive()  # still waiting for Done
-    post(url, "/api/done")
+    post(url, "/api/pass/" + urlparse(url).fragment.removeprefix("/pass/") + "/done")
     t.join(5)
     assert not t.is_alive()
     (got,) = result
     assert [(r.id, r.labels) for r in got.rows] == [("1", ["a"]), ("2", ["a", "b"])]
     assert str(url) in capsys.readouterr().out
-    assert not gold_path.with_name("gold.json.lock").exists()
+    assert not gold_path.with_name("labelling.lock").exists()
 
 
 def test_label_reports_orphans_and_continues(tmp_path, press_done_on_open, capsys):
@@ -254,11 +245,11 @@ def test_label_reports_orphans_and_continues(tmp_path, press_done_on_open, capsy
 
 def test_label_stops_the_server_if_interrupted(gold_path, monkeypatch):
     monkeypatch.setattr(
-        _label.Handle, "wait", lambda self: (_ for _ in ()).throw(KeyboardInterrupt)
+        _label.Server, "wait", lambda self: (_ for _ in ()).throw(KeyboardInterrupt)
     )
     with pytest.raises(KeyboardInterrupt):
         goldlabel.label(Gold()["dev"], taxonomy(), open_browser=False)
-    assert not gold_path.with_name("gold.json.lock").exists()
+    assert not gold_path.with_name("labelling.lock").exists()
 
 
 # --- gl.label opens the page only when something is pending (012) ------------------------------
@@ -295,7 +286,7 @@ def test_label_skips_the_page_when_every_row_is_labelled(tmp_path, no_page, caps
             "Pass force_open_ui=True to review or relabel."
         )
     ]
-    assert not p.with_name("gold.json.lock").exists()
+    assert not p.with_name("labelling.lock").exists()
 
 
 def test_label_skips_a_split_that_is_fully_labelled(tmp_path, no_page, capsys):

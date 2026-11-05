@@ -28,7 +28,7 @@
 
   **Implementation:** `Gold.path` uses `.json`; `_read` returns `doc["rows"]`; add `_doc()`; `_write(rows, taxonomy=KEEP)` rewrites the whole file atomically (`tmp` then `os.replace`) keeping the stored taxonomy unless one is passed; `GoldRow.revisions: list[dict] | None = None` dropped from `dump()` when empty. The per-gold-file `.lock` name follows the path (`gold.json.lock`) until T003. Update README, `examples/sample/*`, skills, references, `docs/agent-instructions.md`, `.kiro/steering/goldlabel.md`, `AGENTS.md`: grep `gold.jsonl` and `gold-.*jsonl` finds none outside `specs/00*`-`014` history and the removed-rows file.
 
-- [ ] T003 Split the server in `src/goldlabel/_label.py`, drop the token, and move the lock to the folder, adapting `src/goldlabel/web/app.js` and `index.html` just enough to keep the 013 labelling view working.
+- [X] T003 Split the server in `src/goldlabel/_label.py`, drop the token, and move the lock to the folder, adapting `src/goldlabel/web/app.js` and `index.html` just enough to keep the 013 labelling view working.
 
   **Tests first (red)** in `tests/test_label_server.py` and `tests/test_label_page.py` (rewrite the token and per-file lock tests):
   - No token anywhere: `GET /` and the asset URLs contain no `token`; the served `index.html` has no `__TOKEN__`.

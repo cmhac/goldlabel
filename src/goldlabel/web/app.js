@@ -1,6 +1,7 @@
 // Renders the server's `state` and posts the person's actions. No rules live here: the server
 // validates labels, picks the next item and writes the file.
-const token = new URLSearchParams(location.search).get("token") || "";
+const passId = location.hash.replace(/^#\/pass\//, ""); // the pass this page walks
+const pass = "/api/pass/" + passId;
 const app = document.getElementById("app");
 const head = document.getElementById("head");
 const statusEl = document.getElementById("status");
@@ -53,7 +54,7 @@ async function call(method, path, body, onOk) {
   try {
     const r = await fetch(path, {
       method,
-      headers: { "X-Goldlabel-Token": token, "Content-Type": "application/json" },
+      headers: { "X-Goldlabel": "1", "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const data = await r.json();
@@ -73,17 +74,17 @@ async function call(method, path, body, onOk) {
   return ok;
 }
 
-const load = () => call("GET", "/api/state");
-const back = () => call("POST", "/api/back");
-const skip = () => call("POST", "/api/skip");
+const load = () => call("GET", pass);
+const back = () => call("POST", pass + "/back");
+const skip = () => call("POST", pass + "/skip");
 const save = () => {
   if (!selected.length) return;
   const id = state.item.id;
   const labels = selected;
-  return call("POST", "/api/label", { id, labels, note }, () => (saved = { id, labels }));
+  return call("POST", "/api/label", { pass: passId, id, labels, note }, () => (saved = { id, labels }));
 };
 const done = async () => {
-  if (await call("POST", "/api/done")) {
+  if (await call("POST", pass + "/done")) {
     head.replaceChildren();
     statusEl.hidden = true;
     app.replaceChildren(
