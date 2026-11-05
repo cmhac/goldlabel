@@ -87,7 +87,7 @@
 
   **Implementation:** `route()` plus `datasets()`, `samples()` and `rows()` views; each row in the list links to `#/d/<dataset>/r/<id>`.
 
-- [ ] T007 [US1] Add the row editor, **Jump to id**, **Label pending** and Back to `src/goldlabel/web/app.js`, then rebuild `src/goldlabel/web/app.css`.
+- [X] T007 [US1] Add the row editor, **Jump to id**, **Label pending** and Back to `src/goldlabel/web/app.js`, then rebuild `src/goldlabel/web/app.css`.
 
   **Tests first (red)** in `tests/test_label_page.py`:
   - The served JS handles `#/d/<dataset>/r/<id>`; has a **Jump to id** field on dataset and sample pages that navigates to that route and shows "no row <id> in <dataset>" on a 404 without leaving the page; a **Label pending** button that posts `/api/pass` (with the dataset stem and sample) and navigates to `#/pass/<id>`; a Back that uses `history.back()`.

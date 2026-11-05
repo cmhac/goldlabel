@@ -1102,3 +1102,14 @@ def test_nothing_but_the_labelling_server_writes_a_taxonomy(tmp_path):
     g.import_rows([{"id": "z", "text": "t", "labels": ["a"]}], "test")
     g.remove(["z"])
     assert json.loads(g.path.read_text())["taxonomy"] is None
+
+
+def test_done_says_the_server_is_closing_when_gl_label_started_it(start):
+    assert Client(start()).call("POST", "/api/done")[1]["closing"] is True
+
+
+def test_done_says_the_server_stays_up_when_it_was_not_started_by_gl_label(start):
+    assert (
+        Client(start(stop_on_done=False)).call("POST", "/api/done")[1]["closing"]
+        is False
+    )

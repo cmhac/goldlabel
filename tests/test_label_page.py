@@ -129,6 +129,7 @@ def test_js_posts_only_to_the_existing_routes_and_shows_no_prediction():
         "/api/label",
         "/api/datasets",
         "/api/rows",
+        "/api/row",
     }
     assert "predict" not in (js + packaged("index.html")).lower()
     assert '"X-Goldlabel": "1"' in js and "token" not in js.lower()
@@ -395,3 +396,32 @@ def test_the_css_was_rebuilt_for_the_browse_views():
     css = packaged("app.css")
     for cls in ("underline-offset-2", "text-blue-700", "border-collapse"):
         assert cls in css
+
+
+# --- the row editor, jump to id, label pending (015) ----------------------------------------
+
+
+def test_the_page_has_the_row_editor_route_and_the_row_api():
+    js = packaged("app.js")
+    assert '"r"' in js and "/api/row?dataset=" in js and "stored_taxonomy" in js
+    assert "dataset: editing.dataset" in js.replace("  ", " ") or "dataset:" in js
+    assert "history.back()" in js  # Back in the editor is the browser's Back
+
+
+def test_jump_to_id_and_label_pending_are_on_the_dataset_and_sample_pages():
+    js = packaged("app.js")
+    assert "Jump to id" in js and 'for: "jump"' in js
+    assert 'role: "alert"' in js  # "no row <id> in <dataset>" is announced
+    assert "Label pending" in js and '"/api/pass"' in js
+    assert "nothing pending" in js
+
+
+def test_the_editor_names_labels_outside_the_taxonomy_and_a_missing_taxonomy():
+    js = packaged("app.js")
+    assert "not in this taxonomy" in js
+    assert "No taxonomy is stored" in js
+
+
+def test_done_returns_to_the_list_when_the_server_keeps_running():
+    js = packaged("app.js")
+    assert "closing" in js and '"#/"' in js

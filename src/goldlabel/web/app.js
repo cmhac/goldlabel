@@ -13,6 +13,7 @@ let note = ""; // the draft note for the shown item; survives a re-render
 let saved = null; // {id, labels} of the last save, for the status line
 let busy = false; // a request is in flight
 let error = "";
+let editing = null; // {dataset} while one row of a dataset is revised, outside any pass
 
 const FOCUS =
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 " +
@@ -46,8 +47,8 @@ function el(tag, cls, text, attrs) {
   return e;
 }
 
-// `onOk` runs after a successful call and before the re-render.
-async function call(method, path, body, onOk) {
+// `onOk` runs after a successful call and before the re-render; `shape` turns the reply into state.
+async function call(method, path, body, onOk, shape) {
   if (busy) return false; // a held-down or double-clicked key must not act twice
   busy = true;
   let ok = false;
@@ -62,7 +63,7 @@ async function call(method, path, body, onOk) {
       error = data.error || "request failed (" + r.status + ")";
     } else {
       error = "";
-      state = data;
+      state = shape ? shape(data) : data;
       ok = true;
       if (onOk) onOk();
     }
@@ -75,16 +76,22 @@ async function call(method, path, body, onOk) {
 }
 
 const load = () => call("GET", passPath());
-const back = () => call("POST", passPath() + "/back");
-const skip = () => call("POST", passPath() + "/skip");
+const back = () => (editing ? history.back() : call("POST", passPath() + "/back"));
+const skip = () => (editing ? undefined : call("POST", passPath() + "/skip"));
 const save = () => {
   if (!selected.length) return;
   const id = state.item.id;
   const labels = selected;
-  return call("POST", "/api/label", { pass: passId, id, labels, note }, () => (saved = { id, labels }));
+  const done = () => (saved = { id, labels });
+  if (editing) return call("POST", "/api/label", { dataset: editing.dataset, id, labels, note }, done, rowState);
+  return call("POST", "/api/label", { pass: passId, id, labels, note }, done);
 };
 const done = async () => {
   if (await call("POST", passPath() + "/done")) {
+    if (!state.closing) {
+      location.hash = "#/"; // the server keeps running: back to the dataset list
+      return;
+    }
     head.replaceChildren();
     statusEl.hidden = true;
     app.replaceChildren(
@@ -111,6 +118,7 @@ const typing = () => document.activeElement && document.activeElement.id === "no
 function statusText() {
   if (typing()) return "Typing a note: the number keys are paused. Esc returns to the labels, Ctrl+Enter saves.";
   if (saved) return "Saved row " + saved.id + " as " + saved.labels.join(", ") + ". Press ← to go back.";
+  if (editing) return "Revising row " + state.item.id + ". " + (state.mode === "multi" ? "Choose every label that fits, then press Enter." : "Click a label or press its number. It saves.");
   return state.mode === "multi"
     ? "Choose every label that fits, then press Enter."
     : "Click a label or press its number. It saves and the next row opens.";
@@ -169,7 +177,7 @@ function finished() {
 function textCard() {
   const box = el("section", CARD + " flex flex-col gap-4 p-5 lg:p-8", undefined, { "aria-label": "Item to label" });
   box.append(
-    el("p", "text-sm tabular-nums " + MUTED, "Row " + state.position + " of " + state.total + " in " + state.sample + " · id " + state.item.id),
+    el("p", "text-sm tabular-nums " + MUTED, editing ? "Row id " + state.item.id + " in " + state.sample : "Row " + state.position + " of " + state.total + " in " + state.sample + " · id " + state.item.id),
     el("p", "max-w-[68ch] whitespace-pre-wrap break-words text-xl leading-relaxed", state.item.text),
   );
   return box;
@@ -179,7 +187,7 @@ function options() {
   const multi = state.mode === "multi";
   const group = el("fieldset", "flex flex-col gap-2");
   group.append(
-    el("legend", "mb-2 text-sm font-medium " + MUTED, multi ? "Choose every label that fits" : "Choose one label: it saves and moves on"),
+    el("legend", "mb-2 text-sm font-medium " + MUTED, multi ? "Choose every label that fits" : editing ? "Choose one label: it saves" : "Choose one label: it saves and moves on"),
   );
   state.labels.forEach((l, i) => {
     const on = selected.includes(l.name);
@@ -214,27 +222,40 @@ function panel() {
   const multi = state.mode === "multi";
   const box = el("section", CARD + " flex flex-col gap-4 lg:sticky lg:top-4");
   const nav = el("div", "grid grid-cols-2 gap-2");
-  const b = el("button", BTN, "← Back", { type: "button" });
+  const b = el("button", BTN + (editing ? " col-span-2" : ""), "← Back", { type: "button" });
   b.onclick = back;
-  const s = el("button", BTN, "Skip (S)", { type: "button" });
-  s.onclick = skip;
-  nav.append(b, s);
+  nav.append(b);
+  if (!editing) {
+    const s = el("button", BTN, "Skip (S)", { type: "button" });
+    s.onclick = skip;
+    nav.append(s);
+  }
   if (multi) {
-    const n = el("button", PRIMARY + " col-span-2", "Save and next (Enter)", { type: "button" });
+    const n = el("button", PRIMARY + " col-span-2", editing ? "Save (Enter)" : "Save and next (Enter)", { type: "button" });
     n.disabled = !selected.length;
     n.onclick = save;
     nav.append(n);
   }
+  if (editing && !state.storedTaxonomy) {
+    box.append(el("p", MUTED, "No taxonomy is stored for this dataset yet, so these are the labels already used. gl.label stores one."));
+  }
+  box.append(options());
+  const names = state.labels.map((l) => l.name);
+  const extra = (state.item.labels || []).filter((l) => !names.includes(l));
+  if (extra.length) box.append(el("p", MUTED, "Labels not in this taxonomy: " + extra.join(", ") + ". Saving replaces them."));
   box.append(
-    options(),
     noteField(),
     nav,
     el(
       "p",
       "border-t border-zinc-200 pt-3 text-sm dark:border-zinc-800 " + MUTED,
-      multi
-        ? "Keys: 1-9 choose, Enter save and next, ← back, S skip, N note."
-        : "Keys: 1-9 label and next, ← back, S skip, N note.",
+      editing
+        ? multi
+          ? "Keys: 1-9 choose, Enter save, ← back, N note."
+          : "Keys: 1-9 label, ← back, N note."
+        : multi
+          ? "Keys: 1-9 choose, Enter save and next, ← back, S skip, N note."
+          : "Keys: 1-9 label and next, ← back, S skip, N note.",
     ),
   );
   return box;
@@ -260,7 +281,7 @@ function render() {
     selected = state.item.labels || [];
     note = state.item.note || "";
   }
-  head.replaceChildren(header());
+  head.replaceChildren(editing ? editorCrumbs() : header());
   statusEl.hidden = false;
   setStatus();
   const parts = [];
@@ -271,7 +292,7 @@ function render() {
     grid.append(textCard(), panel());
     parts.push(grid);
   }
-  parts.push(counts());
+  if (!editing) parts.push(counts());
   app.replaceChildren(...parts);
 }
 
@@ -355,6 +376,79 @@ function table(caption, heads, rows) {
 
 const text = (s) => document.createTextNode(String(s));
 
+async function api(method, path, body) {
+  const r = await fetch(path, {
+    method,
+    headers: { "X-Goldlabel": "1", "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || "request failed (" + r.status + ")");
+  return data;
+}
+
+// The row of /api/row as the pass view's state, so the editor reuses its cards.
+const rowState = (row) => ({
+  sample: row.sample,
+  item: { id: row.id, text: row.text, labels: row.labels, note: row.note },
+  labels: row.options,
+  mode: row.mode,
+  storedTaxonomy: row.stored_taxonomy,
+  finished: false,
+});
+
+let editorTitle = "";
+const editorCrumbs = () =>
+  crumbs([["Datasets", "#/"], [editorTitle, dsHref(editing.dataset)], [state.sample, sampleHref(editing.dataset, state.sample)], ["Row " + state.item.id]]);
+
+async function rowView(name, id) {
+  const d = (await getJson("/api/datasets")).find((x) => x.name === name);
+  editorTitle = d ? d.title : name;
+  editing = { dataset: name };
+  try {
+    state = rowState(await getJson("/api/row?dataset=" + enc(name) + "&id=" + enc(id)));
+  } catch (e) {
+    editing = null;
+    throw new Error("no row " + id + " in " + editorTitle);
+  }
+  render();
+  return null; // render() drew the page
+}
+
+function jumpForm(d) {
+  const form = el("form", "flex flex-wrap items-end gap-2");
+  const field = el("div", "flex flex-col gap-1");
+  const input = el("input", "min-h-11 rounded-lg border border-zinc-400 bg-white px-3 dark:border-zinc-600 dark:bg-zinc-950 " + FOCUS, undefined, { id: "jump", type: "text", autocomplete: "off" });
+  field.append(el("label", "text-sm font-medium", "Jump to id", { for: "jump" }), input);
+  const msg = el("p", "w-full text-sm text-red-800 dark:text-red-300", undefined, { role: "alert" });
+  form.append(field, el("button", BTN, "Go", { type: "submit" }), msg);
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const id = input.value.trim();
+    if (!id) return;
+    try {
+      await getJson("/api/row?dataset=" + enc(d.name) + "&id=" + enc(id));
+      location.hash = rowHref(d.name, id);
+    } catch (err) {
+      msg.textContent = "no row " + id + " in " + d.title;
+    }
+  };
+  return form;
+}
+
+function pendingButton(d, s) {
+  const b = el("button", BTN, s.pending ? "Label pending (" + s.pending + ")" : "nothing pending", { type: "button" });
+  b.disabled = !s.pending;
+  b.onclick = async () => {
+    try {
+      location.hash = "#/pass/" + (await api("POST", "/api/pass", { dataset: d.name, samples: [s.name] })).pass;
+    } catch (err) {
+      b.textContent = "Error: " + err.message;
+    }
+  };
+  return b;
+}
+
 function datasetCard(d, linkTitle) {
   const box = el("section", CARD + " flex flex-col gap-3", undefined, { "aria-label": "Dataset " + d.title });
   const title = el("h2", "text-lg font-semibold");
@@ -370,13 +464,15 @@ function datasetCard(d, linkTitle) {
   box.append(
     table(
       "Samples in " + d.title,
-      ["Sample", "Rows", "Labelled", "Pending"],
+      linkTitle ? ["Sample", "Rows", "Labelled", "Pending"] : ["Sample", "Rows", "Labelled", "Pending", ""],
       d.samples.map((s) => {
         const a = el("a", LINK, s.name, { href: sampleHref(d.name, s.name) });
-        return [a, text(s.rows), text(s.labelled), text(s.pending)];
+        const cells = [a, text(s.rows), text(s.labelled), text(s.pending)];
+        return linkTitle ? cells : [...cells, pendingButton(d, s)];
       }),
     ),
   );
+  if (!linkTitle) box.append(jumpForm(d));
   return box;
 }
 
@@ -399,6 +495,13 @@ async function rowsView(name, sample) {
   const d = (await getJson("/api/datasets")).find((x) => x.name === name);
   head.replaceChildren(crumbs([["Datasets", "#/"], [d ? d.title : name, dsHref(name)], [sample]]));
   const box = el("section", CARD + " flex flex-col gap-3");
+  if (d) {
+    const s = d.samples.find((x) => x.name === sample);
+    const bar = el("div", "flex flex-wrap items-end justify-between gap-3");
+    bar.append(jumpForm(d));
+    if (s) bar.append(pendingButton(d, s));
+    box.append(bar);
+  }
   box.append(
     table(
       "Rows of " + sample,
@@ -419,6 +522,7 @@ function parse() {
   const p = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
   if (p[0] === "pass" && p[1]) return { kind: "pass", id: p[1] };
   if (p[0] === "d" && p[1] && p[2] === "s" && p[3]) return { kind: "rows", d: p[1], s: p[3] };
+  if (p[0] === "d" && p[1] && p[2] === "r" && p[3]) return { kind: "row", d: p[1], id: p[3] };
   if (p[0] === "d" && p[1] && !p[2]) return { kind: "dataset", d: p[1] };
   if (!p.length) return { kind: "datasets" };
   return { kind: "unknown" };
@@ -434,7 +538,8 @@ async function browse(r) {
     if (r.kind === "datasets") parts = await datasetsView();
     else if (r.kind === "dataset") parts = await datasetView(r.d);
     else if (r.kind === "rows") parts = await rowsView(r.d, r.s);
-    app.replaceChildren(...parts);
+    else if (r.kind === "row") parts = await rowView(r.d, r.id);
+    if (parts) app.replaceChildren(...parts);
   } catch (e) {
     app.replaceChildren(el("p", "rounded-lg border border-red-700 p-3 text-red-800 dark:border-red-400 dark:text-red-300", "Error: " + e.message, { role: "alert" }));
   }
@@ -449,8 +554,9 @@ async function go() {
   saved = null;
   note = "";
   selected = [];
+  editing = null;
   const r = parse();
-  statusEl.hidden = r.kind !== "pass";
+  statusEl.hidden = r.kind !== "pass" && r.kind !== "row";
   head.replaceChildren();
   if (r.kind === "pass") {
     passId = r.id;

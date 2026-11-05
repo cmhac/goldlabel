@@ -511,6 +511,10 @@ class _Request(BaseHTTPRequestHandler):
                 and parts[4] in ("back", "skip", "done")
             ):
                 state = getattr(server, parts[4])(parts[3])
+                if (
+                    parts[4] == "done"
+                ):  # the page leaves for the dataset list if we stay up
+                    state = {**state, "closing": server.stop_on_done}
                 self._send(200, state)
                 if parts[4] == "done" and server.stop_on_done:
                     threading.Thread(target=server.stop, daemon=True).start()
