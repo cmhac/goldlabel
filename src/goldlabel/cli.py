@@ -102,7 +102,30 @@ def main(argv=None) -> int:
     ins.add_argument(
         "--dry-run", action="store_true", help="print what would be written"
     )
+    lab = sub.add_parser(
+        "label",
+        help="open the labelling page for the gold datasets of a storage folder",
+    )
+    lab.add_argument(
+        "name",
+        nargs="?",
+        metavar="NAME",
+        help="open the dataset made with name=NAME",
+    )
+    lab.add_argument(
+        "--dir", help="the storage folder (default: GOLDLABEL_DIR or .goldlabel)"
+    )
+    lab.add_argument(
+        "--port", type=int, help="the port to listen on (default: a free one)"
+    )
     args = ap.parse_args(argv)
+    if args.command == "label":
+        from goldlabel._label import run_forever  # only this command starts the server
+        from goldlabel.settings import settings
+
+        return run_forever(
+            Path(args.dir) if args.dir else settings.root, args.name, args.port
+        )
     valid = [*AGENTS, "all"]
     if args.dir and args.agents:
         ap.error("--dir takes no agent name")

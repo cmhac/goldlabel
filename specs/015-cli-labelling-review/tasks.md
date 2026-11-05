@@ -94,7 +94,7 @@
   - The editor shows the row's current labels pre-selected and the note, reuses the 013 `options()`, `noteField()`, `textCard()` and `panel()`, saves with `POST /api/label` (no `pass`), says so when `stored_taxonomy` is false, and shows a label outside the options as "not in this taxonomy".
   - **Done** on a pass navigates to `#/` when the server did not stop. Text is set with `textContent`.
 
-- [ ] T008 [US1] Add `goldlabel label [NAME] [--dir PATH] [--port N]` in `src/goldlabel/cli.py` (starting a server; joining comes in T009).
+- [X] T008 [US1] Add `goldlabel label [NAME] [--dir PATH] [--port N]` in `src/goldlabel/cli.py` (starting a server; joining comes in T009).
 
   **Tests first (red)** in `tests/test_cli.py` (in-process `main([...])`, `webbrowser.open` and the blocking wait stubbed, the server started on a thread and stopped by the test):
   - `main(["label"])` in a folder with `gold.json` starts a server, prints `Labelling page: http://127.0.0.1:<port>/`, the folder, and `GOLD_RULE_SHORT`, opens the browser once on `/` and, with `NAME`, on `/#/d/gold-NAME` (the file stem of the named dataset); returns 0 after the wait is released; removes the lock.

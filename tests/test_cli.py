@@ -227,3 +227,117 @@ def test_the_wheel_ships_the_cli_and_the_console_script(tmp_path):
         entry = next(n for n in names if n.endswith("entry_points.txt"))
         assert "goldlabel = goldlabel.cli:main" in z.read(entry).decode()
     assert "goldlabel/cli.py" in names
+
+
+# --- goldlabel label (015) --------------------------------------------------------------------
+
+import http.client
+import json
+import socket
+
+from goldlabel import GOLD_RULE_SHORT, _label
+
+
+def write_dataset(folder, name=None):
+    folder.mkdir(parents=True, exist_ok=True)
+    rows = [{"id": "1", "text": "t", "labels": None, "sample": "dev"}]
+    (folder / ("gold.json" if name is None else f"gold-{name}.json")).write_text(
+        json.dumps({"taxonomy": None, "rows": rows})
+    )
+
+
+@pytest.fixture
+def served(monkeypatch):
+    """Stand in for the person: record the opened URL, query the live server, then return."""
+    seen = {"opened": [], "datasets": None, "stop_on_done": None, "lock": None}
+    monkeypatch.setattr("webbrowser.open", seen["opened"].append)
+
+    def wait(self):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", "/api/datasets")
+        seen["datasets"] = json.loads(conn.getresponse().read())
+        seen["stop_on_done"] = self.stop_on_done
+        seen["lock"] = self.lock.exists()
+
+    monkeypatch.setattr(_label.Server, "wait", wait)
+    return seen
+
+
+def test_label_starts_a_server_for_the_folder_and_removes_its_lock(
+    tmp_path, capsys, served
+):
+    folder = tmp_path / "g"
+    write_dataset(folder)
+    code, out, _ = run(capsys, "label", "--dir", str(folder))
+    assert code == 0
+    (url,) = served["opened"]
+    assert url.startswith("http://127.0.0.1:") and url.endswith("/")
+    assert f"Labelling page: {url}" in out and str(folder) in out
+    assert GOLD_RULE_SHORT in out
+    assert [d["name"] for d in served["datasets"]] == ["gold"]
+    assert served["lock"] is True and not (folder / "labelling.lock").exists()
+    assert (
+        served["stop_on_done"] is False
+    )  # Done does not stop a server the command started
+
+
+def test_label_with_a_name_opens_that_dataset(tmp_path, capsys, served):
+    folder = tmp_path / "g"
+    write_dataset(folder)
+    write_dataset(folder, "corpus-b")
+    assert run(capsys, "label", "corpus-b", "--dir", str(folder))[0] == 0
+    assert served["opened"][0].endswith("/#/d/gold-corpus-b")
+
+
+def test_label_uses_the_storage_folder_setting_without_dir(
+    tmp_path, capsys, served, monkeypatch
+):
+    from goldlabel.settings import settings
+
+    write_dataset(tmp_path / "setting")
+    monkeypatch.setattr(settings, "root", tmp_path / "setting")
+    assert run(capsys, "label")[0] == 0
+    assert [d["name"] for d in served["datasets"]] == ["gold"]
+
+
+def test_label_with_no_dataset_says_so_and_starts_nothing(tmp_path, capsys, served):
+    folder = tmp_path / "empty"
+    folder.mkdir()
+    code, out, _ = run(capsys, "label", "--dir", str(folder))
+    assert code == 1 and str(folder) in out and "gl.Gold" in out
+    assert served["opened"] == [] and not (folder / "labelling.lock").exists()
+
+
+def test_label_with_an_unknown_name_lists_the_datasets_that_exist(
+    tmp_path, capsys, served
+):
+    folder = tmp_path / "g"
+    write_dataset(folder)
+    write_dataset(folder, "corpus-b")
+    code, out, _ = run(capsys, "label", "nope", "--dir", str(folder))
+    assert code == 1 and "default" in out and "corpus-b" in out and "nope" in out
+    assert run(capsys, "label", "Bad Name", "--dir", str(folder))[0] == 1
+    assert served["opened"] == [] and not (folder / "labelling.lock").exists()
+
+
+def test_label_with_a_port_in_use_starts_nothing(tmp_path, capsys, served):
+    folder = tmp_path / "g"
+    write_dataset(folder)
+    with socket.socket() as busy:
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        port = busy.getsockname()[1]
+        code, out, _ = run(capsys, "label", "--dir", str(folder), "--port", str(port))
+    assert code == 1 and str(port) in out
+    assert served["opened"] == [] and not (folder / "labelling.lock").exists()
+
+
+def test_label_has_no_flag_that_sets_or_imports_a_label_or_a_taxonomy(capsys):
+    code, out, _ = run(capsys, "label", "--help")
+    assert code == 0
+    for word in ("--dir", "--port", "NAME", "name"):
+        assert word in out
+    for word in ("--taxonomy", "--labels", "--import", "--set", "--label "):
+        assert word not in out
+    code, _, _ = run(capsys, "label", "--taxonomy", "t.yaml")
+    assert code == 2  # argparse refuses an unknown flag

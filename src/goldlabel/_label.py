@@ -101,6 +101,14 @@ def _need_sample(sample) -> None:
         raise GoldError(NOT_A_SAMPLE.format(kind=type(sample).__name__))
 
 
+def _stems(folder: Path) -> list[str]:
+    """The gold datasets of a storage folder, as file stems: `gold`, `gold-<name>`."""
+    files = folder.glob("gold*.json") if folder.is_dir() else []
+    return sorted(
+        f.stem for f in files if re.fullmatch(r"gold(-[a-z0-9_-]+)?\.json", f.name)
+    )
+
+
 def _title(stem: str) -> str:
     return "default" if stem == "gold" else stem.removeprefix("gold-")
 
@@ -351,12 +359,10 @@ class Server:
         """Every gold file of the folder (`gold.json`, `gold-<name>.json`) with its samples."""
         out = []
         with self._mutex:
-            for f in sorted(self.folder.glob("gold*.json"), key=lambda f: f.stem):
-                if not re.fullmatch(r"gold(-[a-z0-9_-]+)?\.json", f.name):
-                    continue
-                entry = {"name": f.stem, "title": _title(f.stem)}
+            for stem in _stems(self.folder):
+                entry = {"name": stem, "title": _title(stem)}
                 try:
-                    g = self.gold(f.stem)
+                    g = self.gold(stem)
                     samples: dict[str, list] = {}
                     for r in g._read():
                         samples.setdefault(r.sample, []).append(r)
@@ -649,3 +655,41 @@ def label(
         handle.stop()
         raise
     return sample
+
+
+def run_forever(folder: Path, name: str | None = None, port: int | None = None) -> int:
+    """`goldlabel label`: serve every dataset of `folder` until interrupted; the exit code."""
+    stems = _stems(folder)
+    if not stems:
+        print(
+            f"No gold dataset in {folder}. Make one in a notebook with gl.Gold(candidates) "
+            "and gold.draw_sample(...)."
+        )
+        return 1
+    stem = "gold" if name is None else f"gold-{name}"
+    if name is not None and stem not in stems:
+        print(
+            f"No gold dataset {name!r} in {folder}. Datasets there: "
+            + ", ".join(_title(x) for x in stems)
+        )
+        return 1
+    try:
+        server = Server(folder, stop_on_done=False, port=port)
+    except (OSError, GoldRuntimeError) as e:
+        print(f"Cannot start the labelling page (port {port or 'any'}): {e}")
+        return 1
+    url = f"http://127.0.0.1:{server.port}/" + (
+        f"#/d/{stem}" if name is not None else ""
+    )
+    try:
+        print(
+            f"Labelling page: {url}\nFolder: {folder}\n"
+            f"Label in your browser; press Ctrl-C here to stop.\n{GOLD_RULE_SHORT}"
+        )
+        webbrowser.open(url)
+        server.wait()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.stop()
+    return 0

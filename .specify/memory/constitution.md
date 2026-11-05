@@ -166,8 +166,7 @@ names.
   The package has two console commands, both subcommands of `goldlabel`: `goldlabel install` (the
   skills installer, standard library only) and `goldlabel label` (starts or joins the labelling page
   for a storage folder; it writes gold labels only through the labelling server, and `cli.py` imports
-  the server lazily, so `install` and `import goldlabel` stay free of it). There is no other command
-  and no application.
+  the server only inside that command). There is no other command and no application.
 - **External APIs**: every Pydantic AI, `Embedder`, psycopg, boto3 and standard-library API MUST
   be checked against the installed version and the current docs before use, never coded from memory.
 - **pgvector is read-only**; SQL identifiers go through `psycopg.sql.Identifier`.

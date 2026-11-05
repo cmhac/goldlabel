@@ -474,7 +474,7 @@ def test_nothing_public_beyond_serve():
         if not n.startswith("_")
         and getattr(v, "__module__", None) == "goldlabel._label"
     }
-    assert public == {"serve", "label", "Server", "Pass"}
+    assert public == {"serve", "label", "Server", "Pass", "run_forever"}
 
 
 # --- notes (013) ----------------------------------------------------------------------------
