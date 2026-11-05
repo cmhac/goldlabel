@@ -237,6 +237,11 @@ async def _aevaluate(
         "live_calls": preds.live,
         "cached_calls": preds.cached,
         "goldlabel": _goldlabel_version(),
+        # the page joins each id to its text in the gold file, so the text is not copied here
+        "disagreements": [
+            {k: d[k] for k in ("id", "gold", "predicted", "reasoning")}
+            for d in evaluation.disagreements
+        ],
     }
     path = sample.path.parent / "evals.jsonl"
     same = ("samples", "rows_digest", "digest", "model", "metric", "target")

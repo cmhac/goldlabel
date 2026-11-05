@@ -125,7 +125,7 @@
 
 ## Phase 5: User Story 3 (P2) — review evaluations and disagreements
 
-- [ ] T010 [P] [US3] Log the disagreements in `src/goldlabel/evaluation.py`.
+- [X] T010 [P] [US3] Log the disagreements in `src/goldlabel/evaluation.py`.
 
   **Tests first (red)** in `tests/test_evaluation.py`:
   - After `clf.evaluate(sample)` with a `FunctionModel` that gets rows `b` and `d` wrong, the one new `evals.jsonl` line has `"disagreements": [{"id": "b", "gold": [...], "predicted": [...], "reasoning": …}, {"id": "d", …}]` (values written by hand), no `text` key, and `predicted` is `null` for an item that failed.

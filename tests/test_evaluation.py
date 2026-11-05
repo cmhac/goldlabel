@@ -1,6 +1,7 @@
 import hashlib
 import json
 import re
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -248,7 +249,7 @@ def test_each_call_appends_one_line_with_every_field():
     assert set(row) == {
         "time", "samples", "rows_digest", "n", "gold", "model", "digest", "prompt",
         "taxonomy", "metric", "target", "score", "metrics", "dollars", "live_calls",
-        "cached_calls", "goldlabel",
+        "cached_calls", "goldlabel", "disagreements",
     }  # fmt: skip
     assert before <= datetime.fromisoformat(row["time"])
     assert (row["samples"], row["n"], row["model"]) == (["dev"], 5, "m")
@@ -467,3 +468,39 @@ def test_band_sample_refuses_a_per_band_below_one(bad):
     with pytest.raises(ValueError, match="per_band"):
         clf(model).band_sample(banded(), per_band=bad)
     assert calls == []
+
+
+def test_the_log_line_records_the_disagreements_without_their_text():
+    gold, c, calls = five()
+    c.evaluate(gold["dev"])
+    [row] = log_rows()
+    assert row["disagreements"] == [
+        {"id": "2", "gold": ["a"], "predicted": ["b"], "reasoning": "why t2"},
+        {"id": "4", "gold": ["b"], "predicted": ["off_topic"], "reasoning": "why t4"},
+    ]
+    assert all("text" not in d for d in row["disagreements"])
+    text = (settings.root / "evals.jsonl").read_text()
+    c.evaluate(gold["dev"])  # an identical rerun: no line, no model call
+    assert (settings.root / "evals.jsonl").read_text() == text and len(calls) == 5
+    replace(c, prompt="another prompt").evaluate(gold["dev"])
+    assert len(log_rows()) == 2 and "disagreements" in log_rows()[1]
+
+
+def test_an_item_that_failed_is_logged_with_no_prediction():
+    model, _ = answering({"t1": ["a"], "t2": []})
+    gold = write_gold([g("1", ["a"]), g("2", ["b"])])
+    clf(model).evaluate(gold["dev"])
+    [row] = log_rows()
+    assert row["disagreements"] == [
+        {"id": "2", "gold": ["b"], "predicted": None, "reasoning": None}
+    ]
+
+
+def test_a_line_written_before_disagreements_were_logged_still_counts():
+    gold, c, _ = five()
+    c.evaluate(gold["dev"])
+    [row] = log_rows()
+    old = {k: v for k, v in row.items() if k != "disagreements"}
+    with (settings.root / "evals.jsonl").open("a") as f:
+        f.write(json.dumps(old) + "\n")
+    assert "evaluated 2 times (1 prompt)" in repr(gold["dev"])
