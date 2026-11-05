@@ -110,7 +110,7 @@
 
 ## Phase 4: User Story 2 (P1) — `gl.label` and the command join a running server
 
-- [ ] T009 [US2] Join a live server from `gl.label` and from the command, in `src/goldlabel/_label.py` and `src/goldlabel/cli.py`.
+- [X] T009 [US2] Join a live server from `gl.label` and from the command, in `src/goldlabel/_label.py` and `src/goldlabel/cli.py`.
 
   **Tests first (red)** in `tests/test_label_server.py` and `tests/test_cli.py` (a real `Server` on a thread in the test process stands in for "another process"; the lock names this pid, so the test also covers a dead-pid lock, a closed port, and garbage):
   - Live server + `gl.label(dev, taxonomy, open_browser=False)` in a second thread: prints the running server's URL as `http://127.0.0.1:<port>/#/pass/<ID>`; the number of listening sockets in the process does not change; a pass exists with `dev`'s pending rows; the call does not return while a row of the pass is pending; labelling the last pending row over HTTP releases it and it returns the `Sample`; posting `done` for that pass releases it with rows still pending; `KeyboardInterrupt` raised in the waiting thread propagates and writes nothing.

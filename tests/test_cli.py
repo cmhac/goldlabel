@@ -341,3 +341,31 @@ def test_label_has_no_flag_that_sets_or_imports_a_label_or_a_taxonomy(capsys):
         assert word not in out
     code, _, _ = run(capsys, "label", "--taxonomy", "t.yaml")
     assert code == 2  # argparse refuses an unknown flag
+
+
+def test_label_with_a_live_server_prints_its_url_and_starts_no_other(
+    tmp_path, capsys, monkeypatch
+):
+    from goldlabel.gold import Gold
+    from goldlabel.settings import settings
+    from goldlabel.taxonomy import Label, Taxonomy
+
+    folder = tmp_path / "g"
+    write_dataset(folder)
+    write_dataset(folder, "x")
+    monkeypatch.setattr(settings, "root", folder)
+    opened = []
+    monkeypatch.setattr("webbrowser.open", opened.append)
+    live = _label.serve(
+        Gold()["dev"], Taxonomy(mode="single", labels=[Label(name="a")])
+    )
+    try:
+        monkeypatch.setattr(
+            _label, "Server", lambda *a, **k: pytest.fail("started a second server")
+        )
+        code, out, _ = run(capsys, "label", "x", "--dir", str(folder))
+        assert code == 0
+        url = f"http://127.0.0.1:{live.port}/#/d/gold-x"
+        assert url in out and opened == [url]
+    finally:
+        live.stop()

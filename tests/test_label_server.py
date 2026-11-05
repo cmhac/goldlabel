@@ -1113,3 +1113,155 @@ def test_done_says_the_server_stays_up_when_it_was_not_started_by_gl_label(start
         Client(start(stop_on_done=False)).call("POST", "/api/done")[1]["closing"]
         is False
     )
+
+
+# --- joining a live server (015) ----------------------------------------------------------------
+
+import threading
+
+
+@pytest.fixture
+def quick(monkeypatch):
+    """The waiting call polls once a second; make that instant."""
+    monkeypatch.setattr(_label.time, "sleep", lambda s: threading.Event().wait(0.01))
+
+
+class Caller:
+    """Run `gl.label(dev, taxonomy)` in a thread named `caller`, as a second process would."""
+
+    def __init__(self, sample="dev", tax=None, **kw):
+        self.out, self.exc = [], []
+        tax = tax or taxonomy("multi")
+
+        def run():
+            try:
+                self.out.append(
+                    _label.label(Gold()[sample], tax, open_browser=False, **kw)
+                )
+            except BaseException as e:  # noqa: BLE001
+                self.exc.append(e)
+
+        self.thread = threading.Thread(target=run, name="caller", daemon=True)
+        self.thread.start()
+
+    def alive(self, wait=0.3):
+        self.thread.join(wait)
+        return self.thread.is_alive()
+
+
+def printed_pass(capsys, port):
+    """Wait for the joining call to print its pass URL and return the pass id."""
+    out = ""
+    for _ in range(200):
+        out += capsys.readouterr().out
+        marker = f"http://127.0.0.1:{port}/#/pass/"
+        if marker in out:
+            return out.split(marker)[1].split()[0]
+        threading.Event().wait(0.02)
+    raise AssertionError("no pass URL printed: " + out)
+
+
+def test_a_second_label_call_joins_the_running_server_and_waits_for_the_rows(
+    start, gold_path, capsys, quick, monkeypatch
+):
+    h = start("single")
+    monkeypatch.setattr(
+        _label, "serve", lambda *a, **k: pytest.fail("started a server")
+    )
+    c = Client(h)
+    writers = []
+    real = Gold._write
+    monkeypatch.setattr(
+        Gold,
+        "_write",
+        lambda self, *a, **k: (
+            writers.append(threading.current_thread().name),
+            real(self, *a, **k),
+        )[1],
+    )
+    caller = Caller()
+    pid = printed_pass(capsys, h.port)
+    assert pid != c.pass_id
+    s = Client.call(c, "GET", f"/api/pass/{pid}")[1]
+    assert s["total"] == 3 and s["pending"] == 3  # dev's pending rows at the call
+    assert caller.alive()  # waits while rows are pending
+    for i in ("1", "2"):
+        c.call("POST", "/api/label", {"pass": pid, "id": i, "labels": ["a"]})
+    assert caller.alive()
+    c.call("POST", "/api/label", {"pass": pid, "id": "3", "labels": ["b"]})
+    assert not caller.alive(2) and not caller.exc
+    assert [r.id for r in caller.out[0].rows] == ["1", "2", "3"]
+    # the server stored the caller's taxonomy; the calling thread wrote nothing
+    assert (
+        json.loads(gold_path.read_text())["taxonomy"] == taxonomy("multi").model_dump()
+    )
+    assert "caller" not in writers
+
+
+def test_done_on_the_joined_pass_releases_the_call_with_rows_pending(
+    start, capsys, quick
+):
+    h = start()
+    c = Client(h)
+    caller = Caller()
+    pid = printed_pass(capsys, h.port)
+    assert caller.alive()
+    c.call("POST", f"/api/pass/{pid}/done")
+    assert not caller.alive(2) and not caller.exc
+
+
+def test_force_open_ui_prints_the_url_and_returns_at_once(
+    start, gold_path, capsys, quick
+):
+    h = start()
+    caller = Caller(force_open_ui=True)
+    pid = printed_pass(capsys, h.port)
+    assert not caller.alive(2)
+    s = Client(h).call("GET", f"/api/pass/{pid}")[1]
+    assert s["total"] == 3  # every row of the sample
+
+
+def test_an_interrupt_stops_the_wait_and_writes_nothing(
+    start, gold_path, monkeypatch, quick
+):
+    start()
+    before = gold_path.read_bytes()
+
+    def boom(seconds):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(_label.time, "sleep", boom)
+    monkeypatch.setattr("webbrowser.open", lambda url: None)
+    with pytest.raises(KeyboardInterrupt):
+        _label.label(Gold()["dev"], taxonomy("multi"), open_browser=False)
+    assert on_disk(gold_path) == json.loads(before)["rows"]
+
+
+def test_a_live_pid_on_a_closed_port_is_a_stale_lock(start, gold_path, tmp_path):
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        closed = s.getsockname()[1]
+    lock = gold_path.with_name("labelling.lock")
+    lock.write_text(
+        json.dumps(
+            {"pid": os.getpid(), "port": closed, "started": "2020-01-01T00:00:00+00:00"}
+        )
+    )
+    assert _label._live(tmp_path) is None
+    h = start()
+    assert json.loads(lock.read_text())["port"] == h.port
+
+
+def test_a_server_in_another_folder_is_not_joined(start, tmp_path):
+    start()
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    assert _label._live(other) is None and _label._live(tmp_path) is not None
+
+
+def test_a_refused_pass_is_reported_not_swallowed(start):
+    h = start()
+    with pytest.raises(_label.GoldRuntimeError, match="refused.*gold-nope"):
+        _label._ask(h.port, "/api/pass", {"dataset": "gold-nope", "samples": ["dev"]})

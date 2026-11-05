@@ -16,12 +16,15 @@ import re
 import secrets
 import sys
 import threading
+import time
 import webbrowser
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
+from urllib.request import Request, urlopen
 
 from goldlabel._gold_rule import GOLD_RULE_SHORT, GoldError, GoldRuntimeError
 from goldlabel.gold import Gold, GoldSet, Sample
@@ -54,21 +57,43 @@ def _alive(pid: int) -> bool:
     return True
 
 
+def _answers(port: int) -> bool:
+    """Does a labelling server answer on this port?"""
+    try:
+        urlopen(f"http://127.0.0.1:{port}/api/datasets", timeout=2).read()
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _held(lock: Path) -> tuple[int, str | None] | None:
+    """(pid, started) of a live server holding `lock`: its process exists and its port answers."""
+    try:
+        info = json.loads(lock.read_text())
+        pid, port, started = int(info["pid"]), int(info["port"]), info.get("started")
+    except (OSError, ValueError, KeyError, TypeError):
+        return None  # missing or unreadable: stale
+    return (pid, started) if _alive(pid) and _answers(port) else None
+
+
+def _live(folder: Path) -> int | None:
+    """The port of the live labelling server of `folder`, if there is one."""
+    if _held(folder / LOCK) is None:
+        return None
+    return int(json.loads((folder / LOCK).read_text())["port"])
+
+
 def _acquire(lock: Path, port: int) -> None:
     lock.parent.mkdir(parents=True, exist_ok=True)
     for _ in range(3):
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
-            try:
-                info = json.loads(lock.read_text())
-                pid, started = int(info["pid"]), info.get("started")
-            except (OSError, ValueError, KeyError, TypeError):
-                pid, started = None, None  # unreadable: stale
-            if pid is not None and _alive(pid):
+            held = _held(lock)
+            if held is not None:
                 raise GoldRuntimeError(
-                    f"{lock.parent} is already being labelled (pid {pid}, started "
-                    f"{started}); finish or stop that session first"
+                    f"{lock.parent} is already being labelled (pid {held[0]}, started "
+                    f"{held[1]}); finish or stop that session first"
                 ) from None
             lock.unlink(missing_ok=True)
             continue
@@ -613,6 +638,53 @@ def serve(
     return server
 
 
+def _ask(port: int, path: str, body: dict | None = None) -> dict:
+    """One request to the live server of this machine; its error text becomes a GoldRuntimeError."""
+    req = Request(
+        f"http://127.0.0.1:{port}{path}",
+        None if body is None else json.dumps(body).encode(),
+        {"X-Goldlabel": "1", "Content-Type": "application/json"},
+    )
+    try:
+        return json.loads(urlopen(req, timeout=10).read())
+    except HTTPError as e:
+        text = json.loads(e.read()).get("error", e.reason)
+        raise GoldRuntimeError(
+            f"the running labelling page refused the request: {text}"
+        ) from None
+
+
+def _join(
+    port: int, sample: Sample, taxonomy: Taxonomy, force: bool, open_it: bool
+) -> None:
+    """Hand a pass to the labelling server that is already running, then wait for its rows."""
+    body = {
+        "dataset": sample.gold.path.stem,
+        "samples": list(sample.names),
+        "force": force,
+        "taxonomy": taxonomy.model_dump(),  # the server, the one writer, stores it
+    }
+    pass_id = _ask(port, "/api/pass", body)["pass"]
+    url = f"http://127.0.0.1:{port}/#/pass/{pass_id}"
+    print(
+        f"A labelling page is already running; this pass is there: {url}\n"
+        "Label in that page, then press Done (or label every row).\n"
+        f"{GOLD_RULE_SHORT}"
+    )
+    if open_it:
+        webbrowser.open(url)
+    if force:
+        return  # a review pass has nothing pending to wait for
+    try:
+        while True:
+            state = _ask(port, f"/api/pass/{pass_id}")
+            if state["pending"] == 0 or state["ended"]:
+                return
+            time.sleep(1)
+    except (OSError, GoldRuntimeError):
+        print("The labelling page stopped; returning what is labelled so far.")
+
+
 def label(
     sample: Sample,
     taxonomy: Taxonomy,
@@ -640,6 +712,10 @@ def label(
             if scope
             else f"No rows to label in {name}: draw some first (gold.draw_sample)."
         )
+        return sample
+    live = _live(sample.gold.path.parent)
+    if live is not None:
+        _join(live, sample, taxonomy, force_open_ui, open_browser)
         return sample
     handle = serve(sample, taxonomy, force_open_ui=force_open_ui, port=port)
     try:
@@ -673,6 +749,12 @@ def run_forever(folder: Path, name: str | None = None, port: int | None = None) 
             + ", ".join(_title(x) for x in stems)
         )
         return 1
+    live = _live(folder)
+    if live is not None:
+        url = f"http://127.0.0.1:{live}/" + (f"#/d/{stem}" if name is not None else "")
+        print(f"A labelling page is already running for {folder}: {url}")
+        webbrowser.open(url)
+        return 0
     try:
         server = Server(folder, stop_on_done=False, port=port)
     except (OSError, GoldRuntimeError) as e:
