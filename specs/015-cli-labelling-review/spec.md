@@ -12,7 +12,7 @@ The issue's checklist is the scope of this spec. Its three "open decisions" are 
 
 ## Decisions taken (the issue's open decisions)
 
-1. **Taxonomy.** `gl.label` saves a snapshot of the taxonomy it was called with, beside the gold file of that dataset. A page started from the command line reads that snapshot. With no snapshot, the page offers only the labels already used in that dataset's gold file and says so on the page. `clf.evaluate` writes no snapshot (the evaluation log already records the taxonomy it ran with, and a second place that stores one would drift). The command line takes no Python import path.
+1. **Taxonomy.** Stored in the gold file itself (the user's decision, 2026-11-05). A gold dataset becomes one JSON document holding the taxonomy and the rows, instead of one JSON line per row; `gl.label` writes the taxonomy it was called with into it, and a page started from the command line reads it from there. Until `gl.label` has run, the taxonomy is empty and the page offers only the labels already used in that dataset's rows and says so. `clf.evaluate` does not write it. The command line takes no Python import path or taxonomy file.
 2. **Running server.** One lock file per storage folder holds the running server's process id, port and start time. A lock whose process is gone, or whose port does not answer, is stale and is replaced. This lock replaces the per-gold-file `.lock` of 012-014.
 3. **Revision record.** On the gold row itself (the user's decision, 2026-11-05). When the page changes a row that already had labels, the row gets a `revisions` entry holding the time of the change and the previous labels, note and `labelled_by`. There is no separate log. An evaluation is **stale** when any row of its sample has a revision entry newer than the evaluation's own time, so a first label never makes one stale.
 
@@ -32,6 +32,8 @@ The issue's checklist is the scope of this spec. Its three "open decisions" are 
 
 - Q: Where is a revision recorded, and how is an evaluation flagged stale? → A: The user's decision: on the gold row, as a `revisions` list of entries with the time and the previous values (no `revisions.jsonl`, no digest comparison). An evaluation is stale when a row of its sample has a revision newer than the evaluation's time; a first label is not a revision, so it does not make one stale.
 
+- Q: Where do the label options come from for a page started from the terminal? → A: The user's decision: not a separate snapshot file; the gold file itself changes from one JSON line per row to a single JSON document holding the taxonomy and the rows, and `gl.label` writes the taxonomy into it. Files in the 014 format are not read and not migrated (early alpha, as 014 decided).
+
 Run `/speckit-clarify` again to overturn any of the three decisions above.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -46,7 +48,7 @@ A colleague is told "labels for rows `a17` and `b203` in the trump dataset are w
 
 **Acceptance Scenarios**:
 
-1. **Given** a storage folder with `gold.jsonl` and `gold-corpus-b.jsonl`, **When** the user runs `goldlabel label` (no name), **Then** the page lists both datasets, each with its samples, their row counts and labelled counts, and does not open any row.
+1. **Given** a storage folder with `gold.json` and `gold-corpus-b.json`, **When** the user runs `goldlabel label` (no name), **Then** the page lists both datasets, each with its samples, their row counts and labelled counts, and does not open any row.
 2. **Given** the same folder, **When** the user runs `goldlabel label corpus-b`, **Then** the page opens on that dataset; a name that matches no file prints the datasets that exist and exits non-zero without starting a server.
 3. **Given** a labelled row `a17`, **When** the user opens it by id and saves a different label, **Then** the gold file holds the new label stamped `labelled_by: "goldlabel-ui"` with a new `labelled_at`, and the row gains one `revisions` entry holding the time and the previous labels, note and `labelled_by`.
 4. **Given** an id that is not in the dataset, **When** the user submits it in **Jump to id**, **Then** the page says so and stays where it was.
@@ -69,7 +71,7 @@ A notebook user has the page open from the terminal, then runs `gl.label(dev, ta
 2. **Given** that call, **When** the page is opened from the printed URL, **Then** it opens on the pass over the sample's rows that were pending at the call, so the labelling flow of 013-014 is unchanged.
 3. **Given** a lock naming a process that no longer exists, or a port that does not answer, **When** `gl.label` or `goldlabel label` runs, **Then** the lock is replaced and a server starts.
 4. **Given** two storage folders, **When** a server runs for one, **Then** the other is unaffected.
-5. **Given** the taxonomy passed to `gl.label` differs from the saved snapshot, **When** it runs, **Then** the snapshot is replaced with the new one and a running server uses it from its next request.
+5. **Given** the taxonomy passed to `gl.label` differs from the one stored in the gold file, **When** it runs, **Then** the stored taxonomy is replaced with the new one, rows and their labels are untouched, and a running server uses it from its next request.
 6. **Given** a server started by `gl.label`, **When** the user presses **Done**, **Then** the server stops as today. A server started by `goldlabel label` ignores **Done** for stopping and runs until the terminal process is interrupted.
 
 ---
@@ -134,14 +136,14 @@ Every change to an already-labelled row's labels or note adds an entry to that r
 ### Edge Cases
 
 - No gold file in the storage folder: the command starts nothing and prints that no gold dataset was found in the folder (the path), and how to make one.
-- A gold file with a malformed line: the page shows the dataset's error (the file and line) and the other datasets still list.
+- A gold file that is not valid JSON, is in the 014 line-per-row format, or has a bad row: the page shows the dataset's error (the file and, for a bad row, its position) and the other datasets still list.
 - A dataset drawn from a notebook while the page is open: the next page load shows it; the page does not poll.
 - A dataset with a sample whose rows are all labelled: the sample's **Label pending** action is disabled and says "nothing pending".
 - `--port` already in use: exit non-zero with the message and start nothing; a bare run picks a free port.
 - Two browser tabs on one server: saves are serialized and both read the file each time, so the later save wins; both are recorded as entries.
 - A stale lock found on a read-only folder: the command reports it cannot replace the lock and exits non-zero.
-- A taxonomy snapshot that does not parse: treated as missing, and the page says labels shown are the ones already used.
-- A saved label that is not in the snapshot taxonomy (a row labelled under an older taxonomy): shown in the row as-is, and a revision can only choose among snapshot labels; the page flags it as "not in this taxonomy".
+- A gold file with no taxonomy yet (drawn or imported, never labelled with `gl.label`): the page says the labels shown are the ones already used, and a first label for a pending row can only choose among them.
+- A saved label that is not in the stored taxonomy (a row labelled under an older taxonomy): shown in the row as-is, and a revision can only choose among the stored taxonomy's labels; the page flags it as "not in this taxonomy".
 - `labelled_by` of a row is something other than the three known values: the entry copies it unchanged.
 - The server never listens beyond 127.0.0.1 and keeps the Host and token checks of 013; the lock file that carries the token is created readable only by its owner.
 
@@ -161,7 +163,7 @@ Every change to an already-labelled row's labels or note adds an entry to that r
 - **FR-005**: A running server MUST be discoverable by the storage folder through one lock file holding its process id, port, start time and access token, created readable only by its owner and removed when the server stops.
 - **FR-006**: `gl.label(sample, taxonomy, ...)` MUST, when a server for that folder is already running, print that server's URL aimed at the pass over the rows pending in `sample` at the call (every row of `sample` with `force_open_ui=True`), start no server, and wait until none of those rows is still pending, then return the `Sample`; an interrupt stops the wait and writes nothing. With `force_open_ui=True` there is nothing pending to wait for, so it prints the URL and returns at once. With none running it MUST behave as in 012-014.
 - **FR-007**: A lock whose process is gone, or whose port does not answer a request carrying its token, MUST be treated as stale and replaced. The per-gold-file lock and its "already being labelled" refusal are removed.
-- **FR-008**: `gl.label` MUST save the taxonomy it was called with to a snapshot beside the gold file; a running server MUST use the snapshot as it is at each request.
+- **FR-008**: `gl.label` MUST write the taxonomy it was called with into the gold file; a running server MUST read the stored taxonomy at each request. Only the labelling server (`gl.label` and the page) writes it; `draw_sample`, `Gold.import_rows` and `clf.evaluate` keep whatever the file holds.
 
 **Browse and navigate**
 
@@ -172,9 +174,13 @@ Every change to an already-labelled row's labels or note adds an entry to that r
 
 **Revise**
 
-- **FR-013**: On any row the user MUST be able to change its labels (within the snapshot taxonomy and its `single`/`multi` mode) and its note, with the same keyboard behaviour as 013, and the change MUST be saved at once.
+- **FR-013**: On any row the user MUST be able to change its labels (within the stored taxonomy and its `single`/`multi` mode) and its note, with the same keyboard behaviour as 013, and the change MUST be saved at once.
 - **FR-014**: The server MUST validate every revision exactly as it validates a first label (known labels, mode, body size) and MUST be the only writer of gold labels besides `Gold.import_rows`.
-- **FR-015**: A revised row MUST be restamped `labelled_by: "goldlabel-ui"` with a new `labelled_at`; the only change to the gold-file format is the optional `revisions` key (FR-016); files from 014 still read unchanged.
+- **FR-015**: A revised row MUST be restamped `labelled_by: "goldlabel-ui"` with a new `labelled_at`; the gold-file format changes as FR-026 says, and no other way to set a label is added.
+
+**Gold file format**
+
+- **FR-026**: A gold dataset MUST be one JSON document in the storage folder, `gold.json` or `gold-<name>.json`, holding the dataset's taxonomy (empty until `gl.label` stores one) and its rows; each row keeps the fields of 014 plus the optional `revisions` list of FR-016. Every write MUST replace the whole file atomically, as today. Files in the 014 format (`gold*.jsonl`) MUST NOT be read, migrated or given an alias. The removed-rows file and `evals.jsonl` keep their line-per-record form.
 
 **Revision record**
 
@@ -196,13 +202,13 @@ Every change to an already-labelled row's labels or note adds an entry to that r
 
 **Agent surface**
 
-- **FR-025**: The skills, the README and `docs/agent-instructions.md` MUST tell users to run `goldlabel label` to review or revise labels and tell agents to hand that command to the user, never to write a label. The gold rule's canonical text MUST NOT change. The constitution (Additional Constraints: "one console command, ... there is no other command") and `AGENTS.md` MUST be amended in the same change to allow `goldlabel label` (a MINOR amendment, 1.4.0, which needs the user's approval before implementing).
+- **FR-025**: The skills, the README and `docs/agent-instructions.md` MUST tell users to run `goldlabel label` to review or revise labels and tell agents to hand that command to the user, never to write a label. Everything that names `gold.jsonl` (the docs, skills, `AGENTS.md`, examples and their drift tests) MUST name the new file. The gold rule's canonical text MUST NOT change. The constitution (Additional Constraints: "one console command, ... there is no other command") and `AGENTS.md` MUST be amended in the same change to allow `goldlabel label` (a MINOR amendment, 1.4.0, which needs the user's approval before implementing).
 
 ### Key Entities
 
-- **Storage folder**: the folder named by `--dir`, `GOLDLABEL_DIR` or `.goldlabel/`; holds the gold files, `evals.jsonl`, taxonomy snapshots and the server lock.
+- **Storage folder**: the folder named by `--dir`, `GOLDLABEL_DIR` or `.goldlabel/`; holds the gold files (each with its taxonomy), `evals.jsonl` and the server lock.
 - **Server lock**: process id, port, start time and token of the one running labelling server for a storage folder.
-- **Taxonomy snapshot**: the taxonomy `gl.label` last saved for a gold dataset; used only to show label options.
+- **Stored taxonomy**: the taxonomy `gl.label` last wrote into a gold dataset's file; the page uses it for label options.
 - **Revision entry**: an item in a gold row's `revisions` list: the time of a change and the labels, note and `labelled_by` the row had just before it.
 - **Evaluation line (extended)**: an existing `evals.jsonl` line plus its disagreements; **stale** is derived from it and the rows' revision times, never stored.
 - **Pass**: the rows `gl.label` or **Label pending** walks, fixed when it starts (unchanged from 013-014).
@@ -223,8 +229,9 @@ Every change to an already-labelled row's labels or note adds an entry to that r
 - The user runs the command from a terminal with a browser on the same machine, as with `gl.label`; running it for another machine is out of scope.
 - The disagreement list is stored from this version on; older evaluation lines stay readable and show metrics only.
 - Staleness compares each evaluation's logged time with the `at` of the rows' revision entries; no digest is compared. Notes never reach a model, so a note-only revision flags an evaluation that did not need it; that is accepted for simplicity.
-- `gold-<name>.jsonl` and `gold.jsonl` are the only gold files; `*.removed.jsonl` and `*.tmp` are not datasets.
+- `gold-<name>.json` and `gold.json` are the only gold files; `*.removed.jsonl` and `*.tmp` are not datasets.
 - The labelling flow, keys and counts of 013-014 are unchanged and keep their tests, except the per-file lock tests, which move to the folder lock.
+- `evals.jsonl` lines written before this feature name a `.jsonl` gold file, so the page does not list them under the new file; they stay in the log.
 - A person who can read the lock file can already edit the gold file; the token's job is to stop other local processes and web pages, as in 013.
 
 ## Human checks (agents report these and stop)
@@ -234,7 +241,7 @@ Open the command's page in a real browser at 1280px and 390px, light and dark, w
 ## Deliberately skipped
 
 - Running evaluations, classifications or estimates from the page (the issue says evaluations stay code-only).
-- Editing the taxonomy in the page, a taxonomy file or Python import path for the command, and `clf.evaluate` writing a taxonomy snapshot.
+- Editing the taxonomy in the page, a taxonomy file or Python import path for the command, and `clf.evaluate` writing the taxonomy.
 - Adding, drawing, removing or moving rows from the page (`draw_sample` and `remove` stay in code).
 - Searching by text, filters, sorting or bulk revision; only list, **Jump to id**, and **Label pending**.
 - Undoing a revision from the page, or showing a row's revision entries in the page (they are in the gold file; read it with polars).
@@ -243,5 +250,5 @@ Open the command's page in a real browser at 1280px and 390px, light and dark, w
 - `--host`, `--no-browser`, and serving beyond 127.0.0.1.
 - A sticky or floating text on the one-column layout, and a new layout below 1024px.
 - Accounts, names for reviewers, or any "who revised" beyond the `labelled_by` stamp.
-- Any migration of older logs, or reading disagreements back out of the cache for old evaluation lines.
+- Any reading or migration of 014-format gold files, and of older logs, or reading disagreements back out of the cache for old evaluation lines.
 - Any change to the classifier, cache, cost ledger, metrics, or to what an evaluation scores.
