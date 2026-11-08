@@ -15,6 +15,7 @@ from goldlabel.settings import resolve
 from goldlabel.taxonomy import Taxonomy
 
 NAME = re.compile(r"[a-z0-9_-]+")  # lowercase: dataset names become file names
+_KEEP = object()  # `_write(rows)` keeps the taxonomy already stored in the file
 
 
 def _check_name(name, what: str = "sample") -> str:
@@ -45,6 +46,9 @@ class GoldRow(BaseModel):
     note: str | None = (
         None  # a person's comment on the row, written by the labelling page
     )
+    # the values before each change the labelling page made to an already-labelled row, oldest
+    # first: {"at", "labels", "note", "labelled_by"}
+    revisions: list[dict] | None = None
 
     @field_validator("sample")
     @classmethod
@@ -58,6 +62,8 @@ class GoldRow(BaseModel):
         for key in ("labelled_by", "labelled_at", "note"):
             if d[key] is None:
                 del d[key]
+        if not d["revisions"]:
+            del d["revisions"]
         return d
 
 
@@ -200,9 +206,7 @@ class Gold:
             _check_name(name, "dataset")
         self.candidates, self.name = candidates, name
         self.sample_size = _check_size(sample_size, "sample_size")
-        self.path = resolve(
-            None, "gold.jsonl" if name is None else f"gold-{name}.jsonl"
-        )
+        self.path = resolve(None, "gold.json" if name is None else f"gold-{name}.json")
 
     @property
     def label(self) -> str:
@@ -234,24 +238,42 @@ class Gold:
             ["sample", "rows", "labelled", "pending"], table
         )
 
-    def _read(self) -> list[GoldRow]:
+    def _doc(self) -> dict:
+        """The file as `{"taxonomy": dict | None, "rows": [raw rows]}`."""
         if not self.path.exists():
-            return []
+            return {"taxonomy": None, "rows": []}
+        try:
+            doc = json.loads(self.path.read_text())
+        except json.JSONDecodeError as e:
+            raise GoldError(f"{self.path}: not a gold file ({e})") from e
+        if not isinstance(doc, dict) or not isinstance(doc.get("rows"), list):
+            raise GoldError(
+                f"{self.path}: not a gold file (expected an object with a 'rows' list)"
+            )
+        return doc
+
+    def _read(self) -> list[GoldRow]:
         rows = []
-        for n, line in enumerate(self.path.read_text().splitlines(), 1):
-            if not line.strip():
-                continue
+        for n, raw in enumerate(self._doc()["rows"], 1):
             try:
-                rows.append(GoldRow.model_validate(json.loads(line)))
-            except (json.JSONDecodeError, ValidationError) as e:
-                raise GoldError(f"{self.path}:{n}: not a gold row ({e})") from e
+                rows.append(GoldRow.model_validate(raw))
+            except ValidationError as e:
+                raise GoldError(f"{self.path}: row {n}: not a gold row ({e})") from e
         return rows
 
-    def _write(self, rows: list[GoldRow]) -> None:
+    def _write(self, rows: list[GoldRow], taxonomy=_KEEP) -> None:
+        # shortcut: the whole file is rewritten on every save, fine for hundreds of rows, switch to
+        # appending changes when a gold set reaches tens of thousands
+        if taxonomy is _KEEP:
+            taxonomy = self._doc().get("taxonomy")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
         try:
-            tmp.write_text("".join(json.dumps(r.dump()) + "\n" for r in rows))
+            tmp.write_text(
+                json.dumps(
+                    {"taxonomy": taxonomy, "rows": [r.dump() for r in rows]}, indent=2
+                )
+            )
             os.replace(tmp, self.path)
         except BaseException:
             tmp.unlink(missing_ok=True)

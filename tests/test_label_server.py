@@ -3,7 +3,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -24,7 +24,7 @@ def rows(*specs):
 
 
 def write_gold(path, rows_):
-    path.write_text("".join(json.dumps(r) + "\n" for r in rows_))
+    path.write_text(json.dumps({"taxonomy": None, "rows": rows_}))
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ def taxonomy(mode="multi"):
 
 @pytest.fixture
 def gold_path(tmp_path):
-    p = tmp_path / "gold.jsonl"
+    p = tmp_path / "gold.json"
     write_gold(
         p,
         rows(
@@ -69,22 +69,32 @@ def start(gold_path):
 
 
 class Client:
+    """Speaks the pass routes of `handle`'s first pass; the 013 helper paths map onto them."""
+
     def __init__(self, handle):
         u = urlparse(handle.url)
         self.host, self.port = u.hostname, u.port
-        self.token = u.query.removeprefix("token=")
+        self.pass_id = u.fragment.removeprefix("/pass/")
 
-    def call(self, method, path, body=None, *, token="ok", host=None):
-        if token == "ok":
-            token = self.token
+    def call(self, method, path, body=None, *, host=None, header=True):
+        me = f"/api/pass/{self.pass_id}"
+        path = {
+            "/api/state": me,
+            "/api/back": me + "/back",
+            "/api/skip": me + "/skip",
+            "/api/done": me + "/done",
+        }.get(path, path)
+        if path == "/api/label" and isinstance(body, dict) and "dataset" not in body:
+            body = {"pass": self.pass_id, **body}
         conn = http.client.HTTPConnection(self.host, self.port, timeout=5)
-        q = f"?token={token}" if token is not None else ""
         headers = {"Host": host} if host else {}
+        if method != "GET" and header:
+            headers["X-Goldlabel"] = "1"
         data = None
         if body is not None:
             data = json.dumps(body)
             headers["Content-Type"] = "application/json"
-        conn.request(method, path + q, data, headers)
+        conn.request(method, path, data, headers)
         r = conn.getresponse()
         raw = r.read().decode()
         conn.close()
@@ -103,7 +113,7 @@ class Client:
 
 
 def on_disk(path):
-    return [json.loads(line) for line in path.read_text().splitlines()]
+    return json.loads(path.read_text())["rows"]
 
 
 # --- binding and access ------------------------------------------------------------------------
@@ -116,23 +126,32 @@ def test_binds_loopback_only(start):
     assert h.port != 0
 
 
-def test_403_without_or_with_wrong_token(start):
-    c = Client(start())
-    assert c.call("GET", "/api/state", token=None)[0] == 403
-    assert c.call("GET", "/api/state", token="wrong")[0] == 403
-    assert (
-        c.call("POST", "/api/label", {"id": "1", "labels": ["a"]}, token="x")[0] == 403
-    )
-    assert c.call("GET", "/", token=None)[0] == 403
-    assert c.call("GET", "/api/state")[0] == 200
-
-
-def test_token_in_header_is_accepted(start):
+def test_there_is_no_access_token(start):
     h = start()
     c = Client(h)
-    conn = http.client.HTTPConnection(c.host, c.port, timeout=5)
-    conn.request("GET", "/api/state", headers={"X-Goldlabel-Token": c.token})
-    assert conn.getresponse().status == 200
+    assert "token" not in h.url.lower()
+    assert "token" not in c.call("GET", "/")[1].lower()
+    assert (
+        c.call("GET", f"/api/pass/{c.pass_id}?token=anything")[0] == 200
+    )  # nothing reads one
+
+
+def test_writes_need_the_x_goldlabel_header_and_reads_do_not(start, gold_path):
+    c = Client(start())
+    before = gold_path.read_bytes()
+    body = {"id": "1", "labels": ["a"]}
+    assert c.call("POST", "/api/label", body, header=False)[0] == 403
+    assert (
+        c.call(
+            "POST", "/api/pass", {"dataset": "gold", "samples": ["dev"]}, header=False
+        )[0]
+        == 403
+    )
+    for verb in ("back", "skip", "done"):
+        assert c.call("POST", f"/api/pass/{c.pass_id}/{verb}", header=False)[0] == 403
+    assert gold_path.read_bytes() == before
+    assert c.call("GET", "/api/state", header=False)[0] == 200
+    assert c.call("POST", "/api/label", body)[0] == 200
 
 
 def test_403_for_foreign_host(start):
@@ -196,7 +215,7 @@ def test_only_a_sample_can_be_served(gold_path):
 
 
 def test_already_labelled_rows_are_not_in_the_pass(tmp_path):
-    p = tmp_path / "gold.jsonl"
+    p = tmp_path / "gold.json"
     write_gold(
         p,
         rows(
@@ -255,18 +274,18 @@ def test_bad_requests(start):
     assert c.call("POST", "/api/label", {"id": "1", "labels": "a"})[0] == 400
     assert c.call("POST", "/api/label", [1])[0] == 400
     conn = http.client.HTTPConnection(c.host, c.port, timeout=5)
-    conn.request("POST", f"/api/label?token={c.token}", "{not json")
+    conn.request("POST", "/api/label", "{not json", {"X-Goldlabel": "1"})
     assert conn.getresponse().status == 400
 
 
 def test_label_writes_and_stamps_and_leaves_other_rows_identical(start, gold_path):
     c = Client(start())
-    lines = gold_path.read_text().splitlines()
+    lines = on_disk(gold_path)
     status, s = c.label("2", ["b"])
     assert status == 200
-    new = gold_path.read_text().splitlines()
-    assert new[0] == lines[0] and new[2:] == lines[2:]  # other rows byte-identical
-    row = json.loads(new[1])
+    new = on_disk(gold_path)
+    assert new[0] == lines[0] and new[2:] == lines[2:]  # other rows identical
+    row = new[1]
     assert row["labels"] == ["b"]
     assert row["labelled_by"] == "goldlabel-ui"
     datetime.fromisoformat(row["labelled_at"])
@@ -287,13 +306,9 @@ def test_label_advances_in_file_order_then_finishes(start):
 
 
 def test_extra_keys_survive_labelling(tmp_path):
-    p = tmp_path / "gold.jsonl"
-    p.write_text(
-        json.dumps(
-            {"id": "1", "text": "t", "labels": None, "sample": "dev", "src": "x"}
-        )
-        + "\n"
-    )
+    p = tmp_path / "gold.json"
+    row = {"id": "1", "text": "t", "labels": None, "sample": "dev", "src": "x"}
+    p.write_text(json.dumps({"taxonomy": None, "rows": [row]}))
     h = _label.serve(Gold()["dev"], taxonomy())
     try:
         Client(h).label("1", ["a"])
@@ -366,7 +381,7 @@ def test_skip_with_one_pending_row_stays(start):
 
 def test_done_stops_server_and_removes_lock(start, gold_path):
     h = start()
-    lock = gold_path.with_name("gold.jsonl.lock")
+    lock = gold_path.with_name("labelling.lock")
     assert lock.exists()
     c = Client(h)
     status, _, _ = c.call("POST", "/api/done")
@@ -381,13 +396,14 @@ def test_stop_releases_lock_and_is_idempotent(start, gold_path):
     h = start()
     h.stop()
     h.stop()
-    assert not gold_path.with_name("gold.jsonl.lock").exists()
+    assert not gold_path.with_name("labelling.lock").exists()
 
 
-def test_lock_holds_pid_and_start_time(start, gold_path):
-    start()
-    lock = json.loads(gold_path.with_name("gold.jsonl.lock").read_text())
-    assert lock["pid"] == os.getpid()
+def test_lock_holds_pid_port_and_start_time(start, gold_path):
+    h = start()
+    lock = json.loads(gold_path.with_name("labelling.lock").read_text())
+    assert set(lock) == {"pid", "port", "started"}
+    assert lock["pid"] == os.getpid() and lock["port"] == h.port
     datetime.fromisoformat(lock["started"])
 
 
@@ -400,23 +416,23 @@ def test_second_server_on_same_file_is_refused(start):
 def test_stale_lock_is_replaced(start, gold_path):
     dead = subprocess.Popen([sys.executable, "-c", "pass"])
     dead.wait()
-    lock = gold_path.with_name("gold.jsonl.lock")
+    lock = gold_path.with_name("labelling.lock")
     lock.write_text(
-        json.dumps({"pid": dead.pid, "started": "2020-01-01T00:00:00+00:00"})
+        json.dumps({"pid": dead.pid, "port": 1, "started": "2020-01-01T00:00:00+00:00"})
     )
     start()
     assert json.loads(lock.read_text())["pid"] == os.getpid()
 
 
 def test_garbage_lock_counts_as_stale(start, gold_path):
-    gold_path.with_name("gold.jsonl.lock").write_text("not json")
+    gold_path.with_name("labelling.lock").write_text("not json")
     assert Client(start()).state()["total"] == 3
 
 
 def test_failed_start_leaves_no_lock(gold_path):
     with pytest.raises(ValueError):
         _label.serve(Gold(), taxonomy())  # ty: ignore[invalid-argument-type]
-    assert not gold_path.with_name("gold.jsonl.lock").exists()
+    assert not gold_path.with_name("labelling.lock").exists()
 
 
 def test_wait_returns_after_stop(start):
@@ -458,7 +474,7 @@ def test_nothing_public_beyond_serve():
         if not n.startswith("_")
         and getattr(v, "__module__", None) == "goldlabel._label"
     }
-    assert public == {"serve", "label", "Handle"}
+    assert public == {"serve", "label", "Server", "Pass", "run_forever"}
 
 
 # --- notes (013) ----------------------------------------------------------------------------
@@ -508,7 +524,7 @@ def test_a_note_that_is_not_a_string_is_refused_and_nothing_is_written(
 @pytest.fixture
 def fifty_and_fifty(tmp_path):
     """50 labelled dev rows d0..d49 and 50 pending test rows t0..t49."""
-    p = tmp_path / "gold.jsonl"
+    p = tmp_path / "gold.json"
     write_gold(
         p,
         rows(*[(f"d{i}", ["a"], "dev") for i in range(50)])
@@ -577,14 +593,14 @@ def test_back_returns_to_a_row_labelled_in_this_pass(fifty_and_fifty):
 
 
 def test_a_row_outside_the_pass_cannot_be_labelled(fifty_and_fifty):
-    before = fifty_and_fifty.read_bytes()
     h = serve("test")
+    before = on_disk(fifty_and_fifty)  # serving only stores the taxonomy
     try:
         status, _ = Client(h).label("d0", ["b"])
         assert status == 404
     finally:
         h.stop()
-    assert fifty_and_fifty.read_bytes() == before
+    assert on_disk(fifty_and_fifty) == before
 
 
 def test_a_review_pass_walks_every_row_in_file_order(fifty_and_fifty):
@@ -602,3 +618,854 @@ def test_a_review_pass_walks_every_row_in_file_order(fifty_and_fifty):
         assert s["finished"] is True and s["item"] is None
     finally:
         h.stop()
+
+
+# --- passes and the folder lock (015) -----------------------------------------------------------
+
+
+def new_pass(c, **body):
+    body = {"dataset": "gold", "samples": ["dev"], **body}
+    status, out, _ = c.call("POST", "/api/pass", body)
+    return status, out
+
+
+def pass_call(c, pass_id, method, tail="", body=None):
+    return c.call(method, f"/api/pass/{pass_id}{tail}", body)
+
+
+def test_a_pass_can_be_created_over_http_with_a_random_id(start):
+    c = Client(start())
+    status, out = new_pass(c, samples=["test"])
+    assert status == 200 and set(out) == {"pass"}
+    assert out["pass"] != c.pass_id and len(out["pass"]) >= 6
+    status, s, _ = pass_call(c, out["pass"], "GET")
+    assert status == 200 and s["item"]["id"] == "t1" and s["sample"] == "test"
+    assert (s["total"], s["done"], s["pending"], s["ended"]) == (1, 0, 1, False)
+
+
+def test_two_passes_do_not_disturb_each_other(start, gold_path):
+    c = Client(start())
+    other = new_pass(c, samples=["test"])[1]["pass"]
+    assert c.label("1", ["a"])[1]["item"]["id"] == "2"
+    s = pass_call(c, other, "GET")[1]
+    assert s["item"]["id"] == "t1" and s["done"] == 0
+    status, s, _ = c.call(
+        "POST", "/api/label", {"pass": other, "id": "t1", "labels": ["b"]}
+    )
+    assert status == 200 and s["finished"] is True
+    assert c.state()["done"] == 1 and c.state()["item"]["id"] == "2"
+    # a row of one pass is not labellable through the other
+    assert (
+        c.call("POST", "/api/label", {"pass": other, "id": "2", "labels": ["a"]})[0]
+        == 404
+    )
+
+
+def test_force_makes_a_pass_over_every_row_of_the_sample(tmp_path):
+    p = tmp_path / "gold.json"
+    write_gold(p, rows(("1", ["a"], "dev"), ("2", None, "dev")))
+    h = _label.serve(Gold()["dev"], taxonomy())
+    try:
+        c = Client(h)
+        assert c.state()["total"] == 1
+        out = new_pass(c, force=True)[1]["pass"]
+        s = pass_call(c, out, "GET")[1]
+        assert (s["total"], s["item"]["id"]) == (2, "1")
+    finally:
+        h.stop()
+
+
+def test_an_unknown_pass_or_dataset_or_sample_is_404(start):
+    c = Client(start())
+    for call in (
+        lambda: pass_call(c, "nope", "GET"),
+        lambda: pass_call(c, "nope", "POST", "/back"),
+        lambda: pass_call(c, "nope", "POST", "/skip"),
+        lambda: pass_call(c, "nope", "POST", "/done"),
+        lambda: c.call(
+            "POST", "/api/label", {"pass": "nope", "id": "1", "labels": ["a"]}
+        ),
+    ):
+        status, body, _ = call()
+        assert status == 404 and body["error"] == "this pass has ended"
+    assert new_pass(c, dataset="gold-nope")[0] == 404
+    assert new_pass(c, samples=["nope"])[0] == 404
+    assert new_pass(c, samples="dev")[0] == 400
+    assert c.call("POST", "/api/pass", {"samples": ["dev"]})[0] == 400
+
+
+def test_a_pass_reports_pending_and_ended(start):
+    c = Client(start(sample="test", stop_on_done=False))
+    assert c.state()["pending"] == 1
+    c.label("t1", ["a"])
+    s = c.state()
+    assert (s["pending"], s["ended"]) == (0, False)
+    assert c.call("POST", "/api/done")[1]["ended"] is True
+    assert (
+        c.state()["ended"] is True
+    )  # a stopped server cannot answer, so this one stays up
+
+
+def test_a_server_not_started_by_gl_label_survives_done(gold_path):
+    h = _label.serve(Gold()["dev"], taxonomy(), stop_on_done=False)
+    try:
+        c = Client(h)
+        s = c.call("POST", "/api/done")[1]
+        assert s["ended"] is True
+        assert c.call("GET", "/api/state")[0] == 200
+        assert gold_path.with_name("labelling.lock").exists()
+    finally:
+        h.stop()
+
+
+def test_serving_stores_the_taxonomy_in_the_gold_file_and_nothing_else(
+    start, gold_path
+):
+    before = on_disk(gold_path)
+    start()
+    doc = json.loads(gold_path.read_text())
+    assert doc["taxonomy"] == taxonomy().model_dump()
+    assert doc["rows"] == before
+
+
+def test_the_lock_is_per_storage_folder_so_two_datasets_share_it(start, tmp_path):
+    start()
+    write_gold(tmp_path / "gold-b.json", rows(("9", None, "dev")))
+    with pytest.raises(RuntimeError, match="already being labelled"):
+        _label.serve(Gold(name="b")["dev"], taxonomy())
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    write_gold(other / "gold.json", rows(("9", None, "dev")))
+    g = Gold()
+    g.path = other / "gold.json"
+    h = _label.serve(g["dev"], taxonomy())  # a different folder has its own lock
+    h.stop()
+
+
+# --- revisions (015) ----------------------------------------------------------------------------
+
+
+def labelled(id_, labels, by="goldlabel-ui", note=None, at="2026-01-01T00:00:00+00:00"):
+    row = {"id": id_, "text": f"text {id_}", "labels": labels, "sample": "dev"}
+    row |= {"labelled_by": by, "labelled_at": at}
+    if note is not None:
+        row["note"] = note
+    return row
+
+
+def review(tmp_path, *rows_, mode="multi"):
+    """Serve a review pass over a hand-written dev sample of labelled rows."""
+    p = tmp_path / "gold.json"
+    write_gold(p, list(rows_))
+    h = _label.serve(Gold()["dev"], taxonomy(mode), force_open_ui=True)
+    return p, h, Client(h)
+
+
+def post_label(c, id_, labels, **extra):
+    return c.call("POST", "/api/label", {"id": id_, "labels": labels, **extra})[:2]
+
+
+def test_changing_the_labels_of_a_labelled_row_adds_one_revision(tmp_path):
+    p, h, c = review(tmp_path, labelled("1", ["a"], note="old"), labelled("2", ["b"]))
+    try:
+        t0 = datetime.now(UTC)
+        status, _ = post_label(c, "1", ["b"])
+        t1 = datetime.now(UTC)
+    finally:
+        h.stop()
+    assert status == 200
+    row, other = on_disk(p)
+    assert row["labels"] == ["b"] and row["note"] == "old"
+    assert row["labelled_by"] == "goldlabel-ui"
+    assert t0 <= datetime.fromisoformat(row["labelled_at"]) <= t1
+    (entry,) = row["revisions"]
+    assert set(entry) == {"at", "labels", "note", "labelled_by"}
+    assert entry["labels"] == ["a"] and entry["note"] == "old"
+    assert entry["labelled_by"] == "goldlabel-ui"
+    assert t0 <= datetime.fromisoformat(entry["at"]) <= t1
+    assert other == labelled("2", ["b"])  # every other row is untouched
+
+
+def test_revising_an_imported_row_keeps_imported_as_the_previous_stamp(tmp_path):
+    p, h, c = review(tmp_path, labelled("1", ["a"], by="imported"))
+    try:
+        post_label(c, "1", ["b"])
+    finally:
+        h.stop()
+    (row,) = on_disk(p)
+    assert row["labelled_by"] == "goldlabel-ui"
+    assert row["revisions"][0]["labelled_by"] == "imported"
+
+
+def test_a_note_only_change_is_a_revision_with_the_old_note(tmp_path):
+    p, h, c = review(tmp_path, labelled("1", ["a"], note="old"))
+    try:
+        post_label(c, "1", ["a"], note="new")
+    finally:
+        h.stop()
+    (row,) = on_disk(p)
+    assert row["labels"] == ["a"] and row["note"] == "new"
+    assert (
+        row["revisions"][0]["labels"] == ["a"] and row["revisions"][0]["note"] == "old"
+    )
+
+
+def test_a_save_that_changes_nothing_adds_nothing_and_rewrites_nothing(tmp_path):
+    p, h, c = review(
+        tmp_path, labelled("1", ["a", "b"], note="n"), labelled("2", ["a"])
+    )
+    try:
+        before = p.read_bytes()
+        assert post_label(c, "1", ["a", "b"], note="n")[0] == 200
+        assert post_label(c, "1", ["b", "a"])[0] == 200  # same labels, other order
+        assert (
+            post_label(c, "2", ["a"], note="   ")[0] == 200
+        )  # an empty note is no note
+        assert p.read_bytes() == before
+    finally:
+        h.stop()
+
+
+def test_the_first_label_of_a_pending_row_is_not_a_revision(start, gold_path):
+    c = Client(start())
+    post_label(c, "1", ["a"], note="why")
+    row = on_disk(gold_path)[0]
+    assert row["labels"] == ["a"] and "revisions" not in row
+
+
+def test_two_revisions_make_two_entries_oldest_first(tmp_path):
+    p, h, c = review(tmp_path, labelled("1", ["a"]))
+    try:
+        post_label(c, "1", ["b"], note="second")
+        post_label(c, "1", ["a", "b"])
+    finally:
+        h.stop()
+    (row,) = on_disk(p)
+    first, second = row["revisions"]
+    assert (first["labels"], first["note"]) == (["a"], None)
+    assert (second["labels"], second["note"]) == (["b"], "second")
+    assert first["at"] <= second["at"] and row["labels"] == ["a", "b"]
+
+
+def test_a_bad_revision_is_refused_like_a_bad_first_label_and_writes_nothing(tmp_path):
+    p, h, c = review(tmp_path, labelled("1", ["a"]), mode="single")
+    try:
+        before = p.read_bytes()
+        assert post_label(c, "1", ["a", "b"])[0] == 400
+        assert post_label(c, "1", ["zzz"])[0] == 400
+        assert post_label(c, "1", [])[0] == 400
+        assert post_label(c, "1", ["a"], note=5)[0] == 400
+        assert p.read_bytes() == before
+    finally:
+        h.stop()
+
+
+# --- datasets, rows and rows by id (015) ---------------------------------------------------------
+
+
+def get_json(c, path):
+    status, body, _ = c.call("GET", path)
+    return status, body
+
+
+def mixed_folder(tmp_path):
+    write_gold(
+        tmp_path / "gold.json",
+        rows(
+            ("1", ["a"], "dev"),
+            ("2", ["b"], "dev"),
+            ("3", None, "dev"),
+            ("t1", None, "test"),
+            ("t2", None, "test"),
+        ),
+    )
+    other = [
+        {"id": "x", "text": "text x", "labels": ["q"], "sample": "dev"},
+    ]
+    (tmp_path / "gold-corpus-b.json").write_text(
+        json.dumps(
+            {"taxonomy": {"mode": "single", "labels": [{"name": "q"}]}, "rows": other}
+        )
+    )
+    return tmp_path
+
+
+def test_datasets_lists_each_gold_file_keyed_by_stem_with_sample_counts(
+    tmp_path, start
+):
+    mixed_folder(tmp_path)
+    (tmp_path / "gold.removed.jsonl").write_text("{}\n")  # not datasets
+    (tmp_path / "gold.json.tmp").write_text("x")
+    (tmp_path / "gold.jsonl").write_text("{}\n")
+    (tmp_path / "other.json").write_text("{}")
+    status, out = get_json(Client(start()), "/api/datasets")
+    assert status == 200
+    assert [d["name"] for d in out] == ["gold", "gold-corpus-b"]
+    by = {d["name"]: d for d in out}
+    assert (
+        by["gold"]["title"] == "default" and by["gold-corpus-b"]["title"] == "corpus-b"
+    )
+    assert by["gold"]["taxonomy"] is True and by["gold-corpus-b"]["taxonomy"] is True
+    assert by["gold"]["samples"] == [
+        {"name": "dev", "rows": 3, "labelled": 2, "pending": 1},
+        {"name": "test", "rows": 2, "labelled": 0, "pending": 2},
+    ]
+    assert by["gold-corpus-b"]["samples"] == [
+        {"name": "dev", "rows": 1, "labelled": 1, "pending": 0}
+    ]
+
+
+def test_a_dataset_really_named_default_is_not_the_default_dataset(tmp_path, start):
+    mixed_folder(tmp_path)
+    write_gold(tmp_path / "gold-default.json", rows(("z", None, "dev")))
+    c = Client(start())
+    out = get_json(c, "/api/datasets")[1]
+    assert [d["name"] for d in out] == ["gold", "gold-corpus-b", "gold-default"]
+    assert [d["title"] for d in out] == ["default", "corpus-b", "default"]
+    assert get_json(c, "/api/rows?dataset=gold&sample=dev")[1][0]["id"] == "1"
+    assert get_json(c, "/api/rows?dataset=gold-default&sample=dev")[1][0]["id"] == "z"
+    assert get_json(c, "/api/row?dataset=gold-default&id=z")[0] == 200
+    assert get_json(c, "/api/row?dataset=gold&id=z")[0] == 404
+
+
+def test_a_bad_file_lists_as_an_error_and_the_others_still_list(tmp_path, start):
+    mixed_folder(tmp_path)
+    (tmp_path / "gold-bad.json").write_text("{not json")
+    out = get_json(Client(start()), "/api/datasets")[1]
+    bad = next(d for d in out if d["name"] == "gold-bad")
+    assert "not a gold file" in bad["error"] and "samples" not in bad
+    assert [d["name"] for d in out if "error" not in d] == ["gold", "gold-corpus-b"]
+
+
+def test_rows_of_a_sample_in_file_order(tmp_path, start):
+    mixed_folder(tmp_path)
+    write_gold(
+        tmp_path / "gold.json",
+        [
+            labelled("1", ["a"], note="n"),
+            {"id": "3", "text": "t3", "labels": None, "sample": "dev"},
+            labelled("2", ["b"])
+            | {
+                "revisions": [
+                    {"at": "x", "labels": ["a"], "note": None, "labelled_by": None}
+                ]
+            },
+            {"id": "t1", "text": "t", "labels": None, "sample": "test"},
+        ],
+    )
+    c = Client(start())
+    status, out = get_json(c, "/api/rows?dataset=gold&sample=dev")
+    assert status == 200
+    assert out == [
+        {"id": "1", "labels": ["a"], "note": True, "revised": False},
+        {"id": "3", "labels": None, "note": False, "revised": False},
+        {"id": "2", "labels": ["b"], "note": False, "revised": True},
+    ]
+    assert get_json(c, "/api/rows?dataset=nope&sample=dev")[0] == 404
+    assert get_json(c, "/api/rows?dataset=gold&sample=nope")[0] == 404
+
+
+def test_a_row_by_id_carries_its_options_and_revisions(tmp_path, start):
+    mixed_folder(tmp_path)
+    c = Client(start())
+    status, row = get_json(c, "/api/row?dataset=gold&id=2")
+    assert status == 200
+    assert row == {
+        "id": "2",
+        "text": "text 2",
+        "sample": "dev",
+        "labels": ["b"],
+        "note": None,
+        "labelled_by": None,
+        "revisions": [],
+        "options": [
+            {"name": "a", "description": "the a one"},
+            {"name": "b", "description": ""},
+            {
+                "name": "off_topic",
+                "description": "the item matches none of the labels above",
+            },
+        ],
+        "mode": "multi",
+        "stored_taxonomy": True,
+    }
+    assert get_json(c, "/api/row?dataset=gold&id=nope")[0] == 404
+    assert get_json(c, "/api/row?dataset=nope&id=1")[0] == 404
+    assert get_json(c, "/api/row?dataset=gold")[0] == 400
+
+
+def test_without_a_stored_taxonomy_the_options_are_the_labels_already_used(
+    tmp_path, start
+):
+    c = Client(start())
+    write_gold(
+        tmp_path / "gold-u.json",
+        rows(
+            ("1", ["y"], "dev"),
+            ("2", ["n", "y"], "dev"),
+            ("3", ["off_topic"], "dev"),
+            ("4", None, "dev"),
+        ),
+    )
+    status, row = get_json(c, "/api/row?dataset=gold-u&id=4")
+    assert status == 200 and row["stored_taxonomy"] is False and row["mode"] == "multi"
+    assert [o["name"] for o in row["options"]] == ["n", "y", "off_topic"]
+    assert [o["description"] for o in row["options"][:2]] == ["", ""]
+    write_gold(tmp_path / "gold-s.json", rows(("1", ["y"], "dev"), ("2", None, "dev")))
+    assert get_json(c, "/api/row?dataset=gold-s&id=2")[1]["mode"] == "single"
+    out = get_json(c, "/api/datasets")[1]
+    assert {d["name"]: d["taxonomy"] for d in out} == {
+        "gold": True,
+        "gold-s": False,
+        "gold-u": False,
+    }
+    # it is a person who picks among those labels; the page can revise a row with them
+    body = {"dataset": "gold-u", "id": "4", "labels": ["n"]}
+    assert c.call("POST", "/api/label", body)[0] == 200
+    body = {"dataset": "gold-u", "id": "4", "labels": ["zzz"]}
+    assert c.call("POST", "/api/label", body)[0] == 400
+
+
+def test_a_row_can_be_revised_without_a_pass(tmp_path, start):
+    mixed_folder(tmp_path)
+    c = Client(start())
+    body = {"dataset": "gold", "id": "2", "labels": ["a"], "note": "fixed"}
+    status, row, _ = c.call("POST", "/api/label", body)
+    assert status == 200 and row["labels"] == ["a"] and row["note"] == "fixed"
+    assert row["revisions"][0]["labels"] == ["b"]
+    saved = on_disk(tmp_path / "gold.json")[1]
+    assert saved["labels"] == ["a"] and len(saved["revisions"]) == 1
+    # a pending row of any sample can be labelled the same way, with no revision
+    status, row, _ = c.call(
+        "POST", "/api/label", {"dataset": "gold", "id": "t1", "labels": ["b"]}
+    )
+    assert status == 200 and row["revisions"] == []
+    # validation is the same as in a pass, and unknown datasets and ids are 404
+    assert (
+        c.call("POST", "/api/label", {"dataset": "gold", "id": "1", "labels": ["zzz"]})[
+            0
+        ]
+        == 400
+    )
+    assert (
+        c.call(
+            "POST", "/api/label", {"dataset": "gold", "id": "nope", "labels": ["a"]}
+        )[0]
+        == 404
+    )
+    assert (
+        c.call("POST", "/api/label", {"dataset": "nope", "id": "1", "labels": ["a"]})[0]
+        == 404
+    )
+    body = {"pass": None, "id": "1", "labels": ["a"]}  # neither a pass nor a dataset
+    assert c.call("POST", "/api/label", body)[0] == 400
+
+
+def test_post_pass_stores_a_valid_taxonomy_and_refuses_a_bad_one(tmp_path, start):
+    mixed_folder(tmp_path)
+    c = Client(start())
+    new = {"mode": "single", "labels": [{"name": "q", "description": "d"}]}
+    before = on_disk(tmp_path / "gold-corpus-b.json")
+    status, out = new_pass(c, dataset="gold-corpus-b", taxonomy=new)
+    assert status == 200 and "pass" in out
+    doc = json.loads((tmp_path / "gold-corpus-b.json").read_text())
+    assert doc["taxonomy"] == new and doc["rows"] == before
+    raw = (tmp_path / "gold-corpus-b.json").read_bytes()
+    assert new_pass(c, dataset="gold-corpus-b", taxonomy={"mode": "x"})[0] == 400
+    assert new_pass(c, dataset="gold-corpus-b", taxonomy="no")[0] == 400
+    assert (tmp_path / "gold-corpus-b.json").read_bytes() == raw
+
+
+def test_gl_label_stores_its_taxonomy_and_a_second_call_replaces_it(
+    tmp_path, press_done_on_open
+):
+    from goldlabel import label
+
+    write_gold(tmp_path / "gold.json", rows(("1", None, "dev")))
+    label(Gold()["dev"], taxonomy("single"))
+    assert (
+        json.loads((tmp_path / "gold.json").read_text())["taxonomy"]
+        == taxonomy("single").model_dump()
+    )
+    label(Gold()["dev"], taxonomy("multi"))
+    doc = json.loads((tmp_path / "gold.json").read_text())
+    assert doc["taxonomy"] == taxonomy("multi").model_dump()
+    assert doc["rows"] == rows(("1", None, "dev"))
+
+
+def test_nothing_but_the_labelling_server_writes_a_taxonomy(tmp_path):
+    from goldlabel.candidates import Candidates
+    from goldlabel.gold import Gold as G
+
+    g = G(Candidates([{"id": str(i), "text": "t"} for i in range(5)]), sample_size=2)
+    g.draw_sample("dev")
+    g.import_rows([{"id": "z", "text": "t", "labels": ["a"]}], "test")
+    g.remove(["z"])
+    assert json.loads(g.path.read_text())["taxonomy"] is None
+
+
+def test_done_says_the_server_is_closing_when_gl_label_started_it(start):
+    assert Client(start()).call("POST", "/api/done")[1]["closing"] is True
+
+
+def test_done_says_the_server_stays_up_when_it_was_not_started_by_gl_label(start):
+    assert (
+        Client(start(stop_on_done=False)).call("POST", "/api/done")[1]["closing"]
+        is False
+    )
+
+
+# --- joining a live server (015) ----------------------------------------------------------------
+
+import threading
+
+
+@pytest.fixture
+def quick(monkeypatch):
+    """The waiting call polls once a second; make that instant."""
+    monkeypatch.setattr(_label.time, "sleep", lambda s: threading.Event().wait(0.01))
+
+
+class Caller:
+    """Run `gl.label(dev, taxonomy)` in a thread named `caller`, as a second process would."""
+
+    def __init__(self, sample="dev", tax=None, **kw):
+        self.out, self.exc = [], []
+        tax = tax or taxonomy("multi")
+
+        def run():
+            try:
+                self.out.append(
+                    _label.label(Gold()[sample], tax, open_browser=False, **kw)
+                )
+            except BaseException as e:  # noqa: BLE001
+                self.exc.append(e)
+
+        self.thread = threading.Thread(target=run, name="caller", daemon=True)
+        self.thread.start()
+
+    def alive(self, wait=0.3):
+        self.thread.join(wait)
+        return self.thread.is_alive()
+
+
+def printed_pass(capsys, port):
+    """Wait for the joining call to print its pass URL and return the pass id."""
+    out = ""
+    for _ in range(200):
+        out += capsys.readouterr().out
+        marker = f"http://127.0.0.1:{port}/#/pass/"
+        if marker in out:
+            return out.split(marker)[1].split()[0]
+        threading.Event().wait(0.02)
+    raise AssertionError("no pass URL printed: " + out)
+
+
+def test_a_second_label_call_joins_the_running_server_and_waits_for_the_rows(
+    start, gold_path, capsys, quick, monkeypatch
+):
+    h = start("single")
+    monkeypatch.setattr(
+        _label, "serve", lambda *a, **k: pytest.fail("started a server")
+    )
+    c = Client(h)
+    writers = []
+    real = Gold._write
+    monkeypatch.setattr(
+        Gold,
+        "_write",
+        lambda self, *a, **k: (
+            writers.append(threading.current_thread().name),
+            real(self, *a, **k),
+        )[1],
+    )
+    caller = Caller()
+    pid = printed_pass(capsys, h.port)
+    assert pid != c.pass_id
+    s = Client.call(c, "GET", f"/api/pass/{pid}")[1]
+    assert s["total"] == 3 and s["pending"] == 3  # dev's pending rows at the call
+    assert caller.alive()  # waits while rows are pending
+    for i in ("1", "2"):
+        c.call("POST", "/api/label", {"pass": pid, "id": i, "labels": ["a"]})
+    assert caller.alive()
+    c.call("POST", "/api/label", {"pass": pid, "id": "3", "labels": ["b"]})
+    assert not caller.alive(2) and not caller.exc
+    assert [r.id for r in caller.out[0].rows] == ["1", "2", "3"]
+    # the server stored the caller's taxonomy; the calling thread wrote nothing
+    assert (
+        json.loads(gold_path.read_text())["taxonomy"] == taxonomy("multi").model_dump()
+    )
+    assert "caller" not in writers
+
+
+def test_done_on_the_joined_pass_releases_the_call_with_rows_pending(
+    start, capsys, quick
+):
+    h = start()
+    c = Client(h)
+    caller = Caller()
+    pid = printed_pass(capsys, h.port)
+    assert caller.alive()
+    c.call("POST", f"/api/pass/{pid}/done")
+    assert not caller.alive(2) and not caller.exc
+
+
+def test_force_open_ui_prints_the_url_and_returns_at_once(
+    start, gold_path, capsys, quick
+):
+    h = start()
+    caller = Caller(force_open_ui=True)
+    pid = printed_pass(capsys, h.port)
+    assert not caller.alive(2)
+    s = Client(h).call("GET", f"/api/pass/{pid}")[1]
+    assert s["total"] == 3  # every row of the sample
+
+
+def test_an_interrupt_stops_the_wait_and_writes_nothing(
+    start, gold_path, monkeypatch, quick
+):
+    start()
+    before = gold_path.read_bytes()
+
+    def boom(seconds):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(_label.time, "sleep", boom)
+    monkeypatch.setattr("webbrowser.open", lambda url: None)
+    with pytest.raises(KeyboardInterrupt):
+        _label.label(Gold()["dev"], taxonomy("multi"), open_browser=False)
+    assert on_disk(gold_path) == json.loads(before)["rows"]
+
+
+def test_a_live_pid_on_a_closed_port_is_a_stale_lock(start, gold_path, tmp_path):
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        closed = s.getsockname()[1]
+    lock = gold_path.with_name("labelling.lock")
+    lock.write_text(
+        json.dumps(
+            {"pid": os.getpid(), "port": closed, "started": "2020-01-01T00:00:00+00:00"}
+        )
+    )
+    assert _label._live(tmp_path) is None
+    h = start()
+    assert json.loads(lock.read_text())["port"] == h.port
+
+
+def test_a_server_in_another_folder_is_not_joined(start, tmp_path):
+    start()
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    assert _label._live(other) is None and _label._live(tmp_path) is not None
+
+
+def test_a_refused_pass_is_reported_not_swallowed(start):
+    h = start()
+    with pytest.raises(_label.GoldRuntimeError, match="refused.*gold-nope"):
+        _label._ask(h.port, "/api/pass", {"dataset": "gold-nope", "samples": ["dev"]})
+
+
+# --- evaluations of a sample, and when they go stale (015) -----------------------------------------
+
+T0 = "2026-03-01T12:00:00+00:00"
+EARLIER, LATER = "2026-03-01T11:00:00+00:00", "2026-03-01T13:00:00+00:00"
+
+
+def eval_line(gold_path, samples=("dev",), time=T0, **extra):
+    line = {
+        "time": time,
+        "samples": list(samples),
+        "rows_digest": "d",
+        "n": 3,
+        "skipped_pending": 1,
+        "gold": str(gold_path),
+        "model": "m",
+        "digest": "p1",
+        "metric": "accuracy",
+        "target": 0.5,
+        "score": 0.75,
+        "disagreements": [],
+    }
+    return line | extra
+
+
+def write_log(tmp_path, *lines):
+    (tmp_path / "evals.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines))
+
+
+def revised(row, at):
+    entry = {"at": at, "labels": ["a"], "note": None, "labelled_by": None}
+    return row | {"revisions": [entry]}
+
+
+def evals(c, sample="dev", dataset="gold"):
+    return get_json(c, f"/api/evals?dataset={dataset}&sample={sample}")
+
+
+def test_evals_lists_the_lines_that_include_the_sample_newest_first(
+    tmp_path, gold_path, start
+):
+    other = tmp_path / "gold-b.json"
+    write_log(
+        tmp_path,
+        eval_line(gold_path, time=EARLIER, digest="old"),
+        eval_line(gold_path, samples=("test",), digest="other-sample"),
+        eval_line(gold_path, samples=("dev", "test"), time=LATER, digest="combo"),
+        eval_line(other, digest="other-file"),
+        eval_line(gold_path, time=T0, digest="new", score=0.25, target=None),
+        {"time": T0, "not": "an evaluation"},
+    )
+    c = Client(start())
+    status, out = evals(c)
+    assert status == 200
+    assert [x["digest"] for x in out] == ["combo", "new", "old"]
+    assert out[0]["samples"] == ["dev", "test"]
+    new = out[1]
+    assert (new["time"], new["samples"], new["score"], new["target"]) == (
+        T0,
+        ["dev"],
+        0.25,
+        None,
+    )
+    assert (new["n"], new["skipped_pending"], new["model"], new["passed"]) == (
+        3,
+        1,
+        "m",
+        None,
+    )
+    assert evals(c, "test")[1][0]["digest"] == "combo"
+    assert [x["digest"] for x in evals(c, "test")[1]] == ["combo", "other-sample"]
+
+
+def test_pass_and_fail_come_from_the_score_and_the_target(tmp_path, gold_path, start):
+    write_log(
+        tmp_path,
+        eval_line(gold_path, time=EARLIER, score=0.4, target=0.5),
+        eval_line(gold_path, time=T0, score=0.5, target=0.5),
+    )
+    assert [x["passed"] for x in evals(Client(start()))[1]] == [True, False]
+
+
+def test_a_sample_with_no_log_has_no_evaluations_and_unknown_ones_are_404(start):
+    c = Client(start())
+    assert evals(c) == (200, [])
+    assert evals(c, "nope")[0] == 404 and evals(c, dataset="gold-nope")[0] == 404
+    assert get_json(c, "/api/evals?dataset=gold")[0] == 400
+
+
+def test_disagreements_are_joined_to_their_rows(tmp_path, gold_path, start):
+    rows_ = [
+        labelled("1", ["a"], note="hard one"),
+        revised(labelled("2", ["b"]), LATER),
+        {"id": "3", "text": "text 3", "labels": None, "sample": "dev"},
+    ]
+    write_gold(gold_path, rows_)
+    dis = [
+        {"id": "1", "gold": ["b"], "predicted": ["a"], "reasoning": "r1"},
+        {"id": "2", "gold": ["a"], "predicted": None, "reasoning": None},
+        {"id": "gone", "gold": ["a"], "predicted": ["b"], "reasoning": "r"},
+    ]
+    write_log(tmp_path, eval_line(gold_path, disagreements=dis))
+    [line] = evals(Client(start()))[1]
+    one, two, gone = line["disagreements"]
+    assert one == dis[0] | {
+        "text": "text 1",
+        "labels": ["a"],
+        "note": "hard one",
+        "revised": False,
+        "missing": False,
+    }
+    assert (
+        two["predicted"] is None and two["labels"] == ["b"] and two["revised"] is True
+    )
+    assert gone == dis[2] | {
+        "text": None,
+        "labels": None,
+        "note": None,
+        "revised": False,
+        "missing": True,
+    }
+
+
+def test_a_line_written_before_disagreements_were_logged_says_so(
+    tmp_path, gold_path, start
+):
+    line = eval_line(gold_path)
+    del line["disagreements"]
+    del line["skipped_pending"]
+    write_log(tmp_path, line)
+    [out] = evals(Client(start()))[1]
+    assert out["disagreements"] is None and out["skipped_pending"] is None
+
+
+def test_an_evaluation_is_stale_after_a_later_revision_in_its_own_sample(
+    tmp_path, gold_path, start
+):
+    write_gold(
+        gold_path,
+        [
+            revised(labelled("1", ["b"]), LATER),  # revised after the evaluation ran
+            revised(labelled("2", ["b"]), EARLIER),  # revised before it
+            {"id": "3", "text": "t", "labels": None, "sample": "dev"},
+            revised(labelled("t1", ["b"]) | {"sample": "test"}, LATER),
+        ],
+    )
+    write_log(
+        tmp_path,
+        eval_line(gold_path, digest="dev"),
+        eval_line(gold_path, samples=("test",), digest="test"),
+        eval_line(gold_path, samples=("dev", "test"), digest="combo"),
+        eval_line(gold_path, time=LATER, digest="after-everything"),
+    )
+    by = {x["digest"]: x for x in evals(Client(start()))[1]}
+    assert by["dev"]["stale"] is True and by["dev"]["stale_rows"] == ["1"]
+    assert by["combo"]["stale"] is True and by["combo"]["stale_rows"] == ["1", "t1"]
+    assert (
+        by["after-everything"]["stale"] is False
+        and by["after-everything"]["stale_rows"] == []
+    )
+
+
+def test_a_revision_in_another_sample_or_a_first_label_does_not_make_dev_stale(
+    tmp_path, gold_path, start
+):
+    write_gold(
+        gold_path,
+        [
+            labelled("1", ["a"]),  # labelled for the first time after the run: no entry
+            {"id": "2", "text": "t", "labels": None, "sample": "dev"},
+            revised(labelled("t1", ["b"]) | {"sample": "test"}, LATER),
+        ],
+    )
+    write_log(tmp_path, eval_line(gold_path))
+    [line] = evals(Client(start()))[1]
+    assert line["stale"] is False and line["stale_rows"] == []
+
+
+def test_the_server_still_never_runs_a_model_or_returns_a_prediction_as_a_label(
+    tmp_path, gold_path, start
+):
+    write_log(
+        tmp_path,
+        eval_line(
+            gold_path,
+            disagreements=[
+                {"id": "1", "gold": ["a"], "predicted": ["b"], "reasoning": "r"}
+            ],
+        ),
+    )
+    src = Path(_label.__file__).read_text()
+    assert "classifier" not in src and "pydantic_ai" not in src
+
+
+def test_evals_match_the_gold_file_by_name_and_skip_a_damaged_line(
+    tmp_path, gold_path, start
+):
+    relative = eval_line("/some/other/project/.goldlabel/gold.json", digest="relative")
+    write_log(tmp_path, relative)
+    with (tmp_path / "evals.jsonl").open("a") as f:
+        f.write('{"samples": ["dev"], "gold": "gold.js\n')
+    [line] = evals(Client(start()))[1]
+    assert line["digest"] == "relative"

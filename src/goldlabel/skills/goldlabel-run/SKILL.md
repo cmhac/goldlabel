@@ -59,7 +59,7 @@ clf.save("classifiers/my-topic/", evaluation=final)  # final is the one test eva
 ```python
 gold_b = gl.Gold(
     candidates_b, name="corpus-b"
-)  # its own file: .goldlabel/gold-corpus-b.jsonl
+)  # its own file: .goldlabel/gold-corpus-b.json
 test_b = gold_b.draw_sample("test", n=30)  # pending; people label them
 gl.label(test_b, taxonomy)
 final_b = clf.evaluate(test_b)  # once, as for any held-out sample

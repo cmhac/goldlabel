@@ -215,7 +215,7 @@ def test_samples_keep_secrets_and_gold_edits_out():
             assert "api_key=" not in code
             assert "labelled_by" not in code
             # no sample builds gold rows by hand or writes the gold file
-            assert "gold.jsonl" not in code or "open(" not in code
+            assert "gold.json" not in code or "open(" not in code
 
 
 def test_the_samples_cover_the_main_calls():

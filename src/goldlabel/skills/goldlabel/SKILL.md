@@ -51,7 +51,7 @@ Use a Jupyter notebook (`.ipynb`) for the analysis. Write a `# %%` script only i
 
 ## Where files go
 
-`.goldlabel/` in the current directory by default (`gl.settings.root`, or the environment variable `GOLDLABEL_DIR`): `candidates.jsonl`, `gold.jsonl`, `evals.jsonl` (every evaluation, kept as a history) and `cache/` (model calls and the cost ledger). The gold files and `evals.jsonl` always live there: there is no option to move them or to switch the log off. Candidates, results and the cache take a path to move their file; `cache=False` or `out=False` writes nothing. Commit the notebook; the library never runs git.
+`.goldlabel/` in the current directory by default (`gl.settings.root`, or the environment variable `GOLDLABEL_DIR`): `candidates.jsonl`, `gold.json`, `evals.jsonl` (every evaluation, kept as a history) and `cache/` (model calls and the cost ledger). The gold files and `evals.jsonl` always live there: there is no option to move them or to switch the log off. Candidates, results and the cache take a path to move their file; `cache=False` or `out=False` writes nothing. Commit the notebook; the library never runs git.
 
 ## References (load the one you need)
 

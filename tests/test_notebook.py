@@ -1,4 +1,5 @@
 import dataclasses
+import json
 import re
 import sys
 
@@ -127,10 +128,17 @@ def classifier(evaluation=None):
 
 def gold(tmp_path):
     settings.root = tmp_path  # conftest resets it after the test
-    (tmp_path / "gold.jsonl").write_text(
-        '{"id": "1", "text": "x", "labels": ["a"], "sample": "dev", "labelled_by": "goldlabel-ui"}\n'
-        '{"id": "2", "text": "y", "labels": null, "sample": "test"}\n'
-    )
+    rows = [
+        {
+            "id": "1",
+            "text": "x",
+            "labels": ["a"],
+            "sample": "dev",
+            "labelled_by": "goldlabel-ui",
+        },
+        {"id": "2", "text": "y", "labels": None, "sample": "test"},
+    ]
+    (tmp_path / "gold.json").write_text(json.dumps({"taxonomy": None, "rows": rows}))
     return Gold()
 
 
@@ -257,7 +265,7 @@ def test_goldset_and_gold(tmp_path):
     assert "2 rows" in out and "1 labelled" in out and "1 pending" in out
     assert "imported 1" in out and "pending" in out
     out = gold(tmp_path)._repr_html_()
-    assert "gold.jsonl" in out
+    assert "gold.json" in out
     assert re.search(r"dev\D+1\D", out) and "test" in out and "pending" in out
 
 
@@ -377,6 +385,7 @@ def test_numbers_and_types_candidates_and_gold():
         "labelled_by",
         "labelled_at",
         "note",
+        "revisions",
     ]
     assert g["labels"].to_list() == [["a"], None]
     assert g["labelled_by"].to_list() == ["imported", None]

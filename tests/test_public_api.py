@@ -92,14 +92,14 @@ def test_import_has_no_side_effects(tmp_path):
 
 def test_import_with_a_read_only_goldlabel_dir_changes_nothing(tmp_path):
     (tmp_path / ".goldlabel").mkdir()
-    (tmp_path / ".goldlabel" / "gold.jsonl").write_text("{}\n")
+    (tmp_path / ".goldlabel" / "gold.json").write_text("{}\n")
     (tmp_path / ".goldlabel").chmod(0o555)
     try:
         result = run("import goldlabel", tmp_path)
         assert result.returncode == 0, result.stderr
         assert sorted(p.name for p in tmp_path.rglob("*")) == [
             ".goldlabel",
-            "gold.jsonl",
+            "gold.json",
         ]
     finally:
         (tmp_path / ".goldlabel").chmod(0o755)
@@ -115,7 +115,7 @@ def test_name_shadowing_the_package_attributes_is_the_documented_one():
     assert inspect.ismodule(
         goldlabel.search
     )  # only cost and settings shadow submodules
-    assert resolve(None, "gold.jsonl") == goldlabel.settings.root / "gold.jsonl"
+    assert resolve(None, "gold.json") == goldlabel.settings.root / "gold.json"
     assert importlib.import_module("goldlabel.settings").resolve is resolve
     assert hasattr(importlib.import_module("goldlabel.cost"), "cache_key")
 
