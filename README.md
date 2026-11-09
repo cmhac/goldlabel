@@ -54,27 +54,22 @@ uv add "goldlabel[local]"   # Sentence Transformers, for local query embeddings 
 
 ## Installing skills
 
-Goldlabel ships agent skills that walk you through the six steps above with a coding agent. They are optional: goldlabel
-is plain functions, and the example workflow below works without an agent.
+Goldlabel includes agent skills that walk users through the steps listed above interactively with a coding agent. 
+Coding agent use is optional — goldlabel is meant to be a simple python library and these skills are only
+there if you want them. You can have an agent autonomously build the entire pipeline and only do the hand-
+labeling yourself, selectively use skills for certain parts of the workflow such as prompt tuning, or not
+use AI assistance at all.
 
 ```bash
-uv run goldlabel install claude    # or codex, copilot, kiro, all
+uv run goldlabel install <harness>    # claude, codex, copilot, kiro, or all
 ```
 
 This copies the skills into the agent's skills folder in your project (`.claude/skills` for Claude Code, `.agents/skills`
 for Codex and Copilot, `.kiro/skills` for Kiro). `--global` installs them for your whole user instead, `--dir PATH`
-writes them anywhere else, and `uv run goldlabel install --help` lists every option. Restart the agent if it does not list
-the new skills.
+writes them anywhere else, and `uv run goldlabel install --help` lists every option. Restart the agent if it does not pick up
+the new skills right away.
 
-**Start with `/goldlabel`.** It checks the notebook and the `.goldlabel/` folder you already have, tells you which of the
-six steps look done, and names the skill for the next one, so you can call it at any point without knowing which skill
-comes next. There is one skill per step (`goldlabel-connect`, `goldlabel-search-terms`, `goldlabel-taxonomy`,
-`goldlabel-candidates`, `goldlabel-tune`, `goldlabel-run`), and at the end of each the agent tells you which comes next.
-
-A session looks like a conversation. At each step the agent says what the step is for, shows you the result (the connected
-data, the search terms, a draft taxonomy, the candidates, an evaluation), asks for the decision that is yours, and waits for
-your yes before moving on. It writes only goldlabel calls, into one notebook, so the notebook is the record of the analysis.
-It never writes a gold label: when it is time to label, it tells you to open the labelling page and you label there.
+**Not sure what to do? run `/goldlabel`.** It checks the state of your repository, and helps you figure out what to do next.
 
 ## Example workflow
 
