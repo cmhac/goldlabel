@@ -32,6 +32,8 @@ Nothing in this repository may add a way to set a gold label. Only the labelling
 
 **017 is implemented** (`specs/017-gitignore-storage/`, closes issue #17): the cache directory writes its own `.gitignore` (`*`) when created and `labelling.lock` is added to the storage folder's `.gitignore` when a labelling server takes it (`settings.ignore`; a user's own `.gitignore` is appended to, never rewritten). Gold, evaluation and candidate files stay committable.
 
+**018 is implemented** (`specs/018-readme-skills-and-page/`, closes issue #28): the README says what `goldlabel install` writes, that `/goldlabel` is where to start, that the skills are optional, what a session looks like, points step 3 at the labelling page, and `ub add` is `uv add`. README only; no tests, by the user's choice.
+
 What a human still has to do (agents report these and stop, never fake them):
 
 - Install the plugin in Claude Code, Codex, Copilot CLI and Kiro and run the gold-rule refusal trial in each (SC-6). Some install commands in the README are marked unverified (the Codex `plugin add` form, Copilot's `NAME@MARKETPLACE` form, `npx skills add ... -a kiro-cli`); the trial finds the real ones and records them in the spec's task 16 note.

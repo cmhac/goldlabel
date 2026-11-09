@@ -22,7 +22,8 @@ which classifies each text into one of your labels or a generic `off_topic`.
 ### 3. Label a dev dataset
 
 Goldlabel draws a random sample of the candidates, then opens a small web app to help you quickly label each item
-with your taxonomy. 
+with your taxonomy. Start it from the notebook with `gl.label` or from a terminal with `goldlabel label`
+(see [Review and revise labels](#review-and-revise-labels)).
 
 ### 4. Evaluate the gold dataset and tune the prompt
 
@@ -44,18 +45,36 @@ take.
 ## Install
 
 ```
-ub add goldlabel
-ub add "goldlabel[s3]"      # boto3, for an S3 Vectors corpus
-ub add "goldlabel[pg]"      # psycopg, for a pgvector (PostgreSQL) corpus
-ub add "goldlabel[rds]"     # psycopg and boto3, for RDS / Aurora IAM database authentication
-ub add "goldlabel[local]"   # Sentence Transformers, for local query embeddings (Python < 3.14)
+uv add goldlabel
+uv add "goldlabel[s3]"      # boto3, for an S3 Vectors corpus
+uv add "goldlabel[pg]"      # psycopg, for a pgvector (PostgreSQL) corpus
+uv add "goldlabel[rds]"     # psycopg and boto3, for RDS / Aurora IAM database authentication
+uv add "goldlabel[local]"   # Sentence Transformers, for local query embeddings (Python < 3.14)
 ```
 
 ## Installing skills
 
-Goldlabel comes with a set of agent skills to help you work interactively with a coding agent. Install the skills
-with `uv run goldlabel install <harness>`. Use `uv run goldlabel install --help` for a list of supported agent
-harnesses.
+Goldlabel ships agent skills that walk you through the six steps above with a coding agent. They are optional: goldlabel
+is plain functions, and the example workflow below works without an agent.
+
+```bash
+uv run goldlabel install claude    # or codex, copilot, kiro, all
+```
+
+This copies the skills into the agent's skills folder in your project (`.claude/skills` for Claude Code, `.agents/skills`
+for Codex and Copilot, `.kiro/skills` for Kiro). `--global` installs them for your whole user instead, `--dir PATH`
+writes them anywhere else, and `uv run goldlabel install --help` lists every option. Restart the agent if it does not list
+the new skills.
+
+**Start with `/goldlabel`.** It checks the notebook and the `.goldlabel/` folder you already have, tells you which of the
+six steps look done, and names the skill for the next one, so you can call it at any point without knowing which skill
+comes next. There is one skill per step (`goldlabel-connect`, `goldlabel-search-terms`, `goldlabel-taxonomy`,
+`goldlabel-candidates`, `goldlabel-tune`, `goldlabel-run`), and at the end of each the agent tells you which comes next.
+
+A session looks like a conversation. At each step the agent says what the step is for, shows you the result (the connected
+data, the search terms, a draft taxonomy, the candidates, an evaluation), asks for the decision that is yours, and waits for
+your yes before moving on. It writes only goldlabel calls, into one notebook, so the notebook is the record of the analysis.
+It never writes a gold label: when it is time to label, it tells you to open the labelling page and you label there.
 
 ## Example workflow
 
