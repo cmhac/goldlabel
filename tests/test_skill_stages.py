@@ -138,3 +138,27 @@ def test_examples_are_goldlabel_calls_only(path):
 def test_the_instruction_block_states_the_order_and_the_rule():
     text = (ROOT / "docs" / "agent-instructions.md").read_text()
     assert "in order" in text and "write only goldlabel calls" in text
+
+
+def test_the_overview_checks_progress_before_the_procedure():
+    """016: /goldlabel looks at what the user already has and offers the next stage."""
+    text = OVERVIEW.read_text()
+    assert "## Check progress first\n" in text
+    assert text.find("## Check progress first") < text.find("## The procedure")
+    check = section(text, "## Check progress first")
+    for evidence in (
+        "gl.Table", "gl.PgCorpus", "gl.S3Corpus", "seeds", "keywords", "gl.Taxonomy",
+        "gl.get_candidates", "candidates.jsonl", "gl.Classifier", "gl.Gold",
+        "clf.evaluate", "evals.jsonl", "clf.estimate", "clf.classify", "gold*.json",
+    ):  # fmt: skip
+        assert evidence in check, evidence
+    for phrase in (
+        "unsure",
+        "the user's yes",
+        "Sequence complete",
+        "changes and runs nothing",
+        "never open gold*.json or evals.jsonl",
+        "never read a key, a database URL or a .env",
+        "only when nothing is done",
+    ):
+        assert phrase in check, phrase

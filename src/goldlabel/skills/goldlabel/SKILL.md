@@ -16,9 +16,26 @@ Importing a file the user says people already labelled is allowed: import it unc
 pip install goldlabel            # extras: goldlabel[pg] pgvector, goldlabel[s3] S3 Vectors, goldlabel[rds] RDS IAM
 ```
 
+## Check progress first
+
+`/goldlabel` is where a user starts whenever they do not know which skill to call. Before any stage, find out what they already have. Read their notebook or script (the calls in it) and only the file names and modification times in the storage folder (`.goldlabel/` by default). This check changes and runs nothing, and you never open gold*.json or evals.jsonl (an evaluation line holds row text, gold labels and model reasoning; for counts, ask the user or point them to the labelling page), and never read a key, a database URL or a .env.
+
+| Stage | Evidence |
+|---|---|
+| 1 | a corpus: `gl.Table`, `gl.PgCorpus` or `gl.S3Corpus` |
+| 2 | `seeds` and/or `keywords` variables (none if the user chose the whole corpus: ask) |
+| 3 | a `gl.Taxonomy(...)` |
+| 4 | a `gl.get_candidates(...)` call; `candidates.jsonl` |
+| 5 | `gl.Classifier`, `gl.Gold` and `clf.evaluate` calls; `gold*.json` and `evals.jsonl` exist |
+| 6 | `clf.estimate` and `clf.classify` calls; a saved classifier |
+
+Tell the user what you found, stage by stage: **done** (name the evidence you saw), **unsure** (say why: a variable nothing uses, a cell that may not have run, a gold file that may belong to another notebook) or **not started**. Then name the stage to resume at, the first without evidence, and ask "start there?". Evidence is not consent: skip a stage only on the user's yes, and that stage's own entry check still applies. If they say "start over" or name a stage, follow them. Start at `goldlabel-connect` only when nothing is done. If stage 6 is done, say **Sequence complete** and offer what is optional (reusing the classifier, a second corpus, reviewing labels in the page).
+
+Several `gold-<name>.json` files: ask which dataset they are working on. A notebook with anything other than goldlabel calls: say so and offer to clean it up; never delete it unasked.
+
 ## The procedure (a hard requirement)
 
-Work through these six skills in this order, one at a time. Start at the first. Do not skip, merge or reorder them unless the user tells you to. Load the skill for the stage you are at.
+Work through these six skills in this order, one at a time. Start at the stage the progress check names (the first, when nothing is done). Do not skip, merge or reorder them unless the user tells you to. Load the skill for the stage you are at.
 
 1. `goldlabel-connect`: point at the data, confirm the connection and columns, reshape only if the user agrees.
 2. `goldlabel-search-terms`: keywords, regular expressions or seeds, drafted with the user and approved.
