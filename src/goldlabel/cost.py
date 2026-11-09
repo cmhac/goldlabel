@@ -11,7 +11,7 @@ from pydantic_ai.messages import ModelMessage, ModelResponse
 from pydantic_ai.usage import RequestUsage, RunUsage
 
 from goldlabel import _html
-from goldlabel.settings import resolve
+from goldlabel.settings import ignore, resolve
 
 # `cache` below is a directory (str or Path), None for the default `<settings.root>/cache`,
 # or False for no cache: nothing is read or written and the ledger stays empty.
@@ -45,7 +45,7 @@ def cache_put(cache, key: str, output, usage: RunUsage | RequestUsage) -> None:
     directory = cache_dir(cache)
     if directory is False:
         return
-    directory.mkdir(parents=True, exist_ok=True)
+    ignore(directory, "*")  # also creates it; the cache is never committed
     entry = {
         "output": output,
         "usage": {
@@ -84,7 +84,7 @@ def _read(cache) -> dict:
 
 
 def _write(directory: Path, data: dict) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
+    ignore(directory, "*")
     temp = directory / f"cost.json.{os.getpid()}.{threading.get_ident()}.tmp"
     temp.write_text(json.dumps(data, indent=2) + "\n")
     os.replace(temp, directory / "cost.json")

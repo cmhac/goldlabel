@@ -123,7 +123,11 @@ def test_ledger_lives_in_the_cache_directory(tmp_path):
         },
         "timings": [{"label": "dev", "n_items": 2, "seconds": 1.0}],
     }
-    assert [p.name for p in cache.iterdir()] == ["cost.json"]  # no temp file left
+    assert sorted(p.name for p in cache.iterdir()) == [
+        ".gitignore",
+        "cost.json",
+    ]  # no temp file left
+    assert (cache / ".gitignore").read_text() == "*\n"
     assert cost.total(cache) == (0.25, False)
     assert cost.items_per_second(cache, "dev") == 2.0
     assert cost.per_call_dollars(cache, "m") == (0.25, True)

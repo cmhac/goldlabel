@@ -102,3 +102,36 @@ def test_import_writes_nothing_and_reads_only_goldlabel_dir(tmp_path):
     reads = ast.literal_eval(out.stdout.strip())
     assert [r for r in reads if r.startswith("GOLDLABEL")] in (["GOLDLABEL_DIR"], [])
     assert list(work.iterdir()) == []
+
+
+def test_ignore_creates_appends_and_is_idempotent(tmp_path):
+    from goldlabel.settings import ignore
+
+    folder = tmp_path / "f"
+    ignore(folder, "a")
+    ignore(folder, "a")
+    assert (folder / ".gitignore").read_text() == "a\n"
+    (folder / ".gitignore").write_text("mine")  # a user's file, no trailing newline
+    ignore(folder, "a")
+    ignore(folder, "b")
+    assert (folder / ".gitignore").read_text() == "mine\na\nb\n"
+
+
+def test_git_ignores_the_cache_and_the_lock_but_not_the_record(tmp_path):
+    from pydantic_ai.usage import RequestUsage
+
+    from goldlabel._label import _acquire
+    from goldlabel.cost import cache_put
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    root = tmp_path / ".goldlabel"
+    cache_put(root / "cache", "k", {"x": 1}, RequestUsage(input_tokens=1))
+    _acquire(root / "labelling.lock", 1234)
+    (root / "gold.json").write_text("{}")
+    out = subprocess.run(
+        ["git", "-C", str(tmp_path), "status", "--porcelain", "-uall"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert out.split() == ["??", ".goldlabel/.gitignore", "??", ".goldlabel/gold.json"]

@@ -29,6 +29,7 @@ from urllib.request import Request, urlopen
 from goldlabel._gold_rule import GOLD_RULE_SHORT, GoldError, GoldRuntimeError
 from goldlabel.evaluation import _history
 from goldlabel.gold import Gold, GoldSet, Sample
+from goldlabel.settings import ignore
 from goldlabel.taxonomy import OFF_TOPIC, Label, Taxonomy, validate_labels
 
 OFF_TOPIC_DESCRIPTION = "the item matches none of the labels above"
@@ -84,7 +85,7 @@ def _live(folder: Path) -> int | None:
 
 
 def _acquire(lock: Path, port: int) -> None:
-    lock.parent.mkdir(parents=True, exist_ok=True)
+    ignore(lock.parent, lock.name)  # also creates the folder; the lock is per machine
     for _ in range(3):
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
