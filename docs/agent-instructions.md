@@ -1,6 +1,6 @@
 # Agent instructions block
 
-Agents that do not load skills (Copilot in the editor, and others), and any agent that should have the gold rule in context from the first message, need this block in the project's instruction file. Paste it once per project. It is the same text as `goldlabel.GOLD_RULE_FULL` followed by three pointers; a test keeps the rule in sync with `src/goldlabel/gold_rule.md`.
+Agents that do not load skills (Copilot in the editor, and others), and any agent that should have the gold rule in context from the first message, need this block in the project's instruction file. Paste it once per project. It is the same text as `goldlabel.GOLD_RULE_FULL` followed by the pointers below; a test keeps the rule in sync with `src/goldlabel/gold_rule.md`.
 
 ## Where to paste it
 
