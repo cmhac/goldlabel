@@ -25,8 +25,8 @@
 **Rationale**: the spec's story 1 and the existing rule "continue only if the user tells you to skip". A stale gold file from another corpus would otherwise skip tuning.
 
 ## R4. What the check may read (privacy and the gold rule)
-**Decision**: the notebook or script, and the storage folder's file names, dates and the aggregate fields the skills already name (sample name, row counts, evaluation count). Never gold text or labels in bulk, never a key, URL or `.env`.
-**Rationale**: gold rows can hold the user's data; the rule says agents do not write labels, and reading them in bulk adds nothing to knowing which stage is done.
+**Decision**: the notebook or script, and the storage folder's file names and modification times. It does not open `gold*.json` or `evals.jsonl`.
+**Rationale**: since 015 each `evals.jsonl` line carries the disagreements (row text, gold label, model reasoning), so even "just the counts" means reading the user's data. File names and dates are enough to tell a stage was reached; counts come from the user or the page.
 
 ## R5. How the page is taught
 **Decision**: one section in the overview listing the page's jobs as shipped by 015 (datasets, samples, rows, jump to id, label pending, row editor, evaluations with disagreements, STALE), the two start forms, and the rule "every revision goes through the page". `goldlabel-tune` keeps its step 3 text and gets the evaluation view at step 5.
