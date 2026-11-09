@@ -162,3 +162,26 @@ def test_the_overview_checks_progress_before_the_procedure():
         "only when nothing is done",
     ):
         assert phrase in check, phrase
+
+
+def test_the_overview_guides_each_stage_in_plain_words():
+    """016: the overview alone is enough to lead a user through the six stages."""
+    text = OVERVIEW.read_text()
+    guide = section(text, "## The stages in plain words")
+    assert guide, "no stage guide"
+    starts = [guide.find(f"**`{s}`**") for s in STAGES]
+    assert all(i >= 0 for i in starts) and starts == sorted(starts)
+    for n, start in enumerate(starts):
+        end = starts[n + 1] if n < 5 else len(guide)
+        for label in ("Purpose:", "Ask:", "Show:", "Approval:"):
+            assert label in guide[start:end], f"{STAGES[n]} lacks {label}"
+    talk = section(text, "## How to talk the user through a step")
+    for phrase in (
+        "what the step is for",
+        "show",
+        "decision",
+        "wait",
+        "what comes next",
+    ):
+        assert phrase in talk, phrase
+    assert len(text.splitlines()) <= 150

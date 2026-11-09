@@ -52,6 +52,21 @@ After `goldlabel-run` say **Sequence complete** and name what is optional and st
 
 **Entry checks.** If a stage's entry check fails, say which earlier stage is unfinished, offer to run it, and continue only if the user tells you to skip it. **Repeating a stage.** Each stage says what must be re-run if it is repeated; tell the user.
 
+## The stages in plain words
+
+Use these to explain each stage before you start it; the stage skill has the steps.
+
+- **`goldlabel-connect`** (1) Purpose: point goldlabel at the data and check it reads. Ask: what they want to find (the brief), where the data is, which columns hold the id and the text. Show: the first rows and your plain summary. Approval: the connection and any filter or reshaping you propose.
+- **`goldlabel-search-terms`** (2) Purpose: choose how to narrow the data down to likely matches. Ask: which seed phrases, keywords or regular expressions fit the brief, or the whole corpus. Show: the list, and a sample of what keywords bring in. Approval: the list of terms.
+- **`goldlabel-taxonomy`** (3) Purpose: agree the labels an item can get. Ask: `single` or `multi`, each label and its description, where two nearby labels draw their line. Show: the taxonomy and sample rows read together. Approval: exactly these labels, descriptions and mode.
+- **`goldlabel-candidates`** (4) Purpose: build the list of candidate items. Ask: whether the list is right after reading a sample. Show: the sample and the counts. Approval: the candidate list, which stays fixed once gold rows are drawn from it.
+- **`goldlabel-tune`** (5) Purpose: build the classifier and measure it against labels people wrote. Ask: how many gold rows, the target score, which one change to try next, when the prompt is final. Show: the evaluation and its disagreements. Approval: each prompt change, and the one test evaluation.
+- **`goldlabel-run`** (6) Purpose: classify everything. Ask: the similarity cutoff, whether the estimate is acceptable, the `max_cost`. Show: the estimate (calls, cost, time) before the run, the results and errors after. Approval: an explicit yes to the full run.
+
+## How to talk the user through a step
+
+Say what the step is for, in plain words, before you do it, then show the result, not a description of it. Put the decision that is theirs to them, as a question, and wait for the answer: do not decide for them. Explain any term the first time you use it. One stage at a time. Then say what comes next, in the "Done" form above.
+
 ## Write only goldlabel calls
 
 In short: write only goldlabel calls. The notebook contains goldlabel calls and nothing else: no snapshot or cache of the data, no guard such as `if not path.exists()` or `if not gold.all.rows` around a library call, no helper function or class, no long constants, no code that loads a `.env` file, and no charts, deduplication, aggregates, exports or fact-check cells after the run. The library already caches model calls, so re-running `evaluate` or `classify` costs nothing. If something seems to need other code (a query for data the library cannot read, a reshaping step), stop, show the user exactly what you would write and why, and write it only after their yes. Do not put the taxonomy, the prompt or the seed and keyword lists in a file (YAML, markdown or CSV): they are variables in cells, unless the user explicitly tells you to use a file.
