@@ -16,9 +16,26 @@ Importing a file the user says people already labelled is allowed: import it unc
 pip install goldlabel            # extras: goldlabel[pg] pgvector, goldlabel[s3] S3 Vectors, goldlabel[rds] RDS IAM
 ```
 
+## Check progress first
+
+`/goldlabel` is where a user starts whenever they do not know which skill to call. Before any stage, find out what they already have. Read their notebook or script (the calls in it) and only the file names and modification times in the storage folder (`.goldlabel/` by default). This check changes and runs nothing, and you never open gold*.json or evals.jsonl (an evaluation line holds row text, gold labels and model reasoning; for counts, ask the user or point them to the labelling page), and never read a key, a database URL or a .env.
+
+| Stage | Evidence |
+|---|---|
+| 1 | a corpus: `gl.Table`, `gl.PgCorpus` or `gl.S3Corpus` |
+| 2 | `seeds` and/or `keywords` variables (none if the user chose the whole corpus: ask) |
+| 3 | a `gl.Taxonomy(...)` |
+| 4 | a `gl.get_candidates(...)` call; `candidates.jsonl` |
+| 5 | `gl.Classifier`, `gl.Gold` and `clf.evaluate` calls; `gold*.json` and `evals.jsonl` exist |
+| 6 | `clf.estimate` and `clf.classify` calls; a saved classifier |
+
+Tell the user what you found, stage by stage: **done** (name the evidence you saw), **unsure** (say why: a variable nothing uses, a cell that may not have run, a gold file that may belong to another notebook) or **not started**. Then name the stage to resume at, the first without evidence, and ask "start there?". Evidence is not consent: skip a stage only on the user's yes, and that stage's own entry check still applies. If they say "start over" or name a stage, follow them. Start at `goldlabel-connect` only when nothing is done. If stage 6 is done, say **Sequence complete** and offer what is optional (reusing the classifier, a second corpus, reviewing labels in the page).
+
+Several `gold-<name>.json` files: ask which dataset they are working on. A notebook with anything other than goldlabel calls: say so and offer to clean it up; never delete it unasked.
+
 ## The procedure (a hard requirement)
 
-Work through these six skills in this order, one at a time. Start at the first. Do not skip, merge or reorder them unless the user tells you to. Load the skill for the stage you are at.
+Work through these six skills in this order, one at a time. Start at the stage the progress check names (the first, when nothing is done). Do not skip, merge or reorder them unless the user tells you to. Load the skill for the stage you are at.
 
 1. `goldlabel-connect`: point at the data, confirm the connection and columns, reshape only if the user agrees.
 2. `goldlabel-search-terms`: keywords, regular expressions or seeds, drafted with the user and approved.
@@ -34,6 +51,34 @@ Work through these six skills in this order, one at a time. Start at the first. 
 After `goldlabel-run` say **Sequence complete** and name what is optional and still open. Each stage skill has the same four parts: an entry check, a numbered procedure, an exit check and a closing "Next". Optional steps are marked `(optional)` inside the stage they belong to; none is a stage of its own.
 
 **Entry checks.** If a stage's entry check fails, say which earlier stage is unfinished, offer to run it, and continue only if the user tells you to skip it. **Repeating a stage.** Each stage says what must be re-run if it is repeated; tell the user.
+
+## The stages in plain words
+
+Use these to explain each stage before you start it; the stage skill has the steps.
+
+- **`goldlabel-connect`** (1) Purpose: point goldlabel at the data and check it reads. Ask: what they want to find (the brief), where the data is, which columns hold the id and the text. Show: the first rows and your plain summary. Approval: the connection and any filter or reshaping you propose.
+- **`goldlabel-search-terms`** (2) Purpose: choose how to narrow the data down to likely matches. Ask: which seed phrases, keywords or regular expressions fit the brief, or the whole corpus. Show: the list, and a sample of what keywords bring in. Approval: the list of terms.
+- **`goldlabel-taxonomy`** (3) Purpose: agree the labels an item can get. Ask: `single` or `multi`, each label and its description, where two nearby labels draw their line. Show: the taxonomy and sample rows read together. Approval: exactly these labels, descriptions and mode.
+- **`goldlabel-candidates`** (4) Purpose: build the list of candidate items. Ask: whether the list is right after reading a sample. Show: the sample and the counts. Approval: the candidate list, which stays fixed once gold rows are drawn from it.
+- **`goldlabel-tune`** (5) Purpose: build the classifier and measure it against labels people wrote. Ask: how many gold rows, the target score, which one change to try next, when the prompt is final. Show: the evaluation and its disagreements. Approval: each prompt change, and the one test evaluation.
+- **`goldlabel-run`** (6) Purpose: classify everything. Ask: the similarity cutoff, whether the estimate is acceptable, the `max_cost`. Show: the estimate (calls, cost, time) before the run, the results and errors after. Approval: an explicit yes to the full run.
+
+## How to talk the user through a step
+
+Say what the step is for, in plain words, before you do it, then show the result, not a description of it. Put the decision that is theirs to them, as a question, and wait for the answer: do not decide for them. Explain any term the first time you use it. One stage at a time. Then say what comes next, in the "Done" form above.
+
+## The labelling and review page
+
+People label, and review labels, in the labelling page. It can: list the datasets and samples in the storage folder, open a row, jump to a row by id, label the pending rows, revise a label or a note, and show each evaluation with its disagreements and a STALE flag. While a person labels, the page never shows a model's prediction.
+
+- In a terminal the user runs `goldlabel label [NAME]` (`--dir` and `--port` are optional). If you cannot open a browser, give them the command; never say you opened the page when you did not.
+- In the notebook, `gl.label(sample, taxonomy)` opens the rows of that sample still pending (`force_open_ui=True` walks every row, to review) and waits until they press Done. If the page is already running, it joins it.
+
+```python
+gl.label(dev, taxonomy)  # people label the pending rows of the dev sample
+```
+
+When a label looks wrong, or the user wants to change one: every revision of a gold label or note goes through the page. Tell them how to open it. A revised row keeps its earlier values, and an evaluation made before a revision is STALE: evaluate again (a new line in `evals.jsonl`; the old one is never rewritten). If the user says "just fix them", refuse as the gold rule says, point to the page, and offer other help.
 
 ## Write only goldlabel calls
 

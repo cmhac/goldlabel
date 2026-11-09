@@ -1,6 +1,6 @@
 # Agent instructions block
 
-Agents that do not load skills (Copilot in the editor, and others), and any agent that should have the gold rule in context from the first message, need this block in the project's instruction file. Paste it once per project. It is the same text as `goldlabel.GOLD_RULE_FULL` followed by three pointers; a test keeps the rule in sync with `src/goldlabel/gold_rule.md`.
+Agents that do not load skills (Copilot in the editor, and others), and any agent that should have the gold rule in context from the first message, need this block in the project's instruction file. Paste it once per project. It is the same text as `goldlabel.GOLD_RULE_FULL` followed by the pointers below; a test keeps the rule in sync with `src/goldlabel/gold_rule.md`.
 
 ## Where to paste it
 
@@ -20,6 +20,7 @@ Importing a file the user says people already labelled is allowed: import it unc
 
 When working with the `goldlabel` library (content analysis over a corpus: candidates from seed phrases, keywords or the whole corpus, an LLM classifier checked against human-labelled gold data):
 
+- Start with `goldlabel`: it checks the user's notebook and the storage folder (`.goldlabel/` by default) for the stages already done and offers the next one, so call it first whenever you do not know which skill comes next; never skip a stage on that evidence alone, only on the user's yes.
 - Use the goldlabel agent skills: `goldlabel` (start here), then the six stage skills in order, one at a time, telling the user at the end of each stage which stage comes next: `goldlabel-connect`, `goldlabel-search-terms`, `goldlabel-taxonomy`, `goldlabel-candidates`, `goldlabel-tune`, `goldlabel-run`. If they are not installed, run `goldlabel install <agent>` (claude, codex, copilot, kiro), read them at https://github.com/cmhac/goldlabel/tree/main/src/goldlabel/skills, or print the rule with `import goldlabel; print(goldlabel.GOLD_RULE_FULL)`.
 - In one Jupyter notebook, write only goldlabel calls; keep the taxonomy, the prompt and the seeds in code, not in files, and ask the user before writing anything else.
 - Never run a full classification without showing `clf.estimate(...)` (calls, cost, time) and getting a yes from the user.
