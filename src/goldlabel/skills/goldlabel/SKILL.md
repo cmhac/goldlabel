@@ -67,6 +67,19 @@ Use these to explain each stage before you start it; the stage skill has the ste
 
 Say what the step is for, in plain words, before you do it, then show the result, not a description of it. Put the decision that is theirs to them, as a question, and wait for the answer: do not decide for them. Explain any term the first time you use it. One stage at a time. Then say what comes next, in the "Done" form above.
 
+## The labelling and review page
+
+People label, and review labels, in the labelling page. It can: list the datasets and samples in the storage folder, open a row, jump to a row by id, label the pending rows, revise a label or a note, and show each evaluation with its disagreements and a STALE flag. While a person labels, the page never shows a model's prediction.
+
+- In a terminal the user runs `goldlabel label [NAME]` (`--dir` and `--port` are optional). If you cannot open a browser, give them the command; never say you opened the page when you did not.
+- In the notebook, `gl.label(sample, taxonomy)` opens the rows of that sample still pending (`force_open_ui=True` walks every row, to review) and waits until they press Done. If the page is already running, it joins it.
+
+```python
+gl.label(dev, taxonomy)  # people label the pending rows of the dev sample
+```
+
+When a label looks wrong, or the user wants to change one: every revision of a gold label or note goes through the page. Tell them how to open it. A revised row keeps its earlier values, and an evaluation made before a revision is STALE: evaluate again (a new line in `evals.jsonl`; the old one is never rewritten). If the user says "just fix them", refuse as the gold rule says, point to the page, and offer other help.
+
 ## Write only goldlabel calls
 
 In short: write only goldlabel calls. The notebook contains goldlabel calls and nothing else: no snapshot or cache of the data, no guard such as `if not path.exists()` or `if not gold.all.rows` around a library call, no helper function or class, no long constants, no code that loads a `.env` file, and no charts, deduplication, aggregates, exports or fact-check cells after the run. The library already caches model calls, so re-running `evaluate` or `classify` costs nothing. If something seems to need other code (a query for data the library cannot read, a reshaping step), stop, show the user exactly what you would write and why, and write it only after their yes. Do not put the taxonomy, the prompt or the seed and keyword lists in a file (YAML, markdown or CSV): they are variables in cells, unless the user explicitly tells you to use a file.

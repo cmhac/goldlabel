@@ -185,3 +185,43 @@ def test_the_overview_guides_each_stage_in_plain_words():
     ):
         assert phrase in talk, phrase
     assert len(text.splitlines()) <= 150
+
+
+def test_the_overview_teaches_the_labelling_page():
+    """016: what the page does, how to start it, and that it is the only route for revisions."""
+    page = section(OVERVIEW.read_text(), "## The labelling and review page")
+    assert page, "no page section"
+    for phrase in (
+        "goldlabel label",
+        "gl.label",
+        "force_open_ui=True",
+        "STALE",
+        "jump to a row by id",
+        "label the pending rows",
+        "revise a label or a note",
+        "disagreements",
+        "never shows a model's prediction",
+        "joins",
+        "every revision of a gold label or note goes through the page",
+    ):
+        assert phrase in page, phrase
+
+
+def test_no_guidance_offers_a_gold_edit():
+    rule = (ROOT / "src" / "goldlabel" / "gold_rule.md").read_text().strip()
+    paths = [OVERVIEW, *(SKILLS / s / "SKILL.md" for s in STAGES), *REFS.glob("*.md")]
+    paths += [
+        ROOT / "docs" / "agent-instructions.md",
+        ROOT / ".kiro/steering/goldlabel.md",
+    ]
+    for path in paths:
+        text = path.read_text().replace(rule, "")
+        for phrase in (
+            "edit gold.json",
+            "edit the gold file",
+            "open gold.json",
+            "change the gold file",
+            "update the gold file",
+            "gold.jsonl",
+        ):  # shortcut: a phrase list misses a new wording; extend it when a trial shows one
+            assert phrase not in text, f"{path.name}: {phrase}"
