@@ -22,7 +22,8 @@ which classifies each text into one of your labels or a generic `off_topic`.
 ### 3. Label a dev dataset
 
 Goldlabel draws a random sample of the candidates, then opens a small web app to help you quickly label each item
-with your taxonomy. 
+with your taxonomy. Start it from the notebook with `gl.label` or from a terminal with `goldlabel label`
+(see [Review and revise labels](#review-and-revise-labels)).
 
 ### 4. Evaluate the gold dataset and tune the prompt
 
@@ -44,18 +45,31 @@ take.
 ## Install
 
 ```
-ub add goldlabel
-ub add "goldlabel[s3]"      # boto3, for an S3 Vectors corpus
-ub add "goldlabel[pg]"      # psycopg, for a pgvector (PostgreSQL) corpus
-ub add "goldlabel[rds]"     # psycopg and boto3, for RDS / Aurora IAM database authentication
-ub add "goldlabel[local]"   # Sentence Transformers, for local query embeddings (Python < 3.14)
+uv add goldlabel
+uv add "goldlabel[s3]"      # boto3, for an S3 Vectors corpus
+uv add "goldlabel[pg]"      # psycopg, for a pgvector (PostgreSQL) corpus
+uv add "goldlabel[rds]"     # psycopg and boto3, for RDS / Aurora IAM database authentication
+uv add "goldlabel[local]"   # Sentence Transformers, for local query embeddings (Python < 3.14)
 ```
 
 ## Installing skills
 
-Goldlabel comes with a set of agent skills to help you work interactively with a coding agent. Install the skills
-with `uv run goldlabel install <harness>`. Use `uv run goldlabel install --help` for a list of supported agent
-harnesses.
+Goldlabel includes agent skills that walk users through the steps listed above interactively with a coding agent. 
+Coding agent use is optional — goldlabel is meant to be a simple python library and these skills are only
+there if you want them. You can have an agent autonomously build the entire pipeline and only do the hand-
+labeling yourself, selectively use skills for certain parts of the workflow such as prompt tuning, or not
+use AI assistance at all.
+
+```bash
+uv run goldlabel install <harness>    # claude, codex, copilot, kiro, or all
+```
+
+This copies the skills into the agent's skills folder in your project (`.claude/skills` for Claude Code, `.agents/skills`
+for Codex and Copilot, `.kiro/skills` for Kiro). `--global` installs them for your whole user instead, `--dir PATH`
+writes them anywhere else, and `uv run goldlabel install --help` lists every option. Restart the agent if it does not pick up
+the new skills right away.
+
+**Not sure what to do? run `/goldlabel`.** It checks the state of your repository, and helps you figure out what to do next.
 
 ## Example workflow
 
