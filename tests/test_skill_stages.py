@@ -225,3 +225,19 @@ def test_no_guidance_offers_a_gold_edit():
             "gold.jsonl",
         ):  # shortcut: a phrase list misses a new wording; extend it when a trial shows one
             assert phrase not in text, f"{path.name}: {phrase}"
+
+
+def test_tune_offers_the_page_when_reading_disagreements():
+    """016: the disagreement-reading steps point at the page and its STALE flag."""
+    procedure = section(body("goldlabel-tune"), "## Procedure")
+    reading = procedure[
+        procedure.index("4. Evaluate on dev") : procedure.index("7. Stop at")
+    ]
+    for phrase in (
+        "goldlabel label",
+        "STALE",
+        "evaluate again",
+        "ev.disagreements_to_polars()",
+    ):
+        assert phrase in reading, phrase
+    assert "never read its disagreements to write the prompt" in procedure
