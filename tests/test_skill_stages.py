@@ -241,3 +241,28 @@ def test_tune_offers_the_page_when_reading_disagreements():
     ):
         assert phrase in reading, phrase
     assert "never read its disagreements to write the prompt" in procedure
+
+
+START_BULLET = (
+    "- Start with `goldlabel`: it checks the user's notebook and the storage folder "
+    "(`.goldlabel/` by default) for the stages already done and offers the next one, so call it "
+    "first whenever you do not know which skill comes next; never skip a stage on that "
+    "evidence alone, only on the user's yes."
+)
+
+
+def test_the_start_here_bullet_is_the_same_in_every_copy():
+    from goldlabel.cli import POINTERS
+
+    copies = {
+        "docs/agent-instructions.md": (
+            ROOT / "docs" / "agent-instructions.md"
+        ).read_text(),
+        ".kiro/steering/goldlabel.md": (
+            ROOT / ".kiro/steering/goldlabel.md"
+        ).read_text(),
+        "cli.POINTERS": POINTERS,
+    }
+    for name, text in copies.items():
+        assert START_BULLET in text, name
+        assert "To review or revise gold labels" in text, name
