@@ -383,7 +383,8 @@ def test_the_run_section_counts_items_names_model_and_dates_and_the_lowest_simil
     p = Predictions(RUN_ROWS, live=2, cached=0, resumed=1, cost=0.25)
     assert str(gl.get_methodology(results=p)) == doc(
         run_section(
-            "The live model calls cost $0.25. The lowest similarity among the items was 0.72."
+            "The live model calls cost $0.25. The similarity cutoff was not recorded; "
+            "the lowest similarity among the items was 0.72."
         )
     )
 
@@ -416,3 +417,70 @@ def test_one_day_one_item_and_no_similarity_scores_and_an_unknown_price():
         "0 from the cache, 0 resumed from an earlier run, 0 failed. "
         "The live model calls cost ? (a price is unknown)."
     )
+
+
+# --- what is not known is said, never guessed -------------------------------------------------
+
+
+def test_result_rows_without_the_model_and_time_say_how_many_lack_them():
+    bare = {"id": "a", "text": "x", "labels": ["a"], "run": "d"}
+    stamped = {**bare, "run_model": "m1", "run_at": "2026-11-07T10:00:00+00:00"}
+    p = Predictions([bare, {**bare, "id": "b"}, stamped], live=3, cost=0.25)
+    assert str(gl.get_methodology(results=p)) == doc(
+        "### Run\n\n3 items were classified by `m1` on 2026-11-07: 3 by live model calls, "
+        "0 from the cache, 0 resumed from an earlier run, 0 failed. "
+        "The live model calls cost $0.25. The model and time were not recorded on 2 of the 3 rows."
+    )
+
+
+def test_rows_imported_from_elsewhere_are_never_called_page_labels():
+    g = write_gold(
+        rows=[
+            gold_row("a", "dev", ["layoff"], "imported"),
+            gold_row("b", "dev", ["burnout"], "imported"),
+        ],
+        log=None,
+    )
+    text = str(gl.get_methodology(gold=g))
+    assert (
+        "0 in the labelling page, 2 imported (labelled elsewhere), 0 with no record"
+        in text
+    )
+
+
+def test_no_evaluation_log_means_no_evaluation_claims():
+    text = str(gl.get_methodology(gold=write_gold(log=None), classifier=NEW))
+    assert "### Evaluation" not in text and "Different prompts" not in text
+    assert "The classifier uses the model `openai:gpt-x`." in text
+
+
+def test_a_damaged_log_line_is_skipped_and_the_rest_still_counts():
+    g = write_gold()
+    log = g.path.parent / "evals.jsonl"
+    log.write_text("{this is not json\n" + log.read_text())
+    assert EVAL_SECTION in str(gl.get_methodology(gold=g, classifier=NEW))
+
+
+@pytest.mark.parametrize(
+    ("missing", "header"),
+    [
+        ("candidates", "### Corpus and candidates"),
+        ("gold", "### Gold labels"),
+        ("classifier", "### Classifier"),
+        ("results", "### Run"),
+    ],
+)
+def test_with_each_input_missing_in_turn_the_text_has_no_section_for_it(
+    missing, header
+):
+    p = Predictions(RUN_ROWS, live=2, cached=0, resumed=1, cost=0.25)
+    given: dict[str, Any] = {
+        "candidates": seeds_list(),
+        "gold": write_gold(),
+        "classifier": NEW,
+        "results": p,
+    }
+    del given[missing]
+    text = str(gl.get_methodology(**given))
+    assert header not in text
+    assert all(h in text for h in ("### Labels",))

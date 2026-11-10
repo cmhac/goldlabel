@@ -220,15 +220,18 @@ def _run(results: Predictions, cutoff: float | None) -> str:
         f"{results.resumed} resumed from an earlier run, {len(results.errors)} failed. "
         f"The live model calls cost {cost}."
     )
+    bare = sum(1 for r in results.rows if not (r.get("run_model") and r.get("run_at")))
+    if bare:
+        text += f" The model and time were not recorded on {bare} of the {n} rows."
     scores = [r["max_similarity"] for r in results.rows if "max_similarity" in r]
     lowest = (
         f"lowest similarity among the items was {min(scores):g}" if scores else None
     )
-    if cutoff is not None:
-        text += f" The similarity cutoff was {cutoff:g}"
-        text += f"; the {lowest}." if lowest else "."
-    elif lowest:
-        text += f" The {lowest}."
+    if cutoff is not None or scores:
+        was = "was not recorded" if cutoff is None else f"was {cutoff:g}"
+        text += f" The similarity cutoff {was}" + (
+            f"; the {lowest}." if lowest else "."
+        )
     return text
 
 
