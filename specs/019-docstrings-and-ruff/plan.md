@@ -36,7 +36,7 @@ No violations; nothing in Complexity Tracking.
 
 ## Design
 
-1. **Config** (`pyproject.toml`, `[tool.ruff.lint]`): `select = ["D", "DOC201", "DOC501"]`, `preview = true`, `explicit-preview-rules = true`, `ignore = ["D105", "D107"]`, `[tool.ruff.lint.pydocstyle] convention = "google"`. `per-file-ignores`: `tests/**`, `examples/**`, `scripts/**`, `specs/**` ignore `D` and `DOC`; `src/goldlabel/_*.py` ignore `D` and `DOC`. The existing `ty`, pytest and pre-commit entries are unchanged: `ruff check` already runs in both pre-commit and CI.
+1. **Config** (`pyproject.toml`, `[tool.ruff.lint]`): `select = ["D", "DOC201", "DOC501"]`, `preview = true`, `explicit-preview-rules = true`, `ignore = ["D105", "D107"]`, `[tool.ruff.lint.pydocstyle] convention = "google"`. `per-file-ignores`: `tests/**`, `examples/**`, `scripts/**`, `specs/**` ignore `D` and `DOC`; `_html.py`, `_frame.py`, `_sync.py`, `_gold_rule.py` ignore `D` and `DOC` (`_label.py` is not exempt: it holds the exported `label`). The existing `ty`, pytest and pre-commit entries are unchanged: `ruff check` already runs in both pre-commit and CI.
 2. **Docstring standard** (what the audit checks; recorded as the first lines of `tests/test_docstrings.py`' module docstring, not a new doc): summary line in the imperative or noun phrase, blank line, then `Args:` (meaning, allowed values, units), `Returns:`, `Raises:` (only the exceptions raised on purpose), and a short `Note:`/paragraph for effects: files written and where, live model calls and cost, network or database reads, a page opened, "returns a new X; the original is unchanged". Plain words; no spec numbers, no agent jargon (FR-006).
 3. **Order of work**: public classes users meet first (`Classifier`, `Gold`/`Sample`, `Candidates`, `Evaluation`), then corpora (`Table`, `S3Corpus`, `PgCorpus`), then the rest, finishing with the module docstrings. The `with_prompt` docstring is written and checked against `system_prompt()` first (FR-001, research R6).
 4. **Test** (`tests/test_docstrings.py`): iterate `goldlabel.__all__`; for each class, its public methods and properties (via `vars`, as the measurement did), assert a docstring and, when there are parameters beyond `self`/`cls`, an `Args:` heading. Failure message names `Class.method`.
@@ -48,7 +48,7 @@ Project structure: only `pyproject.toml`, `AGENTS.md`, `tests/test_docstrings.py
 
 - A preview rule can change on a ruff upgrade; `uv.lock` pins it, and an upgrade is a deliberate commit that re-runs `ruff check`.
 - `ruff format` reflows docstring code blocks in Markdown and Python; run it after editing.
-- Docstring text is checked by reading only (spec "Deliberately skipped"); the audit table in `tasks.md` T03 is that record.
+- Docstring text is checked by reading only (spec "Deliberately skipped"); the audit table in `tasks.md` T013 is that record.
 - The 19 auto-fixable layout findings (`D209`) change only whitespace inside docstrings.
 
 ## Deliberately skipped

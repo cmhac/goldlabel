@@ -9,11 +9,11 @@ All measured on 2026-11-10 with the installed `ruff 0.17.3` (pinned by `uv.lock`
 - `D` with the Google convention (stable): 119 findings today (35 `D102`, 19 `D205`, 19 `D209`, 16 `D105`, 11 `D103`, 9 `D100`, 5 `D101`, 5 `D107`). `D417` (every argument described) is part of the convention; it fires only when an `Args:` section exists.
 - NumPy style gives 140 findings (24 extra `D401`) and PEP 257 145; Google reads best in an editor hover and `help()`, and its `Args:`/`Returns:`/`Raises:` headings are what `D417`/`DOC201`/`DOC501` look for. Alternatives rejected: NumPy (longer, underlined headings), PEP 257 (no argument checks).
 - `DOC201` (missing `Returns`) and `DOC501` (missing `Raises`) are **preview** in 0.17.3 (`ruff rule DOC201`). `preview = true` with `explicit-preview-rules = true` enables only the codes named in `select`, so no other preview rule turns on. `uv.lock` pins ruff, so a preview change arrives only with a deliberate upgrade.
-- Today they report 121 findings: 71 on public functions (47 functions), 50 on private ones (23 of them in the private modules `_label`, `_html`, `_sync`).
+- Today they report 121 findings: 71 on public functions (47 functions), 50 on private ones (23 of them in the private modules `_label`, `_html`, `_sync`; `_label` stays checked, see R2).
 
 ## R2. Private code
 
-**Decision**: per-file-ignore `DOC201`/`DOC501` and `D` for `src/goldlabel/_*.py`; keep them on for private helpers in public modules.
+**Decision**: per-file-ignore `D` and `DOC` for the private modules `_html.py`, `_frame.py`, `_sync.py`, `_gold_rule.py`; keep them on for `_label.py` (it holds the exported `label`) and for private helpers in public modules.
 
 Ruff cannot tell a private function from a public one for the `DOC` rules, so the ~27 private helpers in public modules (`_hit`, `system_prompt`, ...) get a `Returns:`/`Raises:` line each. `[tool.ruff.lint.pydoclint] ignore-one-line-docstrings = true` would skip them (54 findings left, all in multi-line docstrings) but would also let a public one-line docstring with a return value pass. Strict was asked for: keep it `false`; if the private-helper burden turns out noisy in implementation, flipping it is a one-line change recorded in the task note.
 
@@ -30,11 +30,11 @@ Ruff cannot tell a private function from a public one for the `DOC` rules, so th
 
 ## R4. Dunder methods and `__init__`
 
-**Decision**: ignore `D105` (16, almost all `__repr__`/`_repr_html_`/`__len__`-style) and `D107` (5; Google style documents constructor arguments in the class docstring, an `Attributes:`/`Args:` section there). Document `Sample.__add__` by hand: it is how a spent test sample joins tuning, a public operation. The audit in task T03 lists any other public dunder that does something a reader would not guess.
+**Decision**: ignore `D105` (16, almost all `__repr__`/`_repr_html_`/`__len__`-style) and `D107` (5; Google style documents constructor arguments in the class docstring, an `Attributes:`/`Args:` section there). Document `Sample.__add__` by hand: it is how a spent test sample joins tuning, a public operation. The audit in task T001/T013 lists any other public dunder that does something a reader would not guess.
 
 ## R5. Scope outside `src/`
 
-`uv run ruff check` runs on the whole repo; tests, examples, scripts and specs are exempt via `per-file-ignores` (`D`, `DOC`), in the style of the existing `"examples/**" = ["B018"]` entry. Measured at implementation (T02), not assumed.
+`uv run ruff check` runs on the whole repo; tests, examples, scripts and specs are exempt via `per-file-ignores` (`D`, `DOC`), in the style of the existing `"examples/**" = ["B018"]` entry. Measured at implementation (T016), not assumed.
 
 ## R6. The `with_prompt` text (FR-001)
 
