@@ -62,6 +62,7 @@ def test_candidates_from_seeds_and_the_labels_make_the_first_two_sections():
         SEEDS_SECTION,
         LABELS_SECTION,
         "### Classifier\n\nThe classifier uses the model `openai:gpt-x`.",
+        appendix_head("Pick one."),
     )
     assert m.warnings == ()
 
@@ -125,6 +126,8 @@ def test_a_multi_label_taxonomy_says_every_label_that_applies():
         "### Labels\n\nEach item received every label that applies from: `a`, "
         "or the built-in `off_topic` (the item matches none of them).",
         "### Classifier\n\nThe classifier uses the model `m`.",
+        "### Appendix\n\n**Model**: `m`\n\n**Prompt** (exactly as stored):\n\n> p\n\n"
+        "**Labels**\n\n- `a`: x\n- `off_topic`: The item matches none of the labels above.",
     )
 
 
@@ -298,7 +301,13 @@ def test_gold_classifier_and_evaluation_sections_from_a_hand_built_gold_file():
     g = write_gold()
     files = [(p, p.read_bytes()) for p in (g.path, g.path.parent / "evals.jsonl")]
     m = gl.get_methodology(gold=g, classifier=NEW)
-    assert str(m) == doc(LABELS_SECTION, GOLD_SECTION, CLASSIFIER_SECTION, EVAL_SECTION)
+    assert str(m) == doc(
+        LABELS_SECTION,
+        GOLD_SECTION,
+        CLASSIFIER_SECTION,
+        EVAL_SECTION,
+        f"{APPENDIX_HEAD}\n\n{GOLD_TABLE}",
+    )
     assert all(p.read_bytes() == data for p, data in files)  # read-only (SC-006)
 
 
@@ -341,6 +350,7 @@ def test_a_classifier_loaded_from_a_bundle_brings_its_own_evaluation():
         "### Evaluation\n\nThe classifier was scored against the gold labels:\n\n"
         "- **test**: accuracy 0.90 on 50 labelled rows, evaluated 2026-11-06 "
         "(read from the classifier's saved bundle).",
+        appendix_head("Pick one."),
     )
 
 
@@ -521,7 +531,7 @@ def test_a_label_revised_after_the_evaluation_ran_is_flagged_as_stale():
         "its score may no longer match the labels."
     )
     assert m.warnings == (stale,)
-    assert m.text.endswith(f"### Warnings\n\n- {stale}")
+    assert f"### Warnings\n\n- {stale}\n\n### Appendix" in m.text
 
 
 def test_a_classifier_that_was_never_evaluated_is_flagged_once():
@@ -564,3 +574,88 @@ def test_gold_rows_missing_from_the_candidates_are_flagged_unless_a_cutoff_was_a
         "Gold rows not among the candidates passed in: 5.",
     )
     assert warnings_of(candidates=full.above(0.75)) == ()
+
+
+# --- the appendix: the exact prompt, the labels and the gold dataset ---------------------------
+
+
+def appendix_head(prompt="Pick better."):
+    return (
+        "### Appendix\n\n**Model**: `openai:gpt-x`\n\n"
+        f"**Prompt** (exactly as stored):\n\n> {prompt}\n\n"
+        "**Labels**\n\n- `layoff`: Lost a job.\n- `burnout`: Worn out.\n"
+        "- `off_topic`: The item matches none of the labels above."
+    )
+
+
+APPENDIX_HEAD = appendix_head()
+GOLD_TABLE = (
+    "**Gold dataset**\n\n"
+    "| sample | id | text | label | labelled by |\n"
+    "|---|---|---|---|---|\n"
+    "| dev | d1 | text d1 | layoff | labelling page |\n"
+    "| dev | d2 | text d2 | burnout | labelling page |\n"
+    "| dev | d3 | text d3 | (pending) |  |\n"
+    "| test | t1 | text t1 | layoff | imported |\n"
+    "| test | t2 | text t2 | off_topic | unstamped |"
+)
+
+
+def appendix_of(**kw):
+    text = str(gl.get_methodology(**kw))
+    return text[text.index("### Appendix") :]
+
+
+def test_the_appendix_has_the_model_the_prompt_the_labels_and_every_gold_row():
+    assert (
+        appendix_of(gold=write_gold(), classifier=NEW)
+        == f"{APPENDIX_HEAD}\n\n{GOLD_TABLE}"
+    )
+
+
+def test_a_multi_line_prompt_is_quoted_line_by_line_and_keeps_its_blank_lines():
+    multi = replace(NEW, prompt="Line one\n\nLine two")
+    assert "> Line one\n>\n> Line two\n\n**Labels**" in appendix_of(classifier=multi)
+
+
+def test_with_no_classifier_the_appendix_is_only_the_gold_table():
+    assert appendix_of(gold=write_gold()) == f"### Appendix\n\n{GOLD_TABLE}"
+
+
+def test_a_pipe_or_a_line_break_in_a_row_cannot_break_the_table():
+    rows = [gold_row("x|y", "dev", ["layoff"], "imported", text="a | b\nc\r\nd")]
+    g = write_gold(rows=rows, log=None)
+    table = appendix_of(gold=g).split("\n")
+    assert table[-1] == "| dev | x\\|y | a \\| b<br>c<br>d | layoff | imported |"
+    assert (
+        len([line for line in table if line.startswith("|")]) == 3
+    )  # header, rule, row
+
+
+def test_the_gold_table_can_be_left_out_and_nothing_else_changes():
+    g = write_gold()
+    full = str(gl.get_methodology(gold=g, classifier=NEW))
+    short = str(gl.get_methodology(gold=g, classifier=NEW, include_gold_table=False))
+    assert full == f"{short}\n\n{GOLD_TABLE}"
+    assert "Gold dataset" not in short and "| sample" not in short
+    assert (
+        str(gl.get_methodology(gold=g, include_gold_table=False)).count("Appendix") == 0
+    )
+
+
+def test_a_note_never_appears_in_the_text_with_the_table_on_or_off():
+    rows = [gold_row("a", "dev", ["layoff"], "goldlabel-ui", note="TOPSECRET-NOTE")]
+    g = write_gold(rows=rows, log=None)
+    for table in (True, False):
+        text = str(gl.get_methodology(gold=g, classifier=NEW, include_gold_table=table))
+        assert "TOPSECRET" not in text and "Rows with a note: 1" in text
+
+
+def test_results_from_another_classifier_withhold_the_prompt():
+    rows = [{**r, "run": "someone-else"} for r in RUN_ROWS]
+    text = appendix_of(classifier=NEW, results=Predictions(rows, live=3, cost=0.25))
+    assert "Pick better." not in text
+    assert (
+        "**Prompt**: not given, because the results were produced by a different "
+        "classifier from the one passed in, so its prompt is not the prompt of the run."
+    ) in text

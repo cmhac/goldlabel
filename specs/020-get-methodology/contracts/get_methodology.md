@@ -51,7 +51,6 @@ Evaluation calls cost {$x.xx | ?, a price is unknown}.
 {n} item(s) {was|were} classified by `{model}` {on {date} | between {first_at} and {last_at}}: {live} by live model calls, {cached} from the cache, {resumed} resumed from an earlier run, {failed} failed. The live model calls cost {$x.xx | ?, a price is unknown}. The similarity cutoff was {cutoff}; the lowest similarity among the items was {s}.
   (rows without model or time) The model and time were not recorded on {k} of the {n} rows.
   (no cutoff) The similarity cutoff was not recorded.
-  (digest differs from the classifier passed in) These results were produced by a different classifier from the one passed in, so its prompt is not given as the prompt of the run.
 
 ### Warnings
 - The {samples} evaluation of {date} predates a revision of {r} gold label(s); its score may no longer match the labels.
@@ -61,12 +60,25 @@ Evaluation calls cost {$x.xx | ?, a price is unknown}.
 (none: the section is omitted; evaluating a sample many times is not a warning)
 
 ### Appendix
-**Model**: `{model}`   **Prompt** (exactly as stored): > {prompt}   **Labels**: - `name`: description ...
-**Gold dataset**
+**Model**: `{model}`
+
+**Prompt** (exactly as stored):
+
+> {prompt, each line quoted; a blank line is ">"}
+  (results from another classifier) **Prompt**: not given, because the results were produced by a different classifier from the one passed in, so its prompt is not the prompt of the run.
+
+**Labels**
+
+- `{name}`: {description}
+- `off_topic`: The item matches none of the labels above.
+
+**Gold dataset**   (omitted with include_gold_table=False, or when there are no rows)
+
 | sample | id | text | label | labelled by |
 |---|---|---|---|---|
 | dev | 17 | text with \| escaped<br>and a break | burnout | labelling page |
-| dev | 18 | ... | (pending) | |
+| dev | 18 | ... | (pending) |  |
+  labelled by: labelling page | imported | unstamped (blank for a pending row); notes are never shown.
 ```
 
 ## Errors

@@ -251,6 +251,80 @@ def _run(results: Predictions, cutoff: float | None) -> str:
     return text
 
 
+def _other_run(classifier: Classifier | None, results: Predictions | None) -> bool:
+    """Ask whether the result rows were stamped by a classifier other than the one given.
+
+    Returns:
+        bool: True when a row's `run` digest differs from the classifier's.
+    """
+    if classifier is None or results is None:
+        return False
+    return bool({r["run"] for r in results.rows if "run" in r} - {classifier.digest})
+
+
+def _cell(value) -> str:
+    """Make a value safe inside one Markdown table cell: a pipe is escaped, a line break becomes `<br>`.
+
+    Returns:
+        str: The value as one line of text.
+    """
+    # shortcut: a backslash in a row's text is not escaped, upgrade if a text can end in one before a pipe
+    text = str(value).replace("|", "\\|")
+    return text.replace("\r\n", "<br>").replace("\n", "<br>").replace("\r", "<br>")
+
+
+def _appendix(
+    gold: Gold | None,
+    classifier: Classifier | None,
+    results: Predictions | None,
+    include_gold_table: bool,
+) -> str | None:
+    """Write the appendix: the model, the exact prompt, the labels and the gold dataset.
+
+    Returns:
+        str | None: The text, or None when there is nothing to put in it. A note is never copied.
+    """
+    parts = []
+    if classifier is not None:
+        parts.append(f"**Model**: `{_model_name(classifier.model)}`")
+        if _other_run(classifier, results):
+            parts.append(
+                "**Prompt**: not given, because the results were produced by a different "
+                "classifier from the one passed in, so its prompt is not the prompt of the run."
+            )
+        else:
+            quoted = "\n".join(
+                f"> {x}" if x else ">" for x in classifier.prompt.split("\n")
+            )
+            parts.append(f"**Prompt** (exactly as stored):\n\n{quoted}")
+        labels = [
+            f"- `{label.name}`: {label.description}"
+            if label.description
+            else f"- `{label.name}`"
+            for label in classifier.taxonomy.labels
+        ]
+        labels.append("- `off_topic`: The item matches none of the labels above.")
+        parts.append("**Labels**\n\n" + "\n".join(labels))
+    rows = gold._read() if gold is not None and include_gold_table else []
+    if rows:
+        by = {"goldlabel-ui": "labelling page", "imported": "imported"}
+        lines = [
+            "| sample | id | text | label | labelled by |",
+            "|---|---|---|---|---|",
+        ]
+        for r in rows:
+            cells = (
+                r.sample,
+                r.id,
+                r.text,
+                ", ".join(r.labels) if r.labels else "(pending)",
+                by.get(r.labelled_by, "unstamped") if r.labels else "",
+            )
+            lines.append("| " + " | ".join(_cell(x) for x in cells) + " |")
+        parts.append("**Gold dataset**\n\n" + "\n".join(lines))
+    return "\n\n".join(parts) or None
+
+
 def _warnings(
     gold: Gold | None,
     classifier: Classifier | None,
@@ -294,10 +368,7 @@ def _warnings(
         found.append(
             "The classifier's labels differ from the labels stored in the gold file."
         )
-    runs = (
-        {r["run"] for r in results.rows if "run" in r} if results is not None else set()
-    )
-    if classifier is not None and runs - {classifier.digest}:
+    if _other_run(classifier, results):
         found.append(
             "The results were produced by a different classifier from the one passed in."
         )
@@ -379,5 +450,8 @@ def get_methodology(
     found = _warnings(gold, classifier, results, chosen, history)
     if found:
         sections.append(("Warnings", "\n".join(f"- {w}" for w in found)))
+    appendix = _appendix(gold, classifier, results, include_gold_table)
+    if appendix:
+        sections.append(("Appendix", appendix))
     body = "\n\n".join(f"### {title}\n\n{text}" for title, text in sections)
     return Methodology(f"## Methodology\n\n{body}", tuple(found))
