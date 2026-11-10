@@ -120,10 +120,9 @@ def py_cells():
 def test_walkthrough_script_and_notebook_hold_the_same_cells():
     nb = json.loads(IPYNB.read_text())
     from_nb = [(c["cell_type"], "".join(c["source"]).strip()) for c in nb["cells"]]
-    assert from_nb == py_cells()
-    for cell in nb["cells"]:
-        if cell["cell_type"] == "code":
-            assert cell["outputs"] == [] and cell["execution_count"] is None
+    assert (
+        from_nb == py_cells()
+    )  # outputs are allowed: the notebook is saved after a run
 
 
 def test_walkthrough_is_honest_about_gold_and_keys():

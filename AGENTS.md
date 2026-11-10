@@ -101,7 +101,7 @@ Ruff, ty and pytest must pass before every commit (pre-commit enforces it). The 
 - Private helpers: `_sync.py` (sync wrapper over a running loop), `_html.py` and `_frame.py` (reprs and polars/pandas), `_label.py` (the labelling server and `label`), `_gold_rule.py` + `gold_rule.md` (the canonical rule, `GOLD_RULE_SHORT/FULL`, `GoldError`), `web/` (index.html, app.js, app.css, input.css).
 - Development tooling (not shipped): `.specify/` (Spec Kit constitution, templates, scripts), `.claude/skills/speckit-*`, `.agents/skills/speckit-*`, `.github/skills/speckit-*`, `.agents/skills/ponytail*` (symlinked from `.claude/skills/` and `.kiro/skills/`), `skills-lock.json`, `.kiro/steering/ponytail.md`.
 - Agents: `src/goldlabel/skills/` (`goldlabel/` overview with `references/{workflow,tuning,running,reuse}.md`, and the stage skills `goldlabel-{connect,search-terms,taxonomy,candidates,tune,run}`; shipped in the wheel, installed by `goldlabel install`), `docs/agent-instructions.md` (the instruction block a user can paste into an agent's rules file), `.kiro/steering/goldlabel.md`, `.claude-plugin/{plugin,marketplace}.json`, root `plugin.json`.
-- `examples/sample/` is the walkthrough (`walkthrough.ipynb`, no outputs, and `walkthrough.py`, the same cells) over a tiny local corpus; `tests/` mirrors the modules; `specs/` is history plus 006.
+- `examples/sample/` is the walkthrough (`walkthrough.ipynb`, saved after a run so its outputs show, and `walkthrough.py`, the same cells) over a tiny local corpus; `tests/` mirrors the modules; `specs/` is history plus 006.
 
 ## Testing notes
 
