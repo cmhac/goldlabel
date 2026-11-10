@@ -149,10 +149,7 @@ A methodology that says "an LLM classified the posts" is not reproducible. The e
 ### Session 2026-11-10
 
 - Q: Should candidate searches start saving how they were run (seeds, keywords, corpus and filter description)? → A: Yes, option B: the candidates file records the seed phrases, the keywords and regex flag, and a description of the corpus and its filter. Nothing about a classification run is recorded; `classify`, its output file and `Predictions` are unchanged.
-
-### Open
-
-1. **[NEEDS CLARIFICATION: where does it find the gold file and the evaluation log?]** Default: from the `Gold` object passed in (its file, and `evals.jsonl` beside it), the same rule the rest of the library uses. Alternative: with no arguments, also look in the storage folder (`GOLDLABEL_DIR`, then `.goldlabel/`) for the default gold file, candidates and log. The alternative is more convenient and reads files the caller did not name; Principle V says every object carries what it needs.
+- Q: Should `get_methodology` use only the objects passed in, or also look in the storage folder for files it was not given? → A: Option A, only the objects passed in. With none it raises an error naming the arguments; it never reads `gold.json`, `evals.jsonl` or `candidates.jsonl` from the storage folder on its own. `evals.jsonl` is read only from beside the gold file of the `Gold` object passed in.
 
 ## Assumptions
 
@@ -169,6 +166,7 @@ A methodology that says "an LLM classified the posts" is not reproducible. The e
 - Output formats other than text (no `.docx`, no HTML page, no PDF, no file written; the caller saves it).
 - Options for tone, length, language or style; one voice.
 - Reading the notebook or script to infer steps (the code is not parsed; only the objects and files).
+- Looking in the storage folder for files that were not passed in (a call with no arguments is an error).
 - Describing the corpus's own provenance (who collected it, when): it is not known to the library.
 - Counting or naming labellers: not recorded.
 - Notes and revision history in the appendix table, example items elsewhere, per-label confusion tables, disagreements (use the evaluation objects and the labelling page for those).
