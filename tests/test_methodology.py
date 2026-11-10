@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -57,7 +58,11 @@ def clf():
 
 def test_candidates_from_seeds_and_the_labels_make_the_first_two_sections():
     m = gl.get_methodology(candidates=seeds_list(), classifier=clf())
-    assert str(m) == doc(SEEDS_SECTION, LABELS_SECTION)
+    assert str(m) == doc(
+        SEEDS_SECTION,
+        LABELS_SECTION,
+        "### Classifier\n\nThe classifier uses the model `openai:gpt-x`.",
+    )
     assert m.warnings == ()
 
 
@@ -118,7 +123,8 @@ def test_a_multi_label_taxonomy_says_every_label_that_applies():
     text = str(gl.get_methodology(classifier=Classifier("m", t, "p")))
     assert text == doc(
         "### Labels\n\nEach item received every label that applies from: `a`, "
-        "or the built-in `off_topic` (the item matches none of them)."
+        "or the built-in `off_topic` (the item matches none of them).",
+        "### Classifier\n\nThe classifier uses the model `m`.",
     )
 
 
@@ -126,7 +132,10 @@ def test_the_labels_come_from_the_gold_file_when_there_is_no_classifier():
     g = gl.Gold()
     g.path.parent.mkdir(parents=True)
     g.path.write_text(json.dumps({"taxonomy": TAXONOMY.model_dump(), "rows": []}))
-    assert str(gl.get_methodology(gold=g)) == doc(LABELS_SECTION)
+    assert str(gl.get_methodology(gold=g)) == doc(
+        LABELS_SECTION,
+        '### Gold labels\n\nThe gold dataset "default" holds no samples yet.',
+    )
 
 
 def test_an_explicit_candidates_list_wins_over_the_one_the_gold_holds():
@@ -190,3 +199,150 @@ def test_candidates_saved_before_the_search_was_recorded_say_what_is_missing():
         "### Corpus and candidates\n\nWe used every item of the corpus. The corpus and its "
         "filter were not recorded in the candidates file. This produced 2 candidates."
     )
+
+
+# --- gold, classifier and evaluation: a gold file and a log built by hand ----------------------
+
+
+def gold_row(id, sample, labels, by=None, **more):
+    row = {"id": id, "text": f"text {id}", "labels": labels, "sample": sample}
+    return {**row, **({"labelled_by": by} if by else {}), **more}
+
+
+REVISION = {
+    "at": "2026-11-02T10:00:00+00:00",
+    "labels": ["layoff"],
+    "note": None,
+    "labelled_by": "goldlabel-ui",
+}
+GOLD_ROWS = [
+    gold_row("d1", "dev", ["layoff"], "goldlabel-ui"),
+    gold_row(
+        "d2", "dev", ["burnout"], "goldlabel-ui", note="tricky", revisions=[REVISION]
+    ),
+    gold_row("d3", "dev", None),
+    gold_row("t1", "test", ["layoff"], "imported"),
+    gold_row("t2", "test", ["off_topic"]),
+]
+
+
+def eval_line(samples, time, clf_, score, n, skipped, dollars, prompt):
+    return {
+        "time": time,
+        "samples": samples,
+        "rows_digest": "x",
+        "n": n,
+        "skipped_pending": skipped,
+        "gold": ".goldlabel/gold.json",
+        "model": "openai:gpt-x",
+        "digest": clf_.digest,
+        "prompt": prompt,
+        "metric": "accuracy",
+        "target": 0.9,
+        "score": score,
+        "dollars": dollars,
+        "disagreements": [],
+    }
+
+
+OLD = clf()
+NEW = OLD.with_prompt("Pick better.")
+LOG = [
+    eval_line(["dev"], "2026-11-04T09:00:00+00:00", OLD, 0.8, 2, 1, 0.25, "Pick one."),
+    eval_line(
+        ["dev"], "2026-11-05T09:00:00+00:00", NEW, 1.0, 2, 1, 0.5, "Pick better."
+    ),
+    eval_line(
+        ["test"], "2026-11-06T09:00:00+00:00", NEW, 0.5, 2, 0, 0.25, "Pick better."
+    ),
+]
+
+
+def write_gold(rows=GOLD_ROWS, log=LOG):
+    g = gl.Gold()
+    g.path.parent.mkdir(parents=True, exist_ok=True)
+    g.path.write_text(json.dumps({"taxonomy": TAXONOMY.model_dump(), "rows": rows}))
+    if log is not None:
+        log_path = g.path.parent / "evals.jsonl"
+        log_path.write_text("".join(json.dumps(x) + "\n" for x in log))
+    return g
+
+
+GOLD_SECTION = (
+    "### Gold labels\n\nPeople labelled items by hand, and the classifier was measured "
+    'against their labels. The gold dataset "default" holds 2 samples:\n\n'
+    "- **dev**: 3 rows, 2 labelled, 1 pending.\n"
+    "- **test**: 2 rows, 2 labelled, 0 pending.\n\n"
+    "The 4 labelled rows by how they were labelled: 2 in the labelling page, "
+    "1 imported (labelled elsewhere), 1 with no record. "
+    "Rows with a revised label or note: 1. Rows with a note: 1. "
+    "The number of people who labelled is not recorded."
+)
+CLASSIFIER_SECTION = (
+    "### Classifier\n\nThe classifier uses the model `openai:gpt-x`. "
+    "Different prompts evaluated against the gold labels: 2."
+)
+EVAL_SECTION = (
+    "### Evaluation\n\nThe classifier was scored against the gold labels:\n\n"
+    "- **dev**: accuracy 1.00 on 2 labelled rows (1 pending row not scored), "
+    "target 0.9, met. Latest evaluation 2026-11-05. Evaluated 2 times with 2 different prompts.\n"
+    "- **test**: accuracy 0.50 on 2 labelled rows (0 pending rows not scored), "
+    "target 0.9, not met. Latest evaluation 2026-11-06. Evaluated 1 time with 1 different prompt.\n\n"
+    "Evaluation calls cost $1.00 in total."
+)
+
+
+def test_gold_classifier_and_evaluation_sections_from_a_hand_built_gold_file():
+    g = write_gold()
+    files = [(p, p.read_bytes()) for p in (g.path, g.path.parent / "evals.jsonl")]
+    m = gl.get_methodology(gold=g, classifier=NEW)
+    assert str(m) == doc(LABELS_SECTION, GOLD_SECTION, CLASSIFIER_SECTION, EVAL_SECTION)
+    assert all(p.read_bytes() == data for p, data in files)  # read-only (SC-006)
+
+
+def test_a_classifier_gets_the_evaluation_that_was_run_with_its_own_prompt():
+    g = write_gold()
+    text = str(gl.get_methodology(gold=g, classifier=OLD))
+    # dev: the older prompt's own evaluation, though a later one exists; test: none, so the latest
+    assert (
+        "- **dev**: accuracy 0.80 on 2 labelled rows (1 pending row not scored), "
+        "target 0.9, not met. Latest evaluation 2026-11-04. Evaluated 2 times with 2 different prompts."
+    ) in text
+    assert "- **test**: accuracy 0.50" in text
+
+
+def test_a_gold_dataset_without_samples_says_so():
+    g = write_gold(rows=[], log=None)
+    assert str(gl.get_methodology(gold=g)) == doc(
+        LABELS_SECTION,
+        '### Gold labels\n\nThe gold dataset "default" holds no samples yet.',
+    )
+
+
+def test_a_classifier_loaded_from_a_bundle_brings_its_own_evaluation():
+    bundle = replace(clf())
+    object.__setattr__(
+        bundle,
+        "evaluation",
+        {
+            "samples": ["test"],
+            "n": 50,
+            "score": 0.9,
+            "metric": "accuracy",
+            "digest": bundle.digest,
+            "date": "2026-11-06T10:00:00+00:00",
+        },
+    )
+    assert str(gl.get_methodology(classifier=bundle)) == doc(
+        LABELS_SECTION,
+        "### Classifier\n\nThe classifier uses the model `openai:gpt-x`.",
+        "### Evaluation\n\nThe classifier was scored against the gold labels:\n\n"
+        "- **test**: accuracy 0.90 on 50 labelled rows, evaluated 2026-11-06 "
+        "(read from the classifier's saved bundle).",
+    )
+
+
+def test_an_evaluation_cost_that_includes_an_unknown_price_is_a_question_mark():
+    log = [{**x, "dollars": None} if x["samples"] == ["dev"] else x for x in LOG]
+    text = str(gl.get_methodology(gold=write_gold(log=log), classifier=NEW))
+    assert "Evaluation calls cost ? (a price is unknown)." in text and "$1" not in text

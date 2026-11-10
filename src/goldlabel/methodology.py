@@ -1,10 +1,12 @@
 """A plain-English methodology of an analysis, written from the objects and files it is given."""
 
+from collections import Counter
 from dataclasses import dataclass
 
 from goldlabel import _html
 from goldlabel.candidates import Candidates
-from goldlabel.classifier import Classifier, Predictions
+from goldlabel.classifier import Classifier, Predictions, _model_name
+from goldlabel.evaluation import _history
 from goldlabel.gold import Gold
 from goldlabel.taxonomy import Taxonomy
 
@@ -109,6 +111,90 @@ def _labels(t: Taxonomy) -> str:
     )
 
 
+def _gold(gold: Gold) -> str:
+    """Write the paragraph about who labelled what, from the gold file.
+
+    Returns:
+        str: The section text; no row text and no note text is copied.
+    """
+    rows = gold._read()
+    if not rows:
+        return f'The gold dataset "{gold.label}" holds no samples yet.'
+    samples = gold._samples(rows)
+    bullets = "\n".join(
+        f"- **{name}**: {_count(len(rs), 'row')}, "
+        f"{sum(1 for r in rs if r.labels)} labelled, {sum(1 for r in rs if not r.labels)} pending."
+        for name, rs in samples.items()
+    )
+    labelled = [r for r in rows if r.labels]
+    how = Counter(
+        r.labelled_by if r.labelled_by in ("goldlabel-ui", "imported") else "none"
+        for r in labelled
+    )
+    return (
+        "People labelled items by hand, and the classifier was measured against their "
+        f'labels. The gold dataset "{gold.label}" holds {_count(len(samples), "sample")}:'
+        f"\n\n{bullets}\n\n"
+        f"The {_count(len(labelled), 'labelled row')} by how they were labelled: "
+        f"{how['goldlabel-ui']} in the labelling page, {how['imported']} imported "
+        f"(labelled elsewhere), {how['none']} with no record. "
+        f"Rows with a revised label or note: {sum(1 for r in rows if r.revisions)}. "
+        f"Rows with a note: {sum(1 for r in rows if r.note)}. "
+        "The number of people who labelled is not recorded."
+    )
+
+
+def _dollars(total: float) -> str:
+    return f"${total:.2f}" if total == 0 or total >= 0.01 else f"${total:.4f}"
+
+
+def _evaluation(history: list[dict], classifier: Classifier | None) -> str | None:
+    """Write the paragraph on how the classifier scored against the gold labels.
+
+    Returns:
+        str | None: The section text, or None when there is no evaluation to describe.
+    """
+    intro = "The classifier was scored against the gold labels:\n\n"
+    if not history:
+        saved = classifier.evaluation if classifier else None
+        if not saved:
+            return None
+        return (
+            f"{intro}- **{' + '.join(saved['samples'])}**: {saved['metric']} "
+            f"{saved['score']:.2f} on {_count(saved['n'], 'labelled row')}, evaluated "
+            f"{saved['date'][:10]} (read from the classifier's saved bundle)."
+        )
+    groups: dict[tuple, list[dict]] = {}
+    for x in history:
+        groups.setdefault(tuple(x["samples"]), []).append(x)
+    bullets = []
+    for names, lines in groups.items():
+        # a classifier is given the evaluation of its own prompt, not just the latest one
+        own = [x for x in lines if classifier and x.get("digest") == classifier.digest]
+        x = max(own or lines, key=lambda x: str(x.get("time")))
+        target = x.get("target")
+        if target is None:
+            goal = "no target"
+        else:
+            goal = f"target {target:g}, {'met' if x['score'] >= target else 'not met'}"
+        prompts = len({y.get("prompt") for y in lines})
+        bullets.append(
+            f"- **{' + '.join(names)}**: {x['metric']} {x['score']:.2f} on "
+            f"{_count(x['n'], 'labelled row')} "
+            f"({_count(x.get('skipped_pending', 0), 'pending row')} not scored), {goal}. "
+            f"Latest evaluation {str(x['time'])[:10]}. Evaluated {_count(len(lines), 'time')} "
+            f"with {_count(prompts, 'different prompt')}."
+        )
+    prices = [x.get("dollars") for x in history]
+    known = [p for p in prices if p is not None]
+    cost = (
+        f"{_dollars(sum(known))} in total"
+        if len(known) == len(prices)
+        else "? (a price is unknown)"
+    )
+    return f"{intro}" + "\n".join(bullets) + f"\n\nEvaluation calls cost {cost}."
+
+
 def get_methodology(
     *,
     candidates: Candidates | None = None,
@@ -162,5 +248,17 @@ def get_methodology(
         taxonomy = Taxonomy.model_validate(gold._doc()["taxonomy"])
     if taxonomy is not None:
         sections.append(("Labels", _labels(taxonomy)))
+    history = _history(gold.path.parent / "evals.jsonl", gold.path) if gold else []
+    if gold is not None:
+        sections.append(("Gold labels", _gold(gold)))
+    if classifier is not None:
+        text = f"The classifier uses the model `{_model_name(classifier.model)}`."
+        if history:
+            prompts = len({x.get("prompt") for x in history})
+            text += f" Different prompts evaluated against the gold labels: {prompts}."
+        sections.append(("Classifier", text))
+    evaluation = _evaluation(history, classifier)
+    if evaluation:
+        sections.append(("Evaluation", evaluation))
     body = "\n\n".join(f"### {title}\n\n{text}" for title, text in sections)
     return Methodology(f"## Methodology\n\n{body}", ())
