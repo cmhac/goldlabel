@@ -73,18 +73,19 @@ A reader judging the accuracy number needs to know whether it was earned honestl
 
 ---
 
-### User Story 4 - The full prompt and labels go in verbatim (Priority: P2)
+### User Story 4 - The full prompt, labels and gold dataset go in verbatim (Priority: P2)
 
-A methodology that says "an LLM classified the posts" is not reproducible. The exact label definitions and the exact prompt are part of the account.
+A methodology that says "an LLM classified the posts" is not reproducible. The exact label definitions, the exact prompt and the gold labels a reader can check are part of the account.
 
 **Why this priority**: it matters, but the account is useful without it.
 
-**Independent Test**: the text contains the taxonomy's labels with their descriptions and the classifier's prompt exactly as stored, in a closing section a person can cut off.
+**Independent Test**: the text contains the taxonomy's labels with their descriptions, the classifier's prompt exactly as stored, and a table of every gold row, in a closing section a person can cut off.
 
 **Acceptance Scenarios**:
 
 1. **Given** a classifier, **When** called, **Then** a final *Appendix* gives the model name, the prompt exactly as written (not paraphrased) and each label with its description.
 2. **Given** the evaluation history holds more than one prompt, **When** called, **Then** the text says how many prompts were tried; only the prompt of the classifier passed in is given in full.
+3. **Given** a gold dataset, **When** called, **Then** the appendix ends with the whole dataset as a Markdown table (`sample`, `id`, `text`, `label`, `labelled by`), so a reader can check every label; **When** called with `include_gold_table=False`, **Then** the table is absent and nothing else changes.
 
 ---
 
@@ -94,7 +95,8 @@ A methodology that says "an LLM classified the posts" is not reproducible. The e
 - **Candidates of source "keywords" or "all"**: described as such (terms matched or whole corpus), with no similarity wording.
 - **Capped search** (`capped=True`): the text says items above the floor may be missing.
 - **A gold sample with rows pending**: counted, and the text says how many were never labelled and so not scored.
-- **Row text and notes**: never copied into the text (they can be private and the page says a note is never sent to a model); only counts of rows and notes appear.
+- **Row text and notes**: row text appears only in the appendix gold table (FR-007a); a note's text is never copied anywhere (the page says a note is never sent to a model), only the count of notes appears. A gold file with thousands of rows makes a long table; the caller turns it off with `include_gold_table=False`.
+- **Row text that contains `|`, line breaks or Markdown**: escaped so the table renders as one row per item.
 - **`evals.jsonl` absent beside a gold file that was moved**: no evaluation claims, and the text says none were found.
 - **Failed items in a run**: the count of items that errored is given with the number classified.
 - **A very large gold file**: the function reads it once and writes nothing.
@@ -109,7 +111,8 @@ A methodology that says "an LLM classified the posts" is not reproducible. The e
 - **FR-004**: The text MUST be deterministic: the same files and arguments give the same text.
 - **FR-005**: *Corpus and candidates* MUST say how the candidates were chosen (seeds with the embedding model and floor, keywords, or the whole corpus), how many there are, and whether a backend cap may have hidden items.
 - **FR-006**: *Labels* MUST give the mode (one label per item, or every label that applies) and the labels, and say that `off_topic` is built in.
-- **FR-007**: *Gold labels* MUST say how many rows each named sample holds, how many are labelled and pending, how rows were labelled (in the labelling page, imported, or unstamped), how many were revised and how many carry a note, and that labels are human judgements. It MUST NOT state a number of labellers, and MUST NOT copy row text or note text.
+- **FR-007**: *Gold labels* MUST say how many rows each named sample holds, how many are labelled and pending, how rows were labelled (in the labelling page, imported, or unstamped), how many were revised and how many carry a note, and that labels are human judgements. It MUST NOT state a number of labellers, and MUST NOT copy any note's text anywhere in the output (notes are a person's private remarks).
+- **FR-007a**: The *Appendix* MUST include the full gold dataset as a Markdown table, one row per gold row, with the columns `sample`, `id`, `text`, `label` and `labelled by` (labelling page, imported, or unstamped), in the order samples and rows appear in the gold file. A pending row shows `(pending)` as its label; a multi-label row lists its labels separated by commas. Text is shown exactly as stored, with `|` and line breaks escaped so the table stays one row per item. Notes and past revisions are not in the table. The table MUST be left out when the caller asks (a single `include_gold_table=False`), because it copies the corpus's own text and can be large; the other sections do not change.
 - **FR-008**: *Classifier* MUST name the model and say how many prompts were tried, from the evaluation history.
 - **FR-009**: *Evaluation* MUST report, for each evaluated sample, the headline metric and score, the target and whether it was met, the rows scored and skipped as pending, the date of the latest evaluation, how often the sample was evaluated and with how many prompts, and its cost; it MUST flag an evaluation that predates a label revision (STALE), and any sample evaluated more than once.
 - **FR-010**: *Run* MUST report how many items were classified (live, cached, resumed, failed) and the cost, written as unknown (`?`) when any price is unknown, never as `$0`.
@@ -136,7 +139,8 @@ A methodology that says "an LLM classified the posts" is not reproducible. The e
 - **SC-005**: A sample evaluated more than once, a stale evaluation, and a classifier or taxonomy mismatch are each named in the text in 100% of the test cases built for them.
 - **SC-006**: Every gold and evaluation file is byte-identical before and after the call.
 - **SC-007**: With each input missing in turn, the function still returns text and the text claims nothing about the missing step.
-- **SC-008**: The text contains no row text and no note text from the gold file (checked by a gold file whose rows contain a marker string).
+- **SC-008**: The text contains no note text from the gold file (checked by a gold file whose notes contain a marker string), in either the default output or with the table off.
+- **SC-009**: The appendix table has exactly one line per gold row (header excluded), including rows whose text holds `|` or line breaks, and with `include_gold_table=False` it has none.
 
 ## Clarifications
 
@@ -162,7 +166,9 @@ Two questions the user must answer before planning (the defaults are the smalles
 - Reading the notebook or script to infer steps (the code is not parsed; only the objects and files).
 - Describing the corpus's own provenance (who collected it, when): it is not known to the library.
 - Counting or naming labellers: not recorded.
-- Row-level detail, example items, per-label confusion tables, disagreements (use the evaluation objects and the labelling page for those).
+- Notes and revision history in the appendix table, example items elsewhere, per-label confusion tables, disagreements (use the evaluation objects and the labelling page for those).
+- Appendix tables for anything other than the gold dataset (no candidates table, no results table).
+- Any other option: `include_gold_table` is the only switch, because the table copies corpus text and can be long.
 - Any change to the skills, README or agent docs (offered as a follow-up).
 - A command-line form (`goldlabel methodology`); the console has two commands and stays that way.
 - Recording new facts (unless the user chooses it in Clarification 1).
