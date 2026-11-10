@@ -65,19 +65,19 @@ def _corpus(c: Candidates) -> str:
         )
         first = (
             f"We searched {where} for items similar to {phrases}. "
-            f"Each phrase was embedded with {c.embedding_model}, and we kept every item "
-            f"whose highest similarity to any phrase was at least {c.floor:g}."
+            f"We embedded each phrase with {c.embedding_model} and kept every item whose "
+            f"highest similarity to any phrase was at least {c.floor:g}."
         )
         if not c.seeds:
             missing.append("The seed phrases were not recorded in the candidates file.")
     elif c.source == "keywords":
         how = "regular expressions" if c.regex else "literal text"
         terms = (
-            f"{_count(len(c.keywords), 'term')} ({_quoted(c.keywords)}), matched as {how}"
+            f"{_count(len(c.keywords), 'term')} ({_quoted(c.keywords)}), matching them as {how}"
             if c.keywords
             else "the search terms"
         )
-        first = f"We selected items from {where} containing any of {terms}."
+        first = f"We selected items from {where} that contain any of {terms}."
         if not c.keywords:
             missing.append("The keywords were not recorded in the candidates file.")
     else:
@@ -88,14 +88,14 @@ def _corpus(c: Candidates) -> str:
         )
     parts = [first, *missing]
     if c.filter:
-        parts.append(f"The corpus was filtered with: {c.filter}.")
+        parts.append(f"We filtered the corpus with: {c.filter}.")
     if c.cutoff is not None:
         parts.append(
             f"We then kept the items with similarity of at least {c.cutoff:g}, "
             f"which left {len(c.rows)}."
         )
     else:
-        parts.append(f"This produced {len(c.rows)} candidates.")
+        parts.append(f"That gave us {_count(len(c.rows), 'candidate')}.")
     if c.capped:
         parts.append(
             "A limit in the search backend may have hidden items above the floor."
@@ -105,10 +105,14 @@ def _corpus(c: Candidates) -> str:
 
 def _labels(t: Taxonomy) -> str:
     names = ", ".join(f"`{label.name}`" for label in t.labels)
-    mode = "exactly one label" if t.mode == "single" else "every label that applies"
+    if t.mode == "single":
+        return (
+            f"Each item received exactly one of these labels: {names}, or the built-in "
+            "`off_topic`, which means the item fits none of them."
+        )
     return (
-        f"Each item received {mode} from: {names}, or the built-in `off_topic` "
-        "(the item matches none of them)."
+        f"Each item received every label that applies from {names}, or the built-in "
+        "`off_topic` when none of them applies."
     )
 
 
@@ -123,7 +127,7 @@ def _gold(gold: Gold) -> str:
         return f'The gold dataset "{gold.label}" holds no samples yet.'
     samples = gold._samples(rows)
     bullets = "\n".join(
-        f"- **{name}**: {_count(len(rs), 'row')}, "
+        f"- {name}: {_count(len(rs), 'row')}, "
         f"{sum(1 for r in rs if r.labels)} labelled, {sum(1 for r in rs if not r.labels)} pending."
         for name, rs in samples.items()
     )
@@ -133,15 +137,15 @@ def _gold(gold: Gold) -> str:
         for r in labelled
     )
     return (
-        "People labelled items by hand, and the classifier was measured against their "
+        "People labelled items by hand, and we measured the classifier against their "
         f'labels. The gold dataset "{gold.label}" holds {_count(len(samples), "sample")}:'
         f"\n\n{bullets}\n\n"
-        f"The {_count(len(labelled), 'labelled row')} by how they were labelled: "
-        f"{how['goldlabel-ui']} in the labelling page, {how['imported']} imported "
-        f"(labelled elsewhere), {how['none']} with no record. "
-        f"Rows with a revised label or note: {sum(1 for r in rows if r.revisions)}. "
-        f"Rows with a note: {sum(1 for r in rows if r.note)}. "
-        "The number of people who labelled is not recorded."
+        f"By source, the {_count(len(labelled), 'labelled row')} split into "
+        f"{how['goldlabel-ui']} labelled in the labelling page, {how['imported']} imported "
+        f"(labelled elsewhere) and {how['none']} with no record of how they were labelled. "
+        f"{_count(sum(1 for r in rows if r.revisions), 'row')} had a label or note revised "
+        f"after it was first set, and {_count(sum(1 for r in rows if r.note), 'row')} had "
+        "a note. The number of people who labelled was not recorded."
     )
 
 
@@ -176,7 +180,7 @@ def _evaluation(history: list[dict], classifier: Classifier | None) -> str | Non
     Returns:
         str | None: The section text, or None when there is no evaluation to describe.
     """
-    intro = "The classifier was scored against the gold labels:\n\n"
+    intro = "We scored the classifier against the gold labels:\n\n"
     if not history:
         saved = classifier.evaluation if classifier else None
         if not saved:
@@ -184,23 +188,28 @@ def _evaluation(history: list[dict], classifier: Classifier | None) -> str | Non
         # a bundle saved before samples were recorded names one `split` instead
         names = saved.get("samples") or [saved.get("split", "unknown")]
         return (
-            f"{intro}- **{' + '.join(names)}**: {saved['metric']} "
-            f"{saved['score']:.2f} on {_count(saved['n'], 'labelled row')}, evaluated "
+            f"{intro}- On {' + '.join(names)}, {saved['metric']} was {saved['score']:.2f} "
+            f"across {_count(saved['n'], 'labelled row')}, evaluated on "
             f"{saved['date'][:10]} UTC (read from the classifier's saved bundle)."
         )
     bullets = []
     for names, lines, x, _ in _pick(history, classifier):
         target = x.get("target")
-        if target is None:
-            goal = "no target"
-        else:
-            goal = f"target {target:g}, {'met' if x['score'] >= target else 'not met'}"
+        goal = ""
+        if target is not None:
+            side = "meeting" if x["score"] >= target else "short of"
+            goal = f", {side} the {target:g} target"
+        skipped = x.get("skipped_pending", 0)
+        left = (
+            f" {_count(skipped, 'pending row')} {'was' if skipped == 1 else 'were'} left unscored."
+            if skipped
+            else ""
+        )
         prompts = len({y.get("prompt") for y in lines})
         bullets.append(
-            f"- **{' + '.join(names)}**: {x['metric']} {x['score']:.2f} on "
-            f"{_count(x['n'], 'labelled row')} "
-            f"({_count(x.get('skipped_pending', 0), 'pending row')} not scored), {goal}. "
-            f"Latest evaluation {str(x['time'])[:10]} UTC. Evaluated {_count(len(lines), 'time')} "
+            f"- On {' + '.join(names)}, {x['metric']} was {x['score']:.2f} across "
+            f"{_count(x['n'], 'labelled row')}{goal}.{left} The latest evaluation ran on "
+            f"{str(x['time'])[:10]} UTC, and we evaluated the sample {_count(len(lines), 'time')} "
             f"with {_count(prompts, 'different prompt')}."
         )
     prices = [x.get("dollars") for x in history]
@@ -210,7 +219,7 @@ def _evaluation(history: list[dict], classifier: Classifier | None) -> str | Non
         if len(known) == len(prices)
         else "? (a price is unknown)"
     )
-    return f"{intro}" + "\n".join(bullets) + f"\n\nEvaluation calls cost {cost}."
+    return f"{intro}" + "\n".join(bullets) + f"\n\nThe evaluation calls cost {cost}."
 
 
 def _run(results: Predictions, cutoff: float | None) -> str:
@@ -223,7 +232,7 @@ def _run(results: Predictions, cutoff: float | None) -> str:
     n = len(results.rows)
     models = sorted({r["run_model"] for r in results.rows if r.get("run_model")})
     times = sorted(r["run_at"][:10] for r in results.rows if r.get("run_at"))
-    by = f" by {', '.join(f'`{m}`' for m in models)}" if models else ""
+    by = f" with {', '.join(f'`{m}`' for m in models)}" if models else ""
     when = ""
     if times:
         when = (
@@ -233,10 +242,9 @@ def _run(results: Predictions, cutoff: float | None) -> str:
         )
     cost = "? (a price is unknown)" if results.cost is None else _dollars(results.cost)
     text = (
-        f"{_count(n, 'item')} {'was' if n == 1 else 'were'} classified{by}{when}: "
-        f"{results.live} by live model calls, {results.cached} from the cache, "
-        f"{results.resumed} resumed from an earlier run, {len(results.errors)} failed. "
-        f"The live model calls cost {cost}."
+        f"We classified {_count(n, 'item')}{by}{when}: {results.live} by live model calls, "
+        f"{results.cached} from the cache, {results.resumed} resumed from an earlier run "
+        f"and {len(results.errors)} failed. The live model calls cost {cost}."
     )
     bare = sum(1 for r in results.rows if not (r.get("run_model") and r.get("run_at")))
     if bare:
@@ -248,7 +256,7 @@ def _run(results: Predictions, cutoff: float | None) -> str:
     if cutoff is not None or scores:
         was = "was not recorded" if cutoff is None else f"was {cutoff:g}"
         text += f" The similarity cutoff {was}" + (
-            f"; the {lowest}." if lowest else "."
+            f", and the {lowest}." if lowest else "."
         )
     return text
 
@@ -288,17 +296,17 @@ def _appendix(
     """
     parts = []
     if classifier is not None:
-        parts.append(f"**Model**: `{_model_name(classifier.model)}`")
+        parts.append(f"The model was `{_model_name(classifier.model)}`.")
         if _other_run(classifier, results):
             parts.append(
-                "**Prompt**: not given, because the results were produced by a different "
+                "The prompt is not given, because the results were produced by a different "
                 "classifier from the one passed in, so its prompt is not the prompt of the run."
             )
         else:
             quoted = "\n".join(
                 f"> {x}" if x else ">" for x in classifier.prompt.split("\n")
             )
-            parts.append(f"**Prompt** (exactly as stored):\n\n{quoted}")
+            parts.append(f"The prompt, exactly as stored:\n\n{quoted}")
         labels = [
             f"- `{label.name}`: {label.description}"
             if label.description
@@ -306,7 +314,7 @@ def _appendix(
             for label in classifier.taxonomy.labels
         ]
         labels.append("- `off_topic`: The item matches none of the labels above.")
-        parts.append("**Labels**\n\n" + "\n".join(labels))
+        parts.append("The labels:\n\n" + "\n".join(labels))
     rows = gold._read() if gold is not None and include_gold_table else []
     if rows:
         by = {"goldlabel-ui": "labelling page", "imported": "imported"}
@@ -323,7 +331,7 @@ def _appendix(
                 by.get(r.labelled_by, "unstamped") if r.labels else "",
             )
             lines.append("| " + " | ".join(_cell(x) for x in cells) + " |")
-        parts.append("**Gold dataset**\n\n" + "\n".join(lines))
+        parts.append("The gold dataset:\n\n" + "\n".join(lines))
     return "\n\n".join(parts) or None
 
 
@@ -378,7 +386,10 @@ def _warnings(
         ids = {str(r["id"]) for r in candidates.rows}
         missing = sum(1 for r in rows if r.id not in ids)
         if missing:
-            found.append(f"Gold rows not among the candidates passed in: {missing}.")
+            found.append(
+                f"{_count(missing, 'gold row')} {'is' if missing == 1 else 'are'} not among "
+                "the candidates passed in."
+            )
     return found
 
 
@@ -443,7 +454,9 @@ def get_methodology(
         text = f"The classifier uses the model `{_model_name(classifier.model)}`."
         if history:
             prompts = len({x.get("prompt") for x in history})
-            text += f" Different prompts evaluated against the gold labels: {prompts}."
+            text += (
+                f" We evaluated {_count(prompts, 'prompt')} against the gold labels."
+            )
         sections.append(("Classifier", text))
     evaluation = _evaluation(history, classifier)
     if evaluation:

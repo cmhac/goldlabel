@@ -26,53 +26,60 @@ Markdown, first person plural. A section is written only when its input is given
 ## Methodology
 
 ### Corpus and candidates
-We searched {corpus} for items similar to {n_seeds} example phrases ("{seed}"; "{seed}"; ...). Each phrase was embedded with {embedding_model}, and we kept every item whose highest similarity to any phrase was at least {floor}. This produced {n} candidates. {capped_sentence}
-  (cutoff set) replaces "This produced {n} candidates." with: We then kept the items with similarity of at least {cutoff}, which left {n}.
-  (keywords)  We selected items containing any of {n_terms} terms ("{term}"; ...), matched as {literal text | regular expressions}. This produced {n} candidates.
-  (all)       We used every item of {corpus}. This produced {n} candidates.
-  filter:     The corpus was filtered with: {filter}.   (placed before the "This produced" / cutoff sentence)
-  not recorded: The seed phrases were not recorded in the candidates file.   |   The keywords were not recorded...   |   The corpus and filter were not recorded...
+We searched {corpus} for items similar to {n_seeds} example phrases ("{seed}"; "{seed}"; ...). We embedded each phrase with {embedding_model} and kept every item whose highest similarity to any phrase was at least {floor}. That gave us {n} candidates. {capped_sentence}
+  (cutoff set) replaces "That gave us {n} candidates." with: We then kept the items with similarity of at least {cutoff}, which left {n}.
+  (keywords)  We selected items from {corpus} that contain any of {n_terms} terms ("{term}"; ...), matching them as {literal text | regular expressions}. That gave us {n} candidates.
+  (all)       We used every item of {corpus}. That gave us {n} candidates.
+  filter:     We filtered the corpus with: {filter}.   (placed before the "That gave us" / cutoff sentence)
+  not recorded: The seed phrases were not recorded in the candidates file.   |   The keywords were not recorded...   |   The corpus and its filter were not recorded...
 
 ### Labels
-Each item received {exactly one label | every label that applies} from: `a`, `b`, or the built-in `off_topic` (the item matches none of them).
+Each item received exactly one of these labels: `a`, `b`, or the built-in `off_topic`, which means the item fits none of them.
+  (multi) Each item received every label that applies from `a`, `b`, or the built-in `off_topic` when none of them applies.
 
 ### Gold labels
-People labelled items by hand and the classifier was measured against their labels. Dataset "{label}" holds {k} samples: **{name}**: {rows} rows, {labelled} labelled, {pending} pending. {a} labelled in the labelling page, {b} imported (labelled elsewhere), {c} without a record of how they were labelled. {r} labels were revised after they were first set, and {m} rows carry a note. The number of people who labelled is not recorded.
+People labelled items by hand, and we measured the classifier against their labels. The gold dataset "{label}" holds {k} samples:
+
+- {name}: {rows} rows, {labelled} labelled, {pending} pending.
+
+By source, the {n} labelled rows split into {a} labelled in the labelling page, {b} imported (labelled elsewhere) and {c} with no record of how they were labelled. {r} rows had a label or note revised after it was first set, and {m} rows had a note. The number of people who labelled was not recorded.
 
 ### Classifier
-Items were classified by `{model}`. {p} prompt(s) were evaluated against the gold labels. The model, prompt and labels are in the appendix.
+The classifier uses the model `{model}`. We evaluated {p} prompts against the gold labels.
 
 ### Evaluation
-Metric: {metric}; target {target | none}.
-- **{samples}**: {score} on {n} labelled rows ({skipped} pending rows not scored), {target met | target not met}, latest evaluation {date}. Evaluated {k} time(s) with {p} different prompt(s). {flags}
-Evaluation calls cost {$x.xx | ?, a price is unknown}.
+We scored the classifier against the gold labels:
+
+- On {samples}, {metric} was {score} across {n} labelled rows{, meeting | , short of} the {target} target. {k} pending rows were left unscored. The latest evaluation ran on {date} UTC, and we evaluated the sample {k} times with {p} different prompts.
+  (no target: the target clause is omitted; no pending rows: the unscored sentence is omitted)
+The evaluation calls cost {$x.xx | ?, a price is unknown}.
 
 ### Run
-{n} item(s) {was|were} classified by `{model}` {on {date} | between {first_at} and {last_at}}: {live} by live model calls, {cached} from the cache, {resumed} resumed from an earlier run, {failed} failed. The live model calls cost {$x.xx | ?, a price is unknown}. The similarity cutoff was {cutoff}; the lowest similarity among the items was {s}.
+We classified {n} item(s) with `{model}` {on {date} UTC | between {first_at} and {last_at} UTC}: {live} by live model calls, {cached} from the cache, {resumed} resumed from an earlier run and {failed} failed. The live model calls cost {$x.xx | ?, a price is unknown}. The similarity cutoff was {cutoff}, and the lowest similarity among the items was {s}.
   (rows without model or time) The model and time were not recorded on {k} of the {n} rows.
-  (no cutoff) The similarity cutoff was not recorded.
+  (no cutoff) The similarity cutoff was not recorded, and the lowest...
 
 ### Warnings
-- The {samples} evaluation of {date} predates a revision of {r} gold label(s); its score may no longer match the labels.
+- The {samples} evaluation of {date} UTC predates a revision of {r} gold label(s); its score may no longer match the labels.
 - The classifier passed in is not the one that was evaluated ({what differs}), or not the one that produced the results.
-- The classifier's taxonomy differs from the gold file's.
+- The classifier's labels differ from the labels stored in the gold file.
 - {r} gold rows are not among the candidates passed in. (checked only when the candidates have no cutoff)
 (none: the section is omitted; evaluating a sample many times is not a warning)
 
 ### Appendix
-**Model**: `{model}`
+The model was `{model}`.
 
-**Prompt** (exactly as stored):
+The prompt, exactly as stored:
 
 > {prompt, each line quoted; a blank line is ">"}
-  (results from another classifier) **Prompt**: not given, because the results were produced by a different classifier from the one passed in, so its prompt is not the prompt of the run.
+  (results from another classifier) The prompt is not given, because the results were produced by a different classifier from the one passed in, so its prompt is not the prompt of the run.
 
-**Labels**
+The labels:
 
 - `{name}`: {description}
 - `off_topic`: The item matches none of the labels above.
 
-**Gold dataset**   (omitted with include_gold_table=False, or when there are no rows)
+The gold dataset:   (omitted with include_gold_table=False, or when there are no rows)
 
 | sample | id | text | label | labelled by |
 |---|---|---|---|---|

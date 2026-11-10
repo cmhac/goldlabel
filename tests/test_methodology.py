@@ -43,12 +43,12 @@ def seeds_list(**kw):
 SEEDS_SECTION = (
     "### Corpus and candidates\n\n"
     f"We searched {CORPUS} for items similar to 2 example phrases "
-    '("alpha"; "beta"). Each phrase was embedded with embed-1, and we kept every item '
-    "whose highest similarity to any phrase was at least 0.6. This produced 2 candidates."
+    '("alpha"; "beta"). We embedded each phrase with embed-1 and kept every item '
+    "whose highest similarity to any phrase was at least 0.6. That gave us 2 candidates."
 )
 LABELS_SECTION = (
-    "### Labels\n\nEach item received exactly one label from: `layoff`, `burnout`, "
-    "or the built-in `off_topic` (the item matches none of them)."
+    "### Labels\n\nEach item received exactly one of these labels: `layoff`, `burnout`, "
+    "or the built-in `off_topic`, which means the item fits none of them."
 )
 
 
@@ -72,7 +72,7 @@ def test_a_cutoff_replaces_the_produced_sentence_and_says_what_was_left():
     text = str(gl.get_methodology(candidates=chosen))
     assert text == doc(
         SEEDS_SECTION.replace(
-            "This produced 2 candidates.",
+            "That gave us 2 candidates.",
             "We then kept the items with similarity of at least 0.75, which left 1.",
         )
     )
@@ -84,8 +84,8 @@ def test_a_filter_and_a_capped_search_are_stated():
     )
     assert text == doc(
         SEEDS_SECTION.replace(
-            " This produced 2 candidates.",
-            " The corpus was filtered with: year >= 2024. This produced 2 candidates. "
+            " That gave us 2 candidates.",
+            " We filtered the corpus with: year >= 2024. That gave us 2 candidates. "
             "A limit in the search backend may have hidden items above the floor.",
         )
     )
@@ -96,8 +96,8 @@ def test_keyword_and_whole_corpus_candidates_have_no_similarity_wording():
         ROWS, floor=None, source="keywords", keywords=["alpha", "gamma"], corpus=CORPUS
     )
     first = (
-        f"### Corpus and candidates\n\nWe selected items from {CORPUS} containing any of "
-        '2 terms ("alpha"; "gamma"), matched as literal text. This produced 2 candidates.'
+        f"### Corpus and candidates\n\nWe selected items from {CORPUS} that contain any of "
+        '2 terms ("alpha"; "gamma"), matching them as literal text. That gave us 2 candidates.'
     )
     assert str(gl.get_methodology(candidates=kw)) == doc(first)
     rx = Candidates(
@@ -109,13 +109,13 @@ def test_keyword_and_whole_corpus_candidates_have_no_similarity_wording():
         corpus=CORPUS,
     )
     assert str(gl.get_methodology(candidates=rx)) == doc(
-        f"### Corpus and candidates\n\nWe selected items from {CORPUS} containing any of "
-        '1 term ("al+pha"), matched as regular expressions. This produced 2 candidates.'
+        f"### Corpus and candidates\n\nWe selected items from {CORPUS} that contain any of "
+        '1 term ("al+pha"), matching them as regular expressions. That gave us 2 candidates.'
     )
     everything = Candidates(ROWS, floor=None, source="all", corpus=CORPUS)
     assert str(gl.get_methodology(candidates=everything)) == doc(
         f"### Corpus and candidates\n\nWe used every item of {CORPUS}. "
-        "This produced 2 candidates."
+        "That gave us 2 candidates."
     )
 
 
@@ -123,11 +123,11 @@ def test_a_multi_label_taxonomy_says_every_label_that_applies():
     t = Taxonomy(mode="multi", labels={"a": "x"})
     text = str(gl.get_methodology(classifier=Classifier("m", t, "p")))
     assert text == doc(
-        "### Labels\n\nEach item received every label that applies from: `a`, "
-        "or the built-in `off_topic` (the item matches none of them).",
+        "### Labels\n\nEach item received every label that applies from `a`, "
+        "or the built-in `off_topic` when none of them applies.",
         "### Classifier\n\nThe classifier uses the model `m`.",
-        "### Appendix\n\n**Model**: `m`\n\n**Prompt** (exactly as stored):\n\n> p\n\n"
-        "**Labels**\n\n- `a`: x\n- `off_topic`: The item matches none of the labels above.",
+        "### Appendix\n\nThe model was `m`.\n\nThe prompt, exactly as stored:\n\n> p\n\n"
+        "The labels:\n\n- `a`: x\n- `off_topic`: The item matches none of the labels above.",
     )
 
 
@@ -186,21 +186,21 @@ def test_candidates_saved_before_the_search_was_recorded_say_what_is_missing():
     legacy = Candidates(ROWS, floor=0.6, embedding_model="embed-1")
     assert str(gl.get_methodology(candidates=legacy)) == doc(
         "### Corpus and candidates\n\nWe searched the corpus for items similar to example "
-        "phrases. Each phrase was embedded with embed-1, and we kept every item whose "
+        "phrases. We embedded each phrase with embed-1 and kept every item whose "
         "highest similarity to any phrase was at least 0.6. The seed phrases were not "
         "recorded in the candidates file. The corpus and its filter were not recorded in "
-        "the candidates file. This produced 2 candidates."
+        "the candidates file. That gave us 2 candidates."
     )
     kw = Candidates(ROWS, floor=None, source="keywords", corpus=CORPUS)
     assert str(gl.get_methodology(candidates=kw)) == doc(
-        f"### Corpus and candidates\n\nWe selected items from {CORPUS} containing any of "
+        f"### Corpus and candidates\n\nWe selected items from {CORPUS} that contain any of "
         "the search terms. The keywords were not recorded in the candidates file. "
-        "This produced 2 candidates."
+        "That gave us 2 candidates."
     )
     everything = Candidates(ROWS, floor=None, source="all")
     assert str(gl.get_methodology(candidates=everything)) == doc(
         "### Corpus and candidates\n\nWe used every item of the corpus. The corpus and its "
-        "filter were not recorded in the candidates file. This produced 2 candidates."
+        "filter were not recorded in the candidates file. That gave us 2 candidates."
     )
 
 
@@ -274,26 +274,28 @@ def write_gold(rows=GOLD_ROWS, log=LOG):
 
 
 GOLD_SECTION = (
-    "### Gold labels\n\nPeople labelled items by hand, and the classifier was measured "
+    "### Gold labels\n\nPeople labelled items by hand, and we measured the classifier "
     'against their labels. The gold dataset "default" holds 2 samples:\n\n'
-    "- **dev**: 3 rows, 2 labelled, 1 pending.\n"
-    "- **test**: 2 rows, 2 labelled, 0 pending.\n\n"
-    "The 4 labelled rows by how they were labelled: 2 in the labelling page, "
-    "1 imported (labelled elsewhere), 1 with no record. "
-    "Rows with a revised label or note: 1. Rows with a note: 1. "
-    "The number of people who labelled is not recorded."
+    "- dev: 3 rows, 2 labelled, 1 pending.\n"
+    "- test: 2 rows, 2 labelled, 0 pending.\n\n"
+    "By source, the 4 labelled rows split into 2 labelled in the labelling page, "
+    "1 imported (labelled elsewhere) and 1 with no record of how they were labelled. "
+    "1 row had a label or note revised after it was first set, and 1 row had a note. "
+    "The number of people who labelled was not recorded."
 )
 CLASSIFIER_SECTION = (
     "### Classifier\n\nThe classifier uses the model `openai:gpt-x`. "
-    "Different prompts evaluated against the gold labels: 2."
+    "We evaluated 2 prompts against the gold labels."
 )
 EVAL_SECTION = (
-    "### Evaluation\n\nThe classifier was scored against the gold labels:\n\n"
-    "- **dev**: accuracy 1.00 on 2 labelled rows (1 pending row not scored), "
-    "target 0.9, met. Latest evaluation 2026-11-05 UTC. Evaluated 2 times with 2 different prompts.\n"
-    "- **test**: accuracy 0.50 on 2 labelled rows (0 pending rows not scored), "
-    "target 0.9, not met. Latest evaluation 2026-11-06 UTC. Evaluated 1 time with 1 different prompt.\n\n"
-    "Evaluation calls cost $1.00 in total."
+    "### Evaluation\n\nWe scored the classifier against the gold labels:\n\n"
+    "- On dev, accuracy was 1.00 across 2 labelled rows, meeting the 0.9 target. "
+    "1 pending row was left unscored. The latest evaluation ran on 2026-11-05 UTC, "
+    "and we evaluated the sample 2 times with 2 different prompts.\n"
+    "- On test, accuracy was 0.50 across 2 labelled rows, short of the 0.9 target. "
+    "The latest evaluation ran on 2026-11-06 UTC, and we evaluated the sample "
+    "1 time with 1 different prompt.\n\n"
+    "The evaluation calls cost $1.00 in total."
 )
 
 
@@ -316,10 +318,11 @@ def test_a_classifier_gets_the_evaluation_that_was_run_with_its_own_prompt():
     text = str(gl.get_methodology(gold=g, classifier=OLD))
     # dev: the older prompt's own evaluation, though a later one exists; test: none, so the latest
     assert (
-        "- **dev**: accuracy 0.80 on 2 labelled rows (1 pending row not scored), "
-        "target 0.9, not met. Latest evaluation 2026-11-04 UTC. Evaluated 2 times with 2 different prompts."
+        "- On dev, accuracy was 0.80 across 2 labelled rows, short of the 0.9 target. "
+        "1 pending row was left unscored. The latest evaluation ran on 2026-11-04 UTC, "
+        "and we evaluated the sample 2 times with 2 different prompts."
     ) in text
-    assert "- **test**: accuracy 0.50" in text
+    assert "- On test, accuracy was 0.50" in text
 
 
 def test_a_gold_dataset_without_samples_says_so():
@@ -347,8 +350,8 @@ def test_a_classifier_loaded_from_a_bundle_brings_its_own_evaluation():
     assert str(gl.get_methodology(classifier=bundle)) == doc(
         LABELS_SECTION,
         "### Classifier\n\nThe classifier uses the model `openai:gpt-x`.",
-        "### Evaluation\n\nThe classifier was scored against the gold labels:\n\n"
-        "- **test**: accuracy 0.90 on 50 labelled rows, evaluated 2026-11-06 UTC "
+        "### Evaluation\n\nWe scored the classifier against the gold labels:\n\n"
+        "- On test, accuracy was 0.90 across 50 labelled rows, evaluated on 2026-11-06 UTC "
         "(read from the classifier's saved bundle).",
         appendix_head("Pick one."),
     )
@@ -357,7 +360,9 @@ def test_a_classifier_loaded_from_a_bundle_brings_its_own_evaluation():
 def test_an_evaluation_cost_that_includes_an_unknown_price_is_a_question_mark():
     log = [{**x, "dollars": None} if x["samples"] == ["dev"] else x for x in LOG]
     text = str(gl.get_methodology(gold=write_gold(log=log), classifier=NEW))
-    assert "Evaluation calls cost ? (a price is unknown)." in text and "$1" not in text
+    assert (
+        "The evaluation calls cost ? (a price is unknown)." in text and "$1" not in text
+    )
 
 
 # --- the run: a Predictions built by hand ------------------------------------------------------
@@ -385,8 +390,8 @@ RUN_ROWS = [
 
 def run_section(tail):
     return (
-        "### Run\n\n3 items were classified by `m1` between 2026-11-06 and 2026-11-07 UTC: "
-        "2 by live model calls, 0 from the cache, 1 resumed from an earlier run, 1 failed. "
+        "### Run\n\nWe classified 3 items with `m1` between 2026-11-06 and 2026-11-07 UTC: "
+        "2 by live model calls, 0 from the cache, 1 resumed from an earlier run and 1 failed. "
         + tail
     )
 
@@ -395,8 +400,8 @@ def test_the_run_section_counts_items_names_model_and_dates_and_the_lowest_simil
     p = Predictions(RUN_ROWS, live=2, cached=0, resumed=1, cost=0.25)
     assert str(gl.get_methodology(results=p)) == doc(
         run_section(
-            "The live model calls cost $0.25. The similarity cutoff was not recorded; "
-            "the lowest similarity among the items was 0.72."
+            "The live model calls cost $0.25. The similarity cutoff was not recorded, "
+            "and the lowest similarity among the items was 0.72."
         )
     )
 
@@ -406,8 +411,8 @@ def test_the_run_section_states_the_cutoff_the_candidates_carry():
     text = str(gl.get_methodology(results=p, candidates=seeds_list().above(0.7)))
     assert text.endswith(
         run_section(
-            "The live model calls cost $0.25. The similarity cutoff was 0.7; "
-            "the lowest similarity among the items was 0.72."
+            "The live model calls cost $0.25. The similarity cutoff was 0.7, "
+            "and the lowest similarity among the items was 0.72."
         )
     )
 
@@ -425,8 +430,8 @@ def test_one_day_one_item_and_no_similarity_scores_and_an_unknown_price():
     ]
     p = Predictions(rows, live=1, cost=None)
     assert str(gl.get_methodology(results=p)) == doc(
-        "### Run\n\n1 item was classified by `m1` on 2026-11-07 UTC: 1 by live model calls, "
-        "0 from the cache, 0 resumed from an earlier run, 0 failed. "
+        "### Run\n\nWe classified 1 item with `m1` on 2026-11-07 UTC: 1 by live model calls, "
+        "0 from the cache, 0 resumed from an earlier run and 0 failed. "
         "The live model calls cost ? (a price is unknown)."
     )
 
@@ -439,8 +444,8 @@ def test_result_rows_without_the_model_and_time_say_how_many_lack_them():
     stamped = {**bare, "run_model": "m1", "run_at": "2026-11-07T10:00:00+00:00"}
     p = Predictions([bare, {**bare, "id": "b"}, stamped], live=3, cost=0.25)
     assert str(gl.get_methodology(results=p)) == doc(
-        "### Run\n\n3 items were classified by `m1` on 2026-11-07 UTC: 3 by live model calls, "
-        "0 from the cache, 0 resumed from an earlier run, 0 failed. "
+        "### Run\n\nWe classified 3 items with `m1` on 2026-11-07 UTC: 3 by live model calls, "
+        "0 from the cache, 0 resumed from an earlier run and 0 failed. "
         "The live model calls cost $0.25. The model and time were not recorded on 2 of the 3 rows."
     )
 
@@ -455,14 +460,14 @@ def test_rows_imported_from_elsewhere_are_never_called_page_labels():
     )
     text = str(gl.get_methodology(gold=g))
     assert (
-        "0 in the labelling page, 2 imported (labelled elsewhere), 0 with no record"
-        in text
-    )
+        "split into 0 labelled in the labelling page, 2 imported (labelled elsewhere) "
+        "and 0 with no record of how they were labelled"
+    ) in text
 
 
 def test_no_evaluation_log_means_no_evaluation_claims():
     text = str(gl.get_methodology(gold=write_gold(log=None), classifier=NEW))
-    assert "### Evaluation" not in text and "Different prompts" not in text
+    assert "### Evaluation" not in text and "prompts against the gold" not in text
     assert "The classifier uses the model `openai:gpt-x`." in text
 
 
@@ -571,7 +576,7 @@ def test_results_from_another_classifier_are_flagged():
 def test_gold_rows_missing_from_the_candidates_are_flagged_unless_a_cutoff_was_applied():
     full = seeds_list()  # ids a and b; the gold rows are d1, d2, d3, t1, t2
     assert warnings_of(candidates=full) == (
-        "Gold rows not among the candidates passed in: 5.",
+        "5 gold rows are not among the candidates passed in.",
     )
     assert warnings_of(candidates=full.above(0.75)) == ()
 
@@ -581,16 +586,16 @@ def test_gold_rows_missing_from_the_candidates_are_flagged_unless_a_cutoff_was_a
 
 def appendix_head(prompt="Pick better."):
     return (
-        "### Appendix\n\n**Model**: `openai:gpt-x`\n\n"
-        f"**Prompt** (exactly as stored):\n\n> {prompt}\n\n"
-        "**Labels**\n\n- `layoff`: Lost a job.\n- `burnout`: Worn out.\n"
+        "### Appendix\n\nThe model was `openai:gpt-x`.\n\n"
+        f"The prompt, exactly as stored:\n\n> {prompt}\n\n"
+        "The labels:\n\n- `layoff`: Lost a job.\n- `burnout`: Worn out.\n"
         "- `off_topic`: The item matches none of the labels above."
     )
 
 
 APPENDIX_HEAD = appendix_head()
 GOLD_TABLE = (
-    "**Gold dataset**\n\n"
+    "The gold dataset:\n\n"
     "| sample | id | text | label | labelled by |\n"
     "|---|---|---|---|---|\n"
     "| dev | d1 | text d1 | layoff | labelling page |\n"
@@ -615,7 +620,7 @@ def test_the_appendix_has_the_model_the_prompt_the_labels_and_every_gold_row():
 
 def test_a_multi_line_prompt_is_quoted_line_by_line_and_keeps_its_blank_lines():
     multi = replace(NEW, prompt="Line one\n\nLine two")
-    assert "> Line one\n>\n> Line two\n\n**Labels**" in appendix_of(classifier=multi)
+    assert "> Line one\n>\n> Line two\n\nThe labels:" in appendix_of(classifier=multi)
 
 
 def test_with_no_classifier_the_appendix_is_only_the_gold_table():
@@ -637,7 +642,7 @@ def test_the_gold_table_can_be_left_out_and_nothing_else_changes():
     full = str(gl.get_methodology(gold=g, classifier=NEW))
     short = str(gl.get_methodology(gold=g, classifier=NEW, include_gold_table=False))
     assert full == f"{short}\n\n{GOLD_TABLE}"
-    assert "Gold dataset" not in short and "| sample" not in short
+    assert "The gold dataset:" not in short and "| sample" not in short
     assert (
         str(gl.get_methodology(gold=g, include_gold_table=False)).count("Appendix") == 0
     )
@@ -648,7 +653,7 @@ def test_a_note_never_appears_in_the_text_with_the_table_on_or_off():
     g = write_gold(rows=rows, log=None)
     for table in (True, False):
         text = str(gl.get_methodology(gold=g, classifier=NEW, include_gold_table=table))
-        assert "TOPSECRET" not in text and "Rows with a note: 1" in text
+        assert "TOPSECRET" not in text and "1 row had a note" in text
 
 
 def test_results_from_another_classifier_withhold_the_prompt():
@@ -656,7 +661,7 @@ def test_results_from_another_classifier_withhold_the_prompt():
     text = appendix_of(classifier=NEW, results=Predictions(rows, live=3, cost=0.25))
     assert "Pick better." not in text
     assert (
-        "**Prompt**: not given, because the results were produced by a different "
+        "The prompt is not given, because the results were produced by a different "
         "classifier from the one passed in, so its prompt is not the prompt of the run."
     ) in text
 
@@ -675,6 +680,6 @@ def test_a_bundle_saved_before_samples_existed_names_its_split():
             "date": "2026-11-06T10:00:00+00:00",
         },
     )
-    assert "- **test**: accuracy 0.90 on 50 labelled rows" in str(
+    assert "- On test, accuracy was 0.90 across 50 labelled rows" in str(
         gl.get_methodology(classifier=old)
     )
