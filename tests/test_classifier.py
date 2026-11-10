@@ -2,6 +2,7 @@ import hashlib
 import importlib
 import json
 from dataclasses import FrozenInstanceError
+from datetime import UTC, datetime
 
 import pytest
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
@@ -77,6 +78,8 @@ def seed_ledger(model_name, per_call, calls=2, seconds=None):
 def test_valid_output_and_row_shape():
     model, _ = scripted(["a", "b"])
     p = clf(model).classify(["text"])
+    stamp = p.rows[0].pop("run_at")  # the time is checked in its own test
+    assert stamp
     assert p.rows == [
         {
             "id": 0,
@@ -84,6 +87,7 @@ def test_valid_output_and_row_shape():
             "labels": ["a", "b"],
             "reasoning": "because",
             "run": clf(model).digest,
+            "run_model": "m",
         }
     ]
     assert p.labels == [["a", "b"]] and p.errors == []
@@ -269,6 +273,8 @@ def test_items_as_strings_dicts_and_objects_with_rows():
         "labels",
         "reasoning",
         "run",
+        "run_model",
+        "run_at",
         "score",
     ]
 
@@ -467,6 +473,46 @@ def test_out_rows_appended_flushed_and_resume_skips_done(tmp_path):
     c.classify([*items, {"id": "z", "text": "t2"}], out=path)
     assert [json.loads(x)["id"] for x in path.read_text().splitlines()][-1] == "z"
     assert len(calls) == 3
+
+
+def test_every_row_carries_the_model_and_the_time_beside_the_run_digest(tmp_path):
+    before = datetime.now(UTC)
+    model, _ = scripted(["a"], name="my-model")
+    c = clf(model)
+    path = tmp_path / "res.jsonl"
+    p = c.classify(["x", "y"], out=path)
+    after = datetime.now(UTC)
+    lines = [json.loads(line) for line in path.read_text().splitlines()]
+    for r in [*p.rows, *lines]:
+        assert r["run"] == c.digest and r["run_model"] == "my-model"
+        assert before <= datetime.fromisoformat(r["run_at"]) <= after
+        assert r["run_at"].endswith("+00:00")  # UTC
+
+
+def test_an_input_field_called_model_or_at_is_kept_and_never_replaced(tmp_path):
+    model, _ = scripted(["a"], name="my-model")
+    item = {"id": "x", "text": "t", "model": "Civic", "at": "the lake"}
+    row = clf(model).classify([item], out=tmp_path / "r.jsonl").rows[0]
+    assert (row["model"], row["at"]) == ("Civic", "the lake")
+    assert row["run_model"] == "my-model" and "run_at" in row
+
+
+def test_an_out_file_without_the_stamps_still_resumes_and_resumed_rows_keep_theirs(
+    tmp_path,
+):
+    model, calls = scripted(["a"])
+    c = clf(model)
+    old = tmp_path / "old.jsonl"  # written by hand, as the code did before the stamps
+    old.write_text(
+        json.dumps({"id": 0, "text": "x", "labels": ["a"], "run": c.digest}) + "\n"
+    )
+    p = c.classify(["x"], out=old)
+    assert (p.live, p.resumed, len(calls)) == (0, 1, 0)
+    assert "run_model" not in p.rows[0] and "run_at" not in p.rows[0]
+    new = tmp_path / "new.jsonl"
+    first = c.classify(["x"], out=new)
+    again = c.classify(["x"], out=new)
+    assert again.resumed == 1 and again.rows[0]["run_at"] == first.rows[0]["run_at"]
 
 
 def test_out_rows_of_another_run_are_reclassified_and_old_rows_stay(tmp_path):
