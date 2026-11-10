@@ -105,7 +105,7 @@ A methodology that says "an LLM classified the posts" is not reproducible. The e
 
 ### Functional Requirements
 
-- **FR-001**: The library MUST provide `gl.get_methodology`, exported in `goldlabel.__all__`, taking the analysis's objects as optional arguments (candidates, gold dataset, classifier, results) and returning the methodology as plain-English text; at least one argument MUST be given, otherwise it MUST raise an error naming them.
+- **FR-001**: The library MUST provide `gl.get_methodology(*, candidates=None, gold=None, classifier=None, results=None, include_gold_table=True)`, a free function (not a method) exported in `goldlabel.__all__`, taking the analysis's objects as optional keyword-only arguments (candidates, gold dataset, classifier, results) and returning the methodology as plain-English text; at least one argument MUST be given, otherwise it MUST raise an error naming them.
 - **FR-002**: The text MUST be built only from the arguments and the files they point at (the candidates file and `.meta.json`, the gold file, `evals.jsonl` beside it, a classifier bundle, the cost ledger); it MUST NOT call a model, an embedding service, a database, the network or a browser, and MUST cost nothing.
 - **FR-003**: Every fact in the text (count, name, score, date, price) MUST be traceable to one of those sources; a fact that is not recorded MUST be said to be not recorded, never estimated or filled in.
 - **FR-004**: The text MUST be deterministic: the same files and arguments give the same text.
@@ -150,6 +150,7 @@ A methodology that says "an LLM classified the posts" is not reproducible. The e
 
 - Q: Should candidate searches start saving how they were run (seeds, keywords, corpus and filter description)? → A: Yes, option B: the candidates file records the seed phrases, the keywords and regex flag, and a description of the corpus and its filter. Nothing about a classification run is recorded; `classify`, its output file and `Predictions` are unchanged.
 - Q: Should `get_methodology` use only the objects passed in, or also look in the storage folder for files it was not given? → A: Option A, only the objects passed in. With none it raises an error naming the arguments; it never reads `gold.json`, `evals.jsonl` or `candidates.jsonl` from the storage folder on its own. `evals.jsonl` is read only from beside the gold file of the `Gold` object passed in.
+- Q: Should `get_methodology` be a free function or a method on `Gold`? → A: Option A, a free function exported as `gl.get_methodology(*, candidates=None, gold=None, classifier=None, results=None, include_gold_table=True)`, keyword-only; no one object holds every input, and it matches `get_candidates`, `label` and `cost`. An explicit `candidates` wins over `gold.candidates`, and the text flags a difference.
 
 ## Assumptions
 
