@@ -162,7 +162,24 @@ results = clf2.classify(chosen, out="results.jsonl", max_cost=1.00)
 results.to_polars()
 
 # %% [markdown]
-# ## 8. Keep the classifier
+# ## 8. Write the methodology
+#
+# `get_methodology` describes what was done in plain English, from the objects you give it and
+# the files beside them (the gold file and its evaluation log). It calls no model and costs
+# nothing, and it says "not recorded" for anything a file does not hold. Pass `chosen`, the list
+# you classified, so the cutoff is stated. `str(m)` is Markdown to paste into an article, and
+# `m.warnings` lists real problems, such as a score older than a label revision. The appendix
+# lists every gold row, text included; pass `include_gold_table=False` to leave that out.
+
+# %%
+m = gl.get_methodology(candidates=chosen, gold=gold, classifier=clf2, results=results)
+print(m)
+
+# %%
+m.warnings
+
+# %% [markdown]
+# ## 9. Keep the classifier
 #
 # A saved bundle (model, taxonomy, prompt, the final evaluation) is plain files to commit. A
 # pipeline loads it with `gl.Classifier.load("classifiers/layoffs")`, no gold and no UI needed.
