@@ -51,7 +51,7 @@
 
 ## Phase 6: Polish
 
-- [ ] T010 Add a "Current state" paragraph to `AGENTS.md` for 020 (`gl.get_methodology`, what it reads, that `classify` rows carry `run_model` and `run_at`, that `Candidates` record the search and `above` the cutoff, read-only, no model) and `methodology.py` to the Layout list; `tests/test_docs.py` and `tests/test_docstrings.py` must still pass. Run the full checks (`uv run ruff check`, `ruff format --check`, `ty check`, `pytest`); `uv build` wheel contains `goldlabel/methodology.py`. Walk SC-001 to SC-012 and record each as met or not in the final report; confirm `git diff` leaves `src/goldlabel/gold_rule.md`, `_gold_rule.py` and `_label.py` unchanged and adds no way to set a label.
+- [X] T010 Add a "Current state" paragraph to `AGENTS.md` for 020 (`gl.get_methodology`, what it reads, that `classify` rows carry `run_model` and `run_at`, that `Candidates` record the search and `above` the cutoff, read-only, no model) and `methodology.py` to the Layout list; `tests/test_docs.py` and `tests/test_docstrings.py` must still pass. Run the full checks (`uv run ruff check`, `ruff format --check`, `ty check`, `pytest`); `uv build` wheel contains `goldlabel/methodology.py`. Walk SC-001 to SC-012 and record each as met or not in the final report; confirm `git diff` leaves `src/goldlabel/gold_rule.md`, `_gold_rule.py` and `_label.py` unchanged and adds no way to set a label.
 - [ ] T011 `/ponytail-review` and `/ponytail-debt` on the diff; apply findings; push `claude/adoring-dirac-igdiww`. Do not open a PR unless asked. Report what only a human can do (quickstart section 2 on the sample with a real key, and reading the text as the person who did the analysis).
 
 ## Dependencies and parallelism
