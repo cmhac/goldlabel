@@ -44,7 +44,7 @@ Items were classified by `{model}`. {p} prompt(s) were evaluated against the gol
 
 ### Evaluation
 Metric: {metric}; target {target | none}.
-- **{samples}**: {score} on {n} labelled rows ({skipped} pending rows not scored), {target met | target not met}, latest evaluation {date}. Evaluated {k} time(s) with {p} prompt(s). {flags}
+- **{samples}**: {score} on {n} labelled rows ({skipped} pending rows not scored), {target met | target not met}, latest evaluation {date}. Evaluated {k} time(s) with {p} different prompt(s). {flags}
 Evaluation calls cost {$x.xx | ?, a price is unknown}.
 
 ### Run
@@ -54,12 +54,11 @@ Evaluation calls cost {$x.xx | ?, a price is unknown}.
   (digest differs from the classifier passed in) These results were produced by a different classifier from the one passed in, so its prompt is not given as the prompt of the run.
 
 ### Warnings
-- The {samples} sample was evaluated {k} times with {p} prompts.
 - The {samples} evaluation of {date} predates a revision of {r} gold label(s); its score may no longer match the labels.
 - The classifier passed in is not the one that was evaluated ({what differs}), or not the one that produced the results.
 - The classifier's taxonomy differs from the gold file's.
 - {r} gold rows are not among the candidates passed in. (checked only when the candidates have no cutoff)
-(none: the section is omitted)
+(none: the section is omitted; evaluating a sample many times is not a warning)
 
 ### Appendix
 **Model**: `{model}`   **Prompt** (exactly as stored): > {prompt}   **Labels**: - `name`: description ...

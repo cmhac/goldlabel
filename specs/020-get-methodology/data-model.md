@@ -7,8 +7,7 @@ Frozen dataclass.
 | Field | Type | Meaning |
 |---|---|---|
 | `text` | `str` | the whole methodology in Markdown, ending with the appendix |
-| `stages` | `tuple[str, ...]` | the sections written, in order, from `corpus`, `labels`, `gold`, `classifier`, `evaluation`, `run` |
-| `warnings` | `tuple[str, ...]` | one sentence per problem found (also written in the text's *Warnings* section) |
+| `warnings` | `tuple[str, ...]` | one sentence per problem found: a stale evaluation or an inconsistency between the pieces (also written in the text's *Warnings* section); empty on a clean analysis |
 
 `str(m)` and `repr(m)` are `text`. `_repr_html_` is `text` escaped inside `<pre>` with no colour. It has no method that touches a file or a gold label.
 
@@ -29,12 +28,12 @@ New fields, all optional with these defaults, so existing constructions and old 
 
 ## Result rows (changed, additive)
 
-Every row `classify` writes, in memory and in the `out` file, gains two keys beside `run`:
+Every row `classify` writes, in memory and in the `out` file, gains two keys beside `run`. They are prefixed like `run` so an input field called `model` or `at` is never overwritten or lost:
 
 | Key | Value |
 |---|---|
-| `model` | the model name as `_model_name(model)` gives it |
-| `at` | UTC ISO time the row was finished |
+| `run_model` | the model name as `_model_name(model)` gives it |
+| `run_at` | UTC ISO time the row was finished |
 
 Resume keys on `run` only, so files written before this feature still resume; their rows have neither key and are reported as not recorded. Not stored: the prompt or taxonomy (the `run` digest ties the rows to a classifier).
 
@@ -43,7 +42,7 @@ Resume keys on `run` only, so files written before this feature still resume; th
 - Gold dataset: `Gold.path` file (taxonomy dict, rows) and `evals.jsonl` beside it.
 - Evaluation line fields used: `time`, `samples`, `digest`, `model`, `prompt`, `metric`, `target`, `score`, `n`, `skipped_pending`, `dollars`.
 - Classifier: `model`, `prompt`, `taxonomy`, `digest`, `evaluation`.
-- Predictions: `rows` (`run`, `model`, `at`, `max_similarity` when present, `error` when failed), `live`, `cached`, `resumed`, `cost`.
+- Predictions: `rows` (`run`, `run_model`, `run_at`, `max_similarity` when present, `error` when failed), `live`, `cached`, `resumed`, `cost`.
 
 ## Validation rules
 

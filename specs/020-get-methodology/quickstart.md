@@ -26,7 +26,7 @@ Expect: green; `tests/test_methodology.py` builds a gold file and an `evals.json
 
 3. Check, against `.goldlabel/candidates.meta.json`, `.goldlabel/gold.json` and `.goldlabel/evals.jsonl`: every number and name in the text appears in one of them (SC-002).
 4. Run the cell again: identical text (SC-003). Run with `include_gold_table=False`: no table, nothing else changes.
-5. Open `results.jsonl`: every line has `run`, `model` and `at`. The text's *Run* section gives the same model, the first and last `at`, and the cutoff you passed to `above`.
+5. Open `results.jsonl`: every line has `run`, `run_model` and `run_at`. The text's *Run* section gives the same model, the first and last `run_at`, and the cutoff you passed to `above`.
 6. Evaluate `test` a second time under a new prompt: the text now says the test sample was evaluated 2 times with 2 prompts (SC-005).
 7. In `goldlabel label`, revise one `dev` label: the text flags the `dev` evaluation as predating a revision.
 8. `git status` shows no gold or log file touched by the call (SC-006).
