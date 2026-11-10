@@ -60,7 +60,11 @@ def _alive(pid: int) -> bool:
 
 
 def _answers(port: int) -> bool:
-    """Does a labelling server answer on this port?"""
+    """Ask whether a labelling server answers on this port.
+
+    Returns:
+        bool: True when it does.
+    """
     try:
         urlopen(f"http://127.0.0.1:{port}/api/datasets", timeout=2).read()
     except (OSError, ValueError):
@@ -69,7 +73,12 @@ def _answers(port: int) -> bool:
 
 
 def _held(lock: Path) -> tuple[int, str | None, int] | None:
-    """(pid, started, port) of a live server holding `lock`: its process exists and its port answers."""
+    """Read the lock file of a labelling server that is really running.
+
+    Returns:
+        tuple[int, str | None, int] | None: `(pid, started, port)` when the process exists and
+        its port answers; None for a missing, unreadable or stale lock.
+    """
     try:
         info = json.loads(lock.read_text())
         pid, port, started = int(info["pid"]), int(info["port"]), info.get("started")
@@ -79,7 +88,11 @@ def _held(lock: Path) -> tuple[int, str | None, int] | None:
 
 
 def _live(folder: Path) -> int | None:
-    """The port of the live labelling server of `folder`, if there is one."""
+    """Find the labelling server running for a storage folder.
+
+    Returns:
+        int | None: Its port, or None when there is none.
+    """
     held = _held(folder / LOCK)
     return None if held is None else held[2]
 
@@ -128,7 +141,11 @@ def _need_sample(sample) -> None:
 
 
 def _stems(folder: Path) -> list[str]:
-    """The gold datasets of a storage folder, as file stems: `gold`, `gold-<name>`."""
+    """List the gold datasets of a storage folder.
+
+    Returns:
+        list[str]: The file stems, `gold` and `gold-<name>`, sorted.
+    """
     files = folder.glob("gold*.json") if folder.is_dir() else []
     return sorted(
         f.stem for f in files if re.fullmatch(r"gold(-[a-z0-9_-]+)?\.json", f.name)
@@ -143,7 +160,11 @@ def _when(text) -> datetime | None:
 
 
 def _revised_after(row, when: datetime | None) -> bool:
-    """Does the row carry a revision made after `when`?"""
+    """Ask whether the row carries a revision made after `when`.
+
+    Returns:
+        bool: True when it does.
+    """
     return when is not None and any(
         (at := _when(e.get("at"))) is not None and at > when
         for e in row.revisions or []
@@ -155,7 +176,11 @@ def _title(stem: str) -> str:
 
 
 def _taxonomy(gold: Gold) -> Taxonomy:
-    """The taxonomy stored in the gold file; with none, the labels already used in its rows."""
+    """Get the taxonomy stored in the gold file; with none, the labels already used in its rows.
+
+    Returns:
+        Taxonomy: The stored or inferred taxonomy.
+    """
     stored = gold._doc().get("taxonomy")
     if stored:
         return Taxonomy.model_validate(stored)
@@ -172,7 +197,13 @@ def _save(gold: Gold, id_: str, labels: list[str], note: str | None, only=None):
 
     A row that already had labels keeps the values from before the change in its `revisions`
     list, in the same rewrite of the file; a first label, or a save that changes nothing,
-    adds no entry. `only` limits which ids may be saved (a pass's ids). KeyError: no such row.
+    adds no entry. `only` limits which ids may be saved (a pass's ids).
+
+    Returns:
+        GoldRow: The saved row.
+
+    Raises:
+        KeyError: There is no such row (or it is outside `only`).
     """
     rows = gold._read()
     target = next(
@@ -220,8 +251,14 @@ class Pass:
         return [r for r in self.gold._read() if r.id in self.ids]
 
     def _after(self, rows, id_):
-        """The next pending row after `id_` in file order, else the first pending one. A review
-        pass (`force_open_ui`) walks every row once, in file order, then finishes."""
+        """Find the row to show after `id_`.
+
+        The next pending row after `id_` in file order, else the first pending one. A review
+        pass (`force_open_ui`) walks every row once, in file order, then finishes.
+
+        Returns:
+            str | None: The id, or None when the pass is finished.
+        """
         ids = [r.id for r in rows]
         start = ids.index(id_) + 1 if id_ in ids else 0
         if self.review:
@@ -333,7 +370,14 @@ class Server:
     # --- state; every method takes the mutex ---------------------------------------------------
 
     def gold(self, stem: str) -> Gold:
-        """The dataset whose file is `<stem>.json` in this folder (`gold` or `gold-<name>`)."""
+        """Find the dataset whose file is `<stem>.json` in this folder (`gold` or `gold-<name>`).
+
+        Returns:
+            Gold: The dataset, pinned to this server's folder.
+
+        Raises:
+            KeyError: The name is not a dataset name, or the file does not exist.
+        """
         if not re.fullmatch(r"gold(-[a-z0-9_-]+)?", stem):
             raise KeyError(stem)
         g = Gold(name=None if stem == "gold" else stem.removeprefix("gold-"))
@@ -397,7 +441,11 @@ class Server:
             return p.state(_taxonomy(p.gold))
 
     def datasets(self) -> list[dict]:
-        """Every gold file of the folder (`gold.json`, `gold-<name>.json`) with its samples."""
+        """List every gold file of the folder (`gold.json`, `gold-<name>.json`) with its samples.
+
+        Returns:
+            list[dict]: One entry per dataset.
+        """
         out = []
         with self._mutex:
             for stem in _stems(self.folder):
@@ -462,8 +510,17 @@ class Server:
         }
 
     def evals(self, stem: str, sample: str) -> list[dict]:
-        """The logged evaluations whose samples include `sample`, newest first, with the rows
-        revised since each ran (STALE) and each disagreement joined to its row."""
+        """List the logged evaluations whose samples include `sample`, newest first.
+
+        Each one carries the rows revised since it ran (STALE) and each disagreement joined to
+        its row.
+
+        Returns:
+            list[dict]: One entry per evaluation.
+
+        Raises:
+            KeyError: The dataset or the sample does not exist.
+        """
         with self._mutex:
             g = self.gold(stem)
             rows = g._read()
@@ -517,7 +574,11 @@ class Server:
             return out
 
     def revise(self, stem: str, id_: str, labels: list[str], note: str | None) -> dict:
-        """A person's label or revision for any row of a dataset, with or without a pass."""
+        """Save a person's label or revision for any row of a dataset, with or without a pass.
+
+        Returns:
+            dict: The saved row, as the page shows it.
+        """
         with self._mutex:
             g = self.gold(stem)
             validate_labels(labels, _taxonomy(g))
@@ -699,8 +760,17 @@ def serve(
     port=None,
     stop_on_done=True,
 ) -> Server:
-    """Start the labelling server on 127.0.0.1 and return at once. The first pass is the rows of
-    `sample` that are pending now (every row with `force_open_ui=True`); it starts at the first."""
+    """Start the labelling server on 127.0.0.1 and return at once.
+
+    The first pass is the rows of `sample` that are pending now (every row with
+    `force_open_ui=True`); it starts at the first.
+
+    Returns:
+        Server: The running server, with its `url`; `wait()` blocks until Done and `stop()` ends it.
+
+    Raises:
+        GoldError: `sample` is not a `Sample`.
+    """
     _need_sample(sample)
     path = sample.gold.path
     server = Server(path.parent, stop_on_done=stop_on_done, port=port)
@@ -715,7 +785,14 @@ def serve(
 
 
 def _ask(port: int, path: str, body: dict | None = None) -> dict:
-    """One request to the live server of this machine; its error text becomes a GoldRuntimeError."""
+    """Send one request to the live server of this machine.
+
+    Returns:
+        dict: The decoded JSON answer.
+
+    Raises:
+        GoldRuntimeError: The server refused the request; its error text is in the message.
+    """
     req = Request(
         f"http://127.0.0.1:{port}{path}",
         None if body is None else json.dumps(body).encode(),
@@ -770,9 +847,32 @@ def label(
     open_browser: bool = True,
     port: int | None = None,
 ) -> Sample:
-    """Open the labelling page on the rows of `sample` that are pending and wait for **Done**;
-    returns the Sample. Every click is saved at once. If none is pending it prints one line and
-    returns at once, unless `force_open_ui=True` (to review or relabel every row of the sample)."""
+    """Open the labelling page so a person can label the rows of a sample, and wait until they finish.
+
+    This is where gold labels are made: by people, in the page, never by code or a model. The
+    page opens only on the rows of `sample` that are pending when you call this; every click is
+    saved to the gold file at once. If nothing is pending it prints one line and returns, unless
+    `force_open_ui=True`. If a labelling page is already running for the same storage folder
+    (from `goldlabel label` or an earlier call), this pass is handed to it and the call waits
+    there. It returns when nothing is left pending or **Done** is pressed in the page; it
+    prints the page's address, and nothing is sent to any model.
+
+    Args:
+        sample: The `Sample` to label, from `gold.draw_sample(...)`.
+        taxonomy: The `Taxonomy` whose labels the person chooses from. It is stored in the gold
+            file, and rows labelled with labels outside it are reported (and kept).
+        force_open_ui: True to open the page on every row of the sample, to review or relabel
+            rows that are already labelled (a revised label keeps its earlier value in the
+            row's history).
+        open_browser: False to print the address without opening a browser.
+        port: The port to listen on; None picks a free one.
+
+    Returns:
+        Sample: The same sample, as a live view of the gold file.
+
+    Raises:
+        GoldError: `sample` is not a `Sample`.
+    """
     _need_sample(sample)
     gold, name = sample.gold, " + ".join(sample.names)
     orphans = len(gold.orphaned(taxonomy))
@@ -811,7 +911,12 @@ def label(
 
 
 def run_forever(folder: Path, name: str | None = None, port: int | None = None) -> int:
-    """`goldlabel label`: serve every dataset of `folder` until interrupted; the exit code."""
+    """Run `goldlabel label`: serve every dataset of `folder` until interrupted.
+
+    Returns:
+        int: The exit code: 0 on a normal stop (or when a page was already running), 1 when
+        there is nothing to label or the page cannot start.
+    """
     stems = _stems(folder)
     if not stems:
         print(

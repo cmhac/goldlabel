@@ -34,6 +34,8 @@ Nothing in this repository may add a way to set a gold label. Only the labelling
 
 **018 is implemented** (`specs/018-readme-skills-and-page/`, closes issue #28): the README says what `goldlabel install` writes, that `/goldlabel` is where to start, that the skills are optional, what a session looks like, points step 3 at the labelling page, and `ub add` is `uv add`. README only; no tests, by the user's choice.
 
+**019 is implemented** (`specs/019-docstrings-and-ruff/`, closes issue #31): every public callable and class has a docstring a person with no agent can act on (`Classifier.with_prompt` says it replaces the instructions, never appends, and returns a new classifier); ruff's `D` rules (Google style) plus the preview `DOC201`/`DOC501` rules are on in `pyproject.toml` (`preview = true` also switches on ruff's preview default rules, so the three that flagged old lines are ignored there), and `tests/test_docstrings.py` closes the one gap ruff leaves (a public function with arguments and no `Args:` section). Docstrings only: no behaviour, signature or name changed.
+
 What a human still has to do (agents report these and stop, never fake them):
 
 - Install the plugin in Claude Code, Codex, Copilot CLI and Kiro and run the gold-rule refusal trial in each (SC-6). Some install commands in the README are marked unverified (the Codex `plugin add` form, Copilot's `NAME@MARKETPLACE` form, `npx skills add ... -a kiro-cli`); the trial finds the real ones and records them in the spec's task 16 note.
@@ -110,6 +112,7 @@ Ruff, ty and pytest must pass before every commit (pre-commit enforces it). The 
 ## Conventions
 
 - Match surrounding code style; comments only where the why is not obvious.
+- Public docstrings are written for a person with no agent (what it does, `Args:`, `Returns:`, `Raises:`, and any file written, model call, cost or "returns a new X, the original is unchanged"), in Google style, in plain words with no spec numbers. Ruff enforces them (`D`, `DOC201`, `DOC501` in `pyproject.toml`; private `_*` modules, tests, examples, scripts and specs are exempt) and `tests/test_docstrings.py` checks every public callable has a docstring and an `Args:` section. Read the code before writing a claim about behaviour.
 - One commit per task (`006/NN: ...`; for a Spec Kit feature, `NNN/TNN: ...` naming the feature and its task) on the branch you were assigned; do not open a PR unless asked.
 - **Containers: Podman, never Docker (hard requirement, constitution v1.1.0).** For any local container work (a throwaway Postgres or an S3 emulator for a check, pulling or running an image) use `podman` and `podman run`, never `docker`, and never write `docker` into a doc, script or command. Do not depend on a Docker daemon or socket. CI service containers on GitHub's runners are not local and are unaffected.
 - Don't tag, release, publish or bump the version. The publish workflow tags and releases when the user raises the version in `pyproject.toml`; PyPI uses trusted publishing (no token in secrets).

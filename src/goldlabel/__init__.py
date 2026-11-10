@@ -3,6 +3,9 @@
 Importing reads, writes and networks nothing. Two exported names shadow submodules of the package
 (`goldlabel.cost` is the function, `goldlabel.settings` the object): inside the package and in tests
 import by name, `from goldlabel.cost import cache_key`, `from goldlabel.settings import resolve`.
+
+Every public function and class explains itself: hover over a name in your editor, run
+`help(gl.Classifier)` or `help(gl.Classifier.with_prompt)`, or type `gl.Classifier?` in a notebook.
 """
 
 from importlib.metadata import PackageNotFoundError, version
