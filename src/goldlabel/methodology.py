@@ -4,6 +4,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from goldlabel import _html
+from goldlabel._label import _revised_after, _when
 from goldlabel.candidates import Candidates
 from goldlabel.classifier import Classifier, Predictions, _model_name
 from goldlabel.evaluation import _history
@@ -148,6 +149,27 @@ def _dollars(total: float) -> str:
     return f"${total:.2f}" if total == 0 or total >= 0.01 else f"${total:.4f}"
 
 
+def _pick(history: list[dict], classifier: Classifier | None) -> list[tuple]:
+    """Group the evaluation log by the samples scored and choose the line to report for each.
+
+    A classifier is given the evaluation of its own prompt, not just the latest one; without
+    one, or when none of its own was logged for a group, the latest line is used.
+
+    Returns:
+        list[tuple]: One `(sample names, every line of the group, the chosen line, whether the
+        chosen line is the classifier's own)` per group, in the order the log first mentions them.
+    """
+    groups: dict[tuple, list[dict]] = {}
+    for x in history:
+        groups.setdefault(tuple(x["samples"]), []).append(x)
+    picked = []
+    for names, lines in groups.items():
+        own = [x for x in lines if classifier and x.get("digest") == classifier.digest]
+        chosen = max(own or lines, key=lambda x: str(x.get("time")))
+        picked.append((names, lines, chosen, bool(own)))
+    return picked
+
+
 def _evaluation(history: list[dict], classifier: Classifier | None) -> str | None:
     """Write the paragraph on how the classifier scored against the gold labels.
 
@@ -164,14 +186,8 @@ def _evaluation(history: list[dict], classifier: Classifier | None) -> str | Non
             f"{saved['score']:.2f} on {_count(saved['n'], 'labelled row')}, evaluated "
             f"{saved['date'][:10]} (read from the classifier's saved bundle)."
         )
-    groups: dict[tuple, list[dict]] = {}
-    for x in history:
-        groups.setdefault(tuple(x["samples"]), []).append(x)
     bullets = []
-    for names, lines in groups.items():
-        # a classifier is given the evaluation of its own prompt, not just the latest one
-        own = [x for x in lines if classifier and x.get("digest") == classifier.digest]
-        x = max(own or lines, key=lambda x: str(x.get("time")))
+    for names, lines, x, _ in _pick(history, classifier):
         target = x.get("target")
         if target is None:
             goal = "no target"
@@ -233,6 +249,64 @@ def _run(results: Predictions, cutoff: float | None) -> str:
             f"; the {lowest}." if lowest else "."
         )
     return text
+
+
+def _warnings(
+    gold: Gold | None,
+    classifier: Classifier | None,
+    results: Predictions | None,
+    candidates: Candidates | None,
+    history: list[dict],
+) -> list[str]:
+    """Find the real problems: a stale score, and pieces that do not belong together.
+
+    Evaluating a sample many times is not one; tuning does that.
+
+    Returns:
+        list[str]: One sentence for each problem, in a fixed order.
+    """
+    found = []
+    rows = gold._read() if gold is not None else []
+    for names, _, x, _ in _pick(history, classifier):
+        when = _when(x.get("time"))
+        revised = sum(1 for r in rows if r.sample in names and _revised_after(r, when))
+        if revised:
+            found.append(
+                f"The {' + '.join(names)} evaluation of {str(x['time'])[:10]} predates a "
+                f"revision of {_count(revised, 'gold label')}; its score may no longer match "
+                "the labels."
+            )
+    if classifier is not None and history:
+        if classifier.digest not in {x.get("digest") for x in history}:
+            found.append(
+                "The classifier passed in is not the one that was evaluated: its prompt, "
+                "model or labels differ from every logged evaluation."
+            )
+        else:
+            found += [
+                f"The {' + '.join(names)} score shown is from a different prompt than the "
+                "classifier passed in (no evaluation of it was logged for that sample)."
+                for names, _, _, own in _pick(history, classifier)
+                if not own
+            ]
+    stored = gold._doc()["taxonomy"] if gold is not None else None
+    if classifier is not None and stored and classifier.taxonomy.model_dump() != stored:
+        found.append(
+            "The classifier's labels differ from the labels stored in the gold file."
+        )
+    runs = (
+        {r["run"] for r in results.rows if "run" in r} if results is not None else set()
+    )
+    if classifier is not None and runs - {classifier.digest}:
+        found.append(
+            "The results were produced by a different classifier from the one passed in."
+        )
+    if gold is not None and candidates is not None and candidates.cutoff is None:
+        ids = {str(r["id"]) for r in candidates.rows}
+        missing = sum(1 for r in rows if r.id not in ids)
+        if missing:
+            found.append(f"Gold rows not among the candidates passed in: {missing}.")
+    return found
 
 
 def get_methodology(
@@ -302,5 +376,8 @@ def get_methodology(
         sections.append(("Evaluation", evaluation))
     if results is not None:
         sections.append(("Run", _run(results, chosen.cutoff if chosen else None)))
+    found = _warnings(gold, classifier, results, chosen, history)
+    if found:
+        sections.append(("Warnings", "\n".join(f"- {w}" for w in found)))
     body = "\n\n".join(f"### {title}\n\n{text}" for title, text in sections)
-    return Methodology(f"## Methodology\n\n{body}", ())
+    return Methodology(f"## Methodology\n\n{body}", tuple(found))

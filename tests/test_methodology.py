@@ -262,8 +262,10 @@ def write_gold(rows=GOLD_ROWS, log=LOG):
     g = gl.Gold()
     g.path.parent.mkdir(parents=True, exist_ok=True)
     g.path.write_text(json.dumps({"taxonomy": TAXONOMY.model_dump(), "rows": rows}))
-    if log is not None:
-        log_path = g.path.parent / "evals.jsonl"
+    log_path = g.path.parent / "evals.jsonl"
+    if log is None:
+        log_path.unlink(missing_ok=True)
+    else:
         log_path.write_text("".join(json.dumps(x) + "\n" for x in log))
     return g
 
@@ -484,3 +486,81 @@ def test_with_each_input_missing_in_turn_the_text_has_no_section_for_it(
     text = str(gl.get_methodology(**given))
     assert header not in text
     assert all(h in text for h in ("### Labels",))
+
+
+# --- warnings: real problems only; tuning a sample many times is not one -----------------------
+
+
+def clean_inputs():
+    rows = [{**r, "run": NEW.digest} for r in RUN_ROWS]
+    return {
+        "gold": write_gold(),
+        "classifier": NEW,
+        "results": Predictions(rows, live=3, cost=0.25),
+    }
+
+
+def test_a_clean_tuning_history_has_no_warning_even_with_two_prompts_on_dev():
+    m = gl.get_methodology(**clean_inputs())
+    assert m.warnings == () and "### Warnings" not in m.text
+
+
+def warnings_of(**kw):
+    return gl.get_methodology(**{**clean_inputs(), **kw}).warnings
+
+
+def test_a_label_revised_after_the_evaluation_ran_is_flagged_as_stale():
+    late = {"at": "2026-11-05T12:00:00+00:00", "labels": ["burnout"], "note": None}
+    rows = [
+        gold_row("d1", "dev", ["layoff"], "goldlabel-ui", revisions=[late]),
+        *GOLD_ROWS[1:],
+    ]
+    m = gl.get_methodology(**{**clean_inputs(), "gold": write_gold(rows=rows)})
+    stale = (
+        "The dev evaluation of 2026-11-05 predates a revision of 1 gold label; "
+        "its score may no longer match the labels."
+    )
+    assert m.warnings == (stale,)
+    assert m.text.endswith(f"### Warnings\n\n- {stale}")
+
+
+def test_a_classifier_that_was_never_evaluated_is_flagged_once():
+    other = NEW.with_prompt("Something else")
+    expected = (
+        "The classifier passed in is not the one that was evaluated: its prompt, model or "
+        "labels differ from every logged evaluation."
+    )
+    assert warnings_of(classifier=other, results=None) == (expected,)
+
+
+def test_a_score_from_another_prompt_is_flagged_for_the_sample_that_has_no_own_evaluation():
+    # OLD was evaluated on dev only; the test score shown is NEW's
+    expected = (
+        "The test score shown is from a different prompt than the classifier passed in "
+        "(no evaluation of it was logged for that sample)."
+    )
+    assert warnings_of(classifier=OLD, results=None) == (expected,)
+
+
+def test_labels_that_differ_from_the_gold_files_are_flagged():
+    other = Classifier("m", Taxonomy(mode="multi", labels={"layoff": "x"}), "p")
+    got = gl.get_methodology(gold=write_gold(log=None), classifier=other).warnings
+    assert got == (
+        "The classifier's labels differ from the labels stored in the gold file.",
+    )
+
+
+def test_results_from_another_classifier_are_flagged():
+    rows = [{**r, "run": "someone-else"} for r in RUN_ROWS]
+    got = warnings_of(results=Predictions(rows, live=3, cost=0.25))
+    assert got == (
+        "The results were produced by a different classifier from the one passed in.",
+    )
+
+
+def test_gold_rows_missing_from_the_candidates_are_flagged_unless_a_cutoff_was_applied():
+    full = seeds_list()  # ids a and b; the gold rows are d1, d2, d3, t1, t2
+    assert warnings_of(candidates=full) == (
+        "Gold rows not among the candidates passed in: 5.",
+    )
+    assert warnings_of(candidates=full.above(0.75)) == ()
