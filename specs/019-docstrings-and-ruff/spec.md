@@ -9,7 +9,7 @@
 
 A user hovering over `Classifier.with_prompt` in their editor sees only `def with_prompt(text: str) -> Classifier`. It has no docstring, so they cannot tell whether it replaces the instructions, appends to them, or changes the classifier in place. The code answers it (`replace(self, prompt=text)`: it **replaces the instructions text and returns a new `Classifier`**; the label list, the one-label/every-label rule, the `off_topic` rule and the reasoning instruction are always added after it by `system_prompt`), but nothing the user can read says so.
 
-`with_prompt` is not the only case. Measured on 2026-11-10 against the code on this branch (installed `ruff 0.17.3`, `ruff check --select D`, Google convention): **31 of 68** public callables exported through `goldlabel.__all__` have no docstring (`Classifier.with_prompt`, `with_taxonomy`, `Gold.label`, `Gold.pending`, `Gold.all`, `Candidates.above`, `bands`, `top_seeds`, `write`, `Evaluation.score`, `passed`, `write`, `Sample.rows`, `counts`, `path`, all `to_polars`/`to_pandas`, and more), and ruff reports 119 docstring findings in `src/` (35 undocumented public methods, 11 undocumented public functions, 9 modules, 5 classes, 5 `__init__`s, plus 19 docstrings whose summary line is not followed by a blank line). The agent skills explain the library to agents; nothing explains it to a person reading their editor's hover text, `help()` or a notebook's `?`.
+`with_prompt` is not the only case. Measured on 2026-11-10 against the code on this branch (installed `ruff 0.17.3`, `ruff check --select D`, Google convention): **33 of 71** public callables exported through `goldlabel.__all__` have no docstring (`Classifier.with_prompt`, `with_taxonomy`, `Gold.label`, `Gold.pending`, `Gold.all`, `Candidates.above`, `bands`, `top_seeds`, `write`, `Evaluation.score`, `passed`, `write`, `Sample.rows`, `counts`, `path`, all `to_polars`/`to_pandas`, and more), and ruff reports 119 docstring findings in `src/` (35 undocumented public methods, 11 undocumented public functions, 9 modules, 5 classes, 5 `__init__`s, plus 19 docstrings whose summary line is not followed by a blank line). The agent skills explain the library to agents; nothing explains it to a person reading their editor's hover text, `help()` or a notebook's `?`.
 
 ## User Story 1 - A person hovering over `with_prompt` learns what it does (P1)
 
@@ -30,9 +30,9 @@ A journalist or analyst writing a notebook by hand (no agent) hovers over or run
 
 Every public name in `goldlabel.__all__` and every public method and property on those classes has a docstring a non-agent user can act on: what it does in one line, what each argument means (including units and allowed values), what it returns, what it raises, and what it does beyond returning (writes a file and where, makes live model calls, spends money, opens a page, reads the network or a database). Names that look alike say how they differ (`with_prompt` vs `with_taxonomy`; `Gold.label` vs `Gold.pending` vs `Gold.all`; `Evaluation.score` vs `passed`; `write` on `Candidates`, `Evaluation` and `Taxonomy`).
 
-**Why this priority**: the issue asks for "any other unclear functions"; the 31 undocumented ones are the known set, and the already-documented ones have to be audited for the same gaps (a one-line summary that omits replace-versus-append, mutate-versus-copy, or "costs money").
+**Why this priority**: the issue asks for "any other unclear functions"; the 33 undocumented ones are the known set, and the already-documented ones have to be audited for the same gaps (a one-line summary that omits replace-versus-append, mutate-versus-copy, or "costs money").
 
-**Independent Test**: walk the list of public callables (the 68 above, recounted at implementation time); each has a docstring with a summary line and the parts that apply (arguments, returns, raises, side effects), and each of the lookalike pairs above says how it differs from the other.
+**Independent Test**: walk the list of public callables (the 71 above, recounted at implementation time); each has a docstring with a summary line and the parts that apply (arguments, returns, raises, side effects), and each of the lookalike pairs above says how it differs from the other.
 
 **Acceptance Scenarios**:
 
@@ -95,7 +95,7 @@ Every public name in `goldlabel.__all__` and every public method and property on
 
 ### Measurable Outcomes
 
-- **SC-001**: 0 of the public callables exported through `goldlabel.__all__` lack a docstring (31 of 68 today).
+- **SC-001**: 0 of the public callables exported through `goldlabel.__all__` lack a docstring (33 of 71 today).
 - **SC-002**: `uv run ruff check` reports 0 docstring findings on `src/` (119 today under the Google convention, `D` rules), and fails on each of the three test cases in User Story 3.
 - **SC-003**: Reading only `help(Classifier.with_prompt)`, a person who has not seen the issue answers correctly: does it replace or append (replace); is the original changed (no); what else does the model receive (labels, mode rule, `off_topic`, reasoning); do old cached results apply (no).
 - **SC-004**: Each of the lookalike pairs in User Story 2 has docstrings that, read side by side, state the difference in one sentence each; checked by reading, recorded in the tasks file.
@@ -104,7 +104,7 @@ Every public name in `goldlabel.__all__` and every public method and property on
 ## Assumptions
 
 - "Public" means what the library exports: names in `goldlabel.__all__` and the public members of those classes. Private modules and underscore names are out of scope for the written-for-a-person standard (they keep the comments they have).
-- The audit's baseline (68 callables, 31 undocumented, 119 findings) was measured with `ruff 0.17.3` and the Google convention on this branch; the plan re-measures with the version `uv.lock` pins.
+- The audit's baseline (71 callables, 33 undocumented, 119 findings) was measured with `ruff 0.17.3` and the Google convention on this branch; the plan re-measures with the version `uv.lock` pins.
 - Google-style sections (`Args:`, `Returns:`, `Raises:`) are the house style because they read well in an editor hover and in `help()`; NumPy style is the alternative and is not chosen unless the plan finds a reason. The plan confirms this against ruff's docs and the installed version.
 - The `Returns` and `Raises` checks (`DOC201`, `DOC501`) are *preview* rules in ruff 0.17.3 and fire on private helpers too (119 findings today, mostly private). Whether to use them (with `explicit-preview-rules` and per-file exemptions for private modules) or to settle for the stable `D` rules including `D417` (every argument documented) is a plan decision, taken with the finding counts in front of it; the spec's requirement (FR-007) is that missing returns and raises fail ruff if ruff can do that without a flood of false positives on private code.
 - Prose cannot be linted: ruff proves a docstring exists and has the parts, not that it is clear. Clarity is checked by the reading tests in SC-003 and SC-004.

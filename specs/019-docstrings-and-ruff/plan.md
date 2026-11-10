@@ -6,7 +6,7 @@
 
 ## Summary
 
-Write a Google-style docstring on every public callable of `goldlabel` (31 of 68 have none; `with_prompt` first, the issue), audit the 37 that have one, and turn on ruff's `D` rules (Google convention) plus the preview `DOC201`/`DOC501` rules in `pyproject.toml` so the existing `ruff check` fails on regressions. One small test closes the one gap ruff leaves (a public function with arguments and no `Args:` section). No runtime code changes.
+Write a Google-style docstring on every public callable of `goldlabel` (33 of 71 have none; `with_prompt` first, the issue), audit the 38 that have one, and turn on ruff's `D` rules (Google convention) plus the preview `DOC201`/`DOC501` rules in `pyproject.toml` so the existing `ruff check` fails on regressions. One small test closes the one gap ruff leaves (a public function with arguments and no `Args:` section). No runtime code changes.
 
 ## Technical Context
 
@@ -18,7 +18,7 @@ Write a Google-style docstring on every public callable of `goldlabel` (31 of 68
 **Project Type**: library
 **Performance Goals**: N/A
 **Constraints**: no behaviour, signature or public name changes (FR-010); gold rule text and every way to set a label untouched; ruff, ty, pytest pass before every commit
-**Scale/Scope**: 68 public callables, 119 `D` findings and 121 `DOC` findings to clear (research R1), 11 source modules
+**Scale/Scope**: 71 public callables, 119 `D` findings and 121 `DOC` findings to clear (research R1), 11 source modules
 
 ## Constitution Check
 
@@ -37,7 +37,7 @@ No violations; nothing in Complexity Tracking.
 ## Design
 
 1. **Config** (`pyproject.toml`, `[tool.ruff.lint]`): `select = ["D", "DOC201", "DOC501"]`, `preview = true`, `explicit-preview-rules = true`, `ignore = ["D105", "D107"]`, `[tool.ruff.lint.pydocstyle] convention = "google"`. `per-file-ignores`: `tests/**`, `examples/**`, `scripts/**`, `specs/**` ignore `D` and `DOC`; `_html.py`, `_frame.py`, `_sync.py`, `_gold_rule.py` ignore `D` and `DOC` (`_label.py` is not exempt: it holds the exported `label`). The existing `ty`, pytest and pre-commit entries are unchanged: `ruff check` already runs in both pre-commit and CI.
-2. **Docstring standard** (what the audit checks; recorded as the first lines of `tests/test_docstrings.py`' module docstring, not a new doc): summary line in the imperative or noun phrase, blank line, then `Args:` (meaning, allowed values, units), `Returns:`, `Raises:` (only the exceptions raised on purpose), and a short `Note:`/paragraph for effects: files written and where, live model calls and cost, network or database reads, a page opened, "returns a new X; the original is unchanged". Plain words; no spec numbers, no agent jargon (FR-006).
+2. **Docstring standard** (kept in the `tasks.md` header and the module docstring of `tests/test_docstrings.py`, not repeated here): one summary line, `Args:`, `Returns:`, `Raises:` and the effects in plain words (FR-002, FR-006).
 3. **Order of work**: public classes users meet first (`Classifier`, `Gold`/`Sample`, `Candidates`, `Evaluation`), then corpora (`Table`, `S3Corpus`, `PgCorpus`), then the rest, finishing with the module docstrings. The `with_prompt` docstring is written and checked against `system_prompt()` first (FR-001, research R6).
 4. **Test** (`tests/test_docstrings.py`): iterate `goldlabel.__all__`; for each class, its public methods and properties (via `vars`, as the measurement did), assert a docstring and, when there are parameters beyond `self`/`cls`, an `Args:` heading. Failure message names `Class.method`.
 5. **Agent rule** (FR-011): two lines in `AGENTS.md` Conventions; `CLAUDE.md` is the symlink.
