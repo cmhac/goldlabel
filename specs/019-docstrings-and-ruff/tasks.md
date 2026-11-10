@@ -52,7 +52,7 @@
 ## Phase 5: Polish
 
 - [X] T020 Run the full checks (`uv run ruff check`, `ruff format --check`, `ty check`, `pytest`); `uv build` wheel unchanged in contents; walk SC-001 to SC-005 and record each as met; confirm the diff changes no signature, name or behaviour (`git diff` on `src/` shows docstring lines, `pyproject.toml`, tests, `AGENTS.md`, specs only) and `git diff -- src/goldlabel/gold_rule.md src/goldlabel/_gold_rule.py` is empty.
-- [ ] T021 `/ponytail-review` and `/ponytail-debt` on the diff; apply findings; push `claude/stoic-bardeen-rgigyw`. Do not open a PR unless asked.
+- [X] T021 `/ponytail-review` and `/ponytail-debt` on the diff; apply findings; push `claude/stoic-bardeen-rgigyw`. Do not open a PR unless asked.
 
 ## Dependencies and parallelism
 
