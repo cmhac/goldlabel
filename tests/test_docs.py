@@ -172,7 +172,8 @@ def test_every_session_starts_with_the_dev_setup_script():
     assert hook["command"] == '"$CLAUDE_PROJECT_DIR"/scripts/dev-setup.sh'
     script = ROOT / "scripts" / "dev-setup.sh"
     assert os.access(script, os.X_OK)
-    assert "uv sync --all-extras" in script.read_text()
+    assert "uv sync --extra s3 --extra pg --extra rds" in script.read_text()
+    assert "--all-extras" not in script.read_text().replace("Not --all-extras", "")
     assert "pre-commit install" in script.read_text()
 
 

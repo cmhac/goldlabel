@@ -14,7 +14,8 @@ fi
 hashes=.venv/.dev-setup.sha256
 if ! sha256sum --check --status "$hashes" 2>/dev/null; then
   rm -f "$hashes"
-  uv sync --all-extras >&2
+  # Not --all-extras: the "local" extra pulls torch and CUDA (~6 GB), which hangs fresh cloud sessions.
+  uv sync --extra s3 --extra pg --extra rds >&2
   sha256sum scripts/dev-setup.sh pyproject.toml uv.lock > "$hashes"
 fi
 
