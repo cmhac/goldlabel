@@ -277,11 +277,7 @@ GOLD_SECTION = (
     "### Gold labels\n\nPeople labelled items by hand, and we measured the classifier "
     'against their labels. The gold dataset "default" holds 2 samples:\n\n'
     "- dev: 3 rows, 2 labelled, 1 pending.\n"
-    "- test: 2 rows, 2 labelled, 0 pending.\n\n"
-    "By source, the 4 labelled rows split into 2 labelled in the labelling page, "
-    "1 imported (labelled elsewhere) and 1 with no record of how they were labelled. "
-    "1 row had a label or note revised after it was first set, and 1 row had a note. "
-    "The number of people who labelled was not recorded."
+    "- test: 2 rows, 2 labelled, 0 pending."
 )
 CLASSIFIER_SECTION = (
     "### Classifier\n\nThe classifier uses the model `openai:gpt-x`. "
@@ -459,10 +455,8 @@ def test_rows_imported_from_elsewhere_are_never_called_page_labels():
         log=None,
     )
     text = str(gl.get_methodology(gold=g))
-    assert (
-        "split into 0 labelled in the labelling page, 2 imported (labelled elsewhere) "
-        "and 0 with no record of how they were labelled"
-    ) in text
+    assert "| dev | a | text a | layoff | imported |" in text
+    assert "labelling page" not in text  # imported rows are never called page labels
 
 
 def test_no_evaluation_log_means_no_evaluation_claims():
@@ -653,7 +647,7 @@ def test_a_note_never_appears_in_the_text_with_the_table_on_or_off():
     g = write_gold(rows=rows, log=None)
     for table in (True, False):
         text = str(gl.get_methodology(gold=g, classifier=NEW, include_gold_table=table))
-        assert "TOPSECRET" not in text and "1 row had a note" in text
+        assert "TOPSECRET" not in text
 
 
 def test_results_from_another_classifier_withhold_the_prompt():

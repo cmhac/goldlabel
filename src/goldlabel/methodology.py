@@ -1,6 +1,5 @@
 """A plain-English methodology of an analysis, written from the objects and files it is given."""
 
-from collections import Counter
 from dataclasses import dataclass
 
 from goldlabel import _html
@@ -117,7 +116,7 @@ def _labels(t: Taxonomy) -> str:
 
 
 def _gold(gold: Gold) -> str:
-    """Write the paragraph about who labelled what, from the gold file.
+    """Write the paragraph about the gold dataset and its samples, from the gold file.
 
     Returns:
         str: The section text; no row text and no note text is copied.
@@ -131,21 +130,10 @@ def _gold(gold: Gold) -> str:
         f"{sum(1 for r in rs if r.labels)} labelled, {sum(1 for r in rs if not r.labels)} pending."
         for name, rs in samples.items()
     )
-    labelled = [r for r in rows if r.labels]
-    how = Counter(
-        r.labelled_by if r.labelled_by in ("goldlabel-ui", "imported") else "none"
-        for r in labelled
-    )
     return (
         "People labelled items by hand, and we measured the classifier against their "
         f'labels. The gold dataset "{gold.label}" holds {_count(len(samples), "sample")}:'
-        f"\n\n{bullets}\n\n"
-        f"By source, the {_count(len(labelled), 'labelled row')} split into "
-        f"{how['goldlabel-ui']} labelled in the labelling page, {how['imported']} imported "
-        f"(labelled elsewhere) and {how['none']} with no record of how they were labelled. "
-        f"{_count(sum(1 for r in rows if r.revisions), 'row')} had a label or note revised "
-        f"after it was first set, and {_count(sum(1 for r in rows if r.note), 'row')} had "
-        "a note. The number of people who labelled was not recorded."
+        f"\n\n{bullets}"
     )
 
 

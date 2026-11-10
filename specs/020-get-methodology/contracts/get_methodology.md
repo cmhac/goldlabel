@@ -42,8 +42,6 @@ People labelled items by hand, and we measured the classifier against their labe
 
 - {name}: {rows} rows, {labelled} labelled, {pending} pending.
 
-By source, the {n} labelled rows split into {a} labelled in the labelling page, {b} imported (labelled elsewhere) and {c} with no record of how they were labelled. {r} rows had a label or note revised after it was first set, and {m} rows had a note. The number of people who labelled was not recorded.
-
 ### Classifier
 The classifier uses the model `{model}`. We evaluated {p} prompts against the gold labels.
 
