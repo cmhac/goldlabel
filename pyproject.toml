@@ -48,8 +48,32 @@ asyncio_mode = "auto"
 addopts = "-n auto"
 testpaths = ["tests"]
 
+[tool.ruff.lint]
+# Public docstrings are for a person with no agent: D (Google style), plus Returns and Raises,
+# which are preview rules in this ruff; explicit-preview-rules turns on only the codes named here.
+extend-select = ["D", "DOC201", "DOC501"]
+preview = true
+explicit-preview-rules = true
+ignore = [
+    "D105", "D107",  # dunder methods; constructor arguments live in the class docstring
+    # preview mode also switches on ruff's preview default rules; these three flagged 20 old lines
+    # (16 test regexes, 3 noqa comments, 1 ternary) that this change does not touch
+    "RUF043", "RUF100", "FURB110",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
 [tool.ruff.lint.per-file-ignores]
-"examples/**" = ["B018"]  # a notebook cell ends with the value it displays
+"examples/**" = ["B018", "D", "DOC"]  # a notebook cell ends with the value it displays
+"tests/**" = ["D", "DOC"]
+"scripts/**" = ["D", "DOC"]
+"specs/**" = ["D", "DOC"]
+# private modules: their names start with an underscore (`_label.py` holds the exported `label`, so it is checked)
+"src/goldlabel/_html.py" = ["D", "DOC"]
+"src/goldlabel/_frame.py" = ["D", "DOC"]
+"src/goldlabel/_sync.py" = ["D", "DOC"]
+"src/goldlabel/_gold_rule.py" = ["D", "DOC"]
 
 [tool.ty.src]
 # specs: design handoff files import textual, which is no longer a dependency.

@@ -1,3 +1,5 @@
+"""What model calls cost: the answer cache, the ledger of live calls, and the running total (`goldlabel.cost()`)."""
+
 import hashlib
 import json
 import os
@@ -21,18 +23,32 @@ _LEDGER_LOCK = (
 
 
 def cache_dir(cache) -> Path | Literal[False]:
+    """Work out the cache folder from a `cache` argument.
+
+    Returns:
+        Path | Literal[False]: The folder given, `<settings.root>/cache` for None, or False for no cache.
+    """
     if cache is False:
         return False
     return Path(cache) if cache is not None else resolve(None, "cache")
 
 
 def cache_key(model: str, prompt: str, text: str) -> str:
+    """Make the cache key for one model call: the same model, prompt and text give the same key.
+
+    Returns:
+        str: A hex digest.
+    """
     # JSON-encoding the tuple keeps ("ab", "c") and ("a", "bc") distinct
     return hashlib.sha256(json.dumps([model, prompt, text]).encode()).hexdigest()
 
 
 def cache_get(cache, key: str) -> dict | None:
-    """Return {"output": ..., "usage": {...}} or None. A hit must not be recorded as cost or timing."""
+    """Look up a cached answer. A hit must not be recorded as cost or timing.
+
+    Returns:
+        dict | None: `{"output": ..., "usage": {...}}`, or None when there is none (or no cache).
+    """
     directory = cache_dir(cache)
     if directory is False:
         return None
@@ -57,7 +73,11 @@ def cache_put(cache, key: str, output, usage: RunUsage | RequestUsage) -> None:
 
 
 def messages_dollars(messages: list[ModelMessage]) -> float | None:
-    """Dollars for the model responses in `messages` (use `result.new_messages()`); None if any price is unknown."""
+    """Price the model responses in `messages` (use `result.new_messages()`).
+
+    Returns:
+        float | None: Dollars, or None if any price is unknown.
+    """
     total = Decimal(0)
     for message in messages:
         if isinstance(message, ModelResponse):
@@ -69,6 +89,11 @@ def messages_dollars(messages: list[ModelMessage]) -> float | None:
 
 
 def embedding_dollars(result: EmbeddingResult) -> float | None:
+    """Price an embedding call.
+
+    Returns:
+        float | None: Dollars, or None when the model's price is unknown.
+    """
     try:
         return float(result.cost().total_price)
     except LookupError:
@@ -114,20 +139,32 @@ def record(
 
 
 def total(cache) -> tuple[float, bool]:
-    """(dollars over models with a known price, unknown flag). If the flag is set the dollars are only a lower bound; show "?"."""
+    """Total the ledger.
+
+    Returns:
+        tuple[float, bool]: Dollars over the models with a known price, and an unknown flag.
+        If the flag is set the dollars are only a lower bound; show "?".
+    """
     models = _read(cache)["models"].values()
     known = sum(m["dollars"] for m in models if m["dollars"] is not None)
     return known, any(m["dollars"] is None for m in models)
 
 
 def breakdown(cache) -> dict[str, dict]:
+    """Read the ledger's per-model totals.
+
+    Returns:
+        dict[str, dict]: For each model: calls, input and output tokens, and dollars (None if unknown).
+    """
     return _read(cache)["models"]
 
 
 def per_call_dollars(cache, model: str) -> tuple[float | None, bool]:
-    """(average dollars per recorded live call, whether any call is recorded).
+    """Average the cost of a recorded live call of `model`.
 
-    None with True: the price is unknown; with False: there is no sample to price from.
+    Returns:
+        tuple[float | None, bool]: The average dollars per call and whether any call is
+        recorded. None with True: the price is unknown; with False: there is no sample to price from.
     """
     entry = breakdown(cache).get(model)
     if not entry or not entry["calls"]:
@@ -149,13 +186,27 @@ def record_timing(cache, label: str, n_items: int, seconds: float) -> None:
 
 
 def items_per_second(cache, label: str | None = None) -> float | None:
+    """Work out how fast live calls have run, from the recorded timings.
+
+    Returns:
+        float | None: Items per second, or None when nothing is recorded.
+    """
     rows = [t for t in _read(cache)["timings"] if label is None or t["label"] == label]
     seconds = sum(t["seconds"] for t in rows)
     return sum(t["n_items"] for t in rows) / seconds if seconds > 0 else None
 
 
 class Cost:
-    """The running spend from a ledger. `total` is None (shown as `?`) when any recorded price is unknown."""
+    """The money spent on live model calls, read from the ledger in the cache folder.
+
+    You get one from `goldlabel.cost()`. Cached answers are free and are not counted. An unknown
+    price is shown as `?`, never as $0.
+
+    Attributes:
+        by_model: For each model: calls, input and output tokens, and dollars (None if unknown).
+        unknown: True when any recorded price is unknown.
+        total: The total dollars, or None (shown as `?`) when any recorded price is unknown.
+    """
 
     def __init__(self, by_model: dict[str, dict]):
         self.by_model = by_model
@@ -208,5 +259,15 @@ def _dollars(value: float | None) -> str:
 
 
 def cost(cache=None) -> Cost:
-    """The total and per-model breakdown recorded in the cache directory's ledger."""
+    """Show what live model calls have cost so far.
+
+    Reads the ledger (`cost.json`) in the cache folder; it reads no other file and makes no call.
+
+    Args:
+        cache: The cache folder: a path, None for `<settings.root>/cache`, or False for none
+            (an empty ledger).
+
+    Returns:
+        Cost: The total and the per-model breakdown.
+    """
     return Cost(breakdown(cache))

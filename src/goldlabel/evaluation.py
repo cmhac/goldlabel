@@ -1,3 +1,5 @@
+"""Evaluations: scoring a classifier against gold labels, the log of evaluations, and the band report."""
+
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
@@ -26,7 +28,26 @@ def _goldlabel_version() -> str | None:
 
 @dataclass
 class Evaluation:
-    """`disagreements` rows are `{id, text, gold, predicted, reasoning}`; `predicted` is None for an item that failed."""
+    """The result of scoring a classifier against a gold sample.
+
+    You get one from `Classifier.evaluate`. Printing it shows the score, a per-label table and
+    the rows the model got wrong.
+
+    Attributes:
+        metrics: All the scores: exact match, macro and micro F1, and each label's precision,
+            recall and F1.
+        metric: The name of the headline score: "accuracy", "exact_match", "macro_f1" or "micro_f1".
+        target: The score the classifier should reach, or None.
+        n: How many labelled rows were scored.
+        skipped_pending: How many rows were skipped because nobody had labelled them yet.
+        sources: How many scored rows were labelled in the labelling page ("goldlabel-ui"),
+            imported ("imported") or carry no stamp ("unstamped").
+        digest: The classifier's `digest` when it was scored.
+        disagreements: The rows where the model and the people differ, as `{id, text, gold,
+            predicted, reasoning}`; `predicted` is None for an item that failed.
+        labels: Every label, including `off_topic`.
+        samples: The names of the samples that were scored.
+    """
 
     metrics: Metrics
     metric: str
@@ -44,13 +65,37 @@ class Evaluation:
     samples: tuple[str, ...] = ()  # the names of the samples it scored
 
     def score(self, name: str | None = None) -> float:
+        """Return one score as a number between 0 and 1.
+
+        Args:
+            name: "accuracy" or "exact_match" (the same number), "macro_f1" or "micro_f1";
+                None gives the headline score, `metric`.
+
+        Returns:
+            float: The score. Use `passed` to compare the headline score with the target.
+        """
         return target_value(self.metrics, name or self.metric)
 
     @property
     def passed(self) -> bool | None:
+        """Whether the headline score reaches the target.
+
+        Returns:
+            bool | None: True when `score()` is at least `target`, False when it is below it,
+            and None when no target was set.
+        """
         return None if self.target is None else self.score() >= self.target
 
     def write(self, path) -> None:
+        """Save this evaluation as a JSON file.
+
+        This is a separate copy for you to keep or share. It is not the log: `evaluate` has
+        already appended to `evals.jsonl` beside the gold file. An existing file at `path` is
+        overwritten and missing folders are created.
+
+        Args:
+            path: The JSON file to write.
+        """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         data = {
@@ -68,9 +113,19 @@ class Evaluation:
         path.write_text(json.dumps(data, indent=2) + "\n")
 
     def disagreements_to_polars(self):
+        """Return the disagreements as a polars DataFrame.
+
+        Returns:
+            polars.DataFrame: One row per disagreement, with `id`, `text`, `gold`, `predicted` and `reasoning`.
+        """
         return _frame.to_polars(self.disagreements)
 
     def disagreements_to_pandas(self):
+        """Return the disagreements as a pandas DataFrame.
+
+        Returns:
+            pandas.DataFrame: One row per disagreement, with `id`, `text`, `gold`, `predicted` and `reasoning`.
+        """
         return _frame.to_pandas(self.disagreements)
 
     def _head(self) -> list[str]:
@@ -143,13 +198,21 @@ class Evaluation:
 
 
 def _rows_digest(rows) -> str:
-    """What the evaluation saw of the gold rows: their ids and labels, in a fixed order."""
+    """Fingerprint what the evaluation saw of the gold rows: their ids and labels, in a fixed order.
+
+    Returns:
+        str: A hex digest.
+    """
     data = sorted((r.id, sorted(r.labels)) for r in rows if r.labels)
     return hashlib.sha256(json.dumps(data).encode()).hexdigest()
 
 
 def _history(log: Path, gold: Path) -> list[dict]:
-    """The evaluation lines of `log` that scored samples of the gold file `gold`."""
+    """Read the evaluation lines of `log` that scored samples of the gold file `gold`.
+
+    Returns:
+        list[dict]: The matching lines; a damaged line is skipped.
+    """
     if not log.exists():
         return []
     lines = []
@@ -171,7 +234,11 @@ def _history(log: Path, gold: Path) -> list[dict]:
 
 
 def _counts(history: list[dict], names) -> tuple[int, int]:
-    """Evaluations of exactly these samples, and how many distinct prompts they used."""
+    """Count the evaluations of exactly these samples.
+
+    Returns:
+        tuple[int, int]: How many evaluations, and how many distinct prompts they used.
+    """
     mine = [r for r in history if r["samples"] == list(names)]
     return len(mine), len({r["digest"] for r in mine})
 
@@ -184,6 +251,12 @@ async def _aevaluate(
     Pending rows (no labels) are skipped and counted. Gold labels that are invalid for the
     taxonomy raise before any call. `target` adds PASS/FAIL to the repr. Every evaluation is
     appended to `evals.jsonl` beside the gold file, unless the identical one is already there.
+
+    Returns:
+        Evaluation: The scores and the disagreements.
+
+    Raises:
+        ValueError: A labelled row uses a label that is not in the taxonomy.
     """
     taxonomy = clf.taxonomy
     every = sample.rows
@@ -267,16 +340,34 @@ async def _aevaluate(
 
 @dataclass
 class BandReport:
-    """`rows` are `{band, n, off_topic, rate}` for the bands that have candidates; failed items are in `errors`, not `n`."""
+    """The off-topic rate in each similarity band; you get one from `Classifier.band_sample`.
+
+    Attributes:
+        rows: `{band, n, off_topic, rate}` for each band that has candidates: `n` items were
+            classified, `off_topic` of them were off topic, `rate` is the share. Failed items are
+            counted in `errors`, not in `n`.
+        cost: Dollars spent on the live calls, or None if any price is unknown (never 0).
+        errors: How many items failed.
+    """
 
     rows: list[dict]
     cost: float | None  # None: a price is unknown (never 0)
     errors: int = 0
 
     def to_polars(self):
+        """Return the rows as a polars DataFrame.
+
+        Returns:
+            polars.DataFrame: One row per band.
+        """
         return _frame.to_polars(self.rows)
 
     def to_pandas(self):
+        """Return the rows as a pandas DataFrame.
+
+        Returns:
+            pandas.DataFrame: One row per band.
+        """
         return _frame.to_pandas(self.rows)
 
     def _repr_html_(self) -> str:
@@ -304,6 +395,13 @@ async def _aband_sample(clf: Classifier, candidates, *, per_band=30) -> BandRepo
 
     The rows of a band are picked in the id-fixed order (`order_by_id`), so a rerun picks the same
     ones. Off-topic means the predicted labels are exactly `{off_topic}`. Nothing is written.
+
+    Returns:
+        BandReport: The off-topic rate of each band that has candidates.
+
+    Raises:
+        ValueError: `per_band` is not a whole number of at least 1, or `candidates` was not built
+            from seeds.
     """
     if isinstance(per_band, bool) or not isinstance(per_band, int) or per_band < 1:
         raise ValueError(

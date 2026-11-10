@@ -39,6 +39,11 @@ POINTERS = """When working with the `goldlabel` library (content analysis over a
 
 
 def steering_text() -> str:
+    """Build the always-on rules file for Kiro: the gold rule, then the goldlabel pointers.
+
+    Returns:
+        str: The file's text.
+    """
     return f"---\ninclusion: always\n---\n\n{GOLD_RULE_FULL}\n{POINTERS}"
 
 
@@ -90,10 +95,35 @@ def _show(path: Path, base: Path, home: Path) -> str:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="goldlabel", description="goldlabel agent skills")
+    """Run the `goldlabel` command: `install` copies the agent skills, `label` opens the labelling page.
+
+    `goldlabel install claude|codex|copilot|kiro|all` copies the skills into the folder that
+    agent reads (add `--global` for your home folder, `--dir PATH` for any other agent,
+    `--dry-run` to preview, `--force` to replace skills that differ). `goldlabel label [NAME]`
+    serves the labelling page for the gold datasets in the storage folder until you press
+    Ctrl-C. Neither command sets or changes a label by itself.
+
+    Args:
+        argv: The command-line words after `goldlabel`; None reads them from the terminal.
+
+    Returns:
+        int: The exit code: 0 on success, 1 when something failed or was refused.
+    """
+    ap = argparse.ArgumentParser(
+        prog="goldlabel",
+        description="goldlabel: `install` copies the AI agent skills into an agent's skills folder; "
+        "`label` opens the page where people label rows.",
+    )
     sub = ap.add_subparsers(dest="command", required=True)
-    ins = sub.add_parser("install", help="install the agent skills for an agent")
-    ins.add_argument("agents", nargs="*", help="claude, codex, copilot, kiro or all")
+    ins = sub.add_parser(
+        "install",
+        help="copy the goldlabel skills into the folder an AI agent reads (optional)",
+    )
+    ins.add_argument(
+        "agents",
+        nargs="*",
+        help="which agent to install for: claude, codex, copilot, kiro or all",
+    )
     ins.add_argument(
         "--global", dest="user", action="store_true", help="user-wide, not this project"
     )
@@ -106,19 +136,21 @@ def main(argv=None) -> int:
     )
     lab = sub.add_parser(
         "label",
-        help="open the labelling page for the gold datasets of a storage folder",
+        help="open the labelling page, in your browser, for the gold datasets of a storage folder",
     )
     lab.add_argument(
         "name",
         nargs="?",
         metavar="NAME",
-        help="open the dataset made with name=NAME",
+        help="open the dataset that was made with name=NAME in your notebook; without it, every dataset is served",
     )
     lab.add_argument(
         "--dir", help="the storage folder (default: GOLDLABEL_DIR or .goldlabel)"
     )
     lab.add_argument(
-        "--port", type=int, help="the port to listen on (default: a free one)"
+        "--port",
+        type=int,
+        help="the port for the page to listen on (default: any free port)",
     )
     args = ap.parse_args(argv)
     if args.command == "label":

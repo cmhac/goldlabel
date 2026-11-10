@@ -1,3 +1,5 @@
+"""Candidate items for classification: from seed phrases (by similarity), keywords, or the whole corpus."""
+
 import asyncio
 import csv
 import hashlib
@@ -40,18 +42,40 @@ BANDS = [0.60, 0.625, 0.65, 0.675, 0.70, 0.725, 0.75]
 
 
 def read_seeds(path) -> list[str]:
-    """Seed phrases from a seeds.csv: first column, blank lines and an optional `seed` header skipped."""
+    """Read seed phrases from a CSV file.
+
+    Takes the first column, skips blank lines and an optional header cell reading `seed`.
+
+    Args:
+        path: The CSV file.
+
+    Returns:
+        list[str]: The seed phrases, in file order.
+    """
     rows = csv.reader(io.StringIO(Path(path).read_text()))
     seeds = [r[0].strip() for r in rows if r and r[0].strip()]
     return seeds[1:] if seeds and seeds[0].lower() == "seed" else seeds
 
 
 def seeds_digest(seeds: list[str]) -> str:
+    """Fingerprint a list of seed phrases, to tell whether a saved candidate list used the same ones.
+
+    Returns:
+        str: A hex digest that changes when any seed, or their order, changes.
+    """
     return hashlib.sha256(json.dumps(seeds).encode()).hexdigest()
 
 
 def band_of(similarity: float) -> int:
-    """Index into BANDS of the band containing `similarity` (lower-inclusive); -1 below the floor."""
+    """Find which similarity band a score falls in.
+
+    Args:
+        similarity: A similarity score.
+
+    Returns:
+        int: The position in `BANDS` of the band containing it (a band includes its lower
+        edge), or -1 when it is below the lowest band.
+    """
     return max((i for i, edge in enumerate(BANDS) if similarity >= edge), default=-1)
 
 
@@ -67,13 +91,32 @@ CAPPED_WARNING = "results were capped, so some items above the floor may be miss
 
 
 def order_by_id(rows, salt: str = "") -> list[dict]:
-    """Rows in an order fixed by each id (and `salt`): the same on every machine, unmoved by other rows."""
+    """Put rows in an order that depends only on each row's id (and `salt`).
+
+    The order is the same on every machine and does not change when other rows are added or
+    removed, which is how a sample is drawn without a random seed.
+
+    Args:
+        rows: Dicts with an `id`.
+        salt: Text mixed into the order, so different uses get different orders.
+
+    Returns:
+        list[dict]: The rows, reordered.
+    """
     return sorted(
         rows, key=lambda r: hashlib.sha256(f"{salt}\0{r['id']}".encode()).hexdigest()
     )
 
 
 def band_counts(candidates: list[dict]) -> list[int]:
+    """Count rows in each similarity band.
+
+    Args:
+        candidates: Rows with a `max_similarity`.
+
+    Returns:
+        list[int]: One count per band of `BANDS`, lowest band first; rows below the floor are not counted.
+    """
     counts = [0] * len(BANDS)
     for c in candidates:
         if (i := band_of(c["max_similarity"])) >= 0:
@@ -82,16 +125,36 @@ def band_counts(candidates: list[dict]) -> list[int]:
 
 
 def top_seeds(rows: list[dict], threshold: float, n: int = 10) -> list[tuple[str, int]]:
-    """Seeds ranked by items won among rows at or above `threshold` (best_seed is each item's argmax)."""
+    """Rank seeds by how many items they are the best match for.
+
+    Args:
+        rows: Rows with `max_similarity` and `best_seed`.
+        threshold: Only rows with a `max_similarity` at or above this count.
+        n: How many seeds to return.
+
+    Returns:
+        list[tuple[str, int]]: `(seed, items won)` pairs, most items first.
+    """
     won = Counter(r["best_seed"] for r in rows if r["max_similarity"] >= threshold)
     return won.most_common(n)
 
 
 @dataclass(frozen=True)
 class Candidates:
-    """Candidate items. `source` says where they came from: "seeds" (rows `{id, text, max_similarity,
-    best_seed}`, best first), "keywords" (`{id, text, terms_matched, matches}`, best first) or
-    "all" (`{id, text}`, corpus order). Floor, digest and model are None outside seeds."""
+    """The items chosen from a corpus for classification, with how they were chosen.
+
+    You get one from `get_candidates`, or load a saved one with `Candidates.read`.
+
+    Attributes:
+        rows: One dict per item. The fields depend on `source` (below).
+        capped: True when a limit in the search backend may have hidden items above the floor.
+        floor: The lowest similarity kept; None unless the source is "seeds".
+        seeds_digest: A fingerprint of the seed phrases used; None unless the source is "seeds".
+        embedding_model: The model that embedded the seeds; None unless the source is "seeds".
+        source: Where the items came from. "seeds": `{id, text, max_similarity, best_seed}`,
+            most similar first. "keywords": `{id, text, terms_matched, matches}`, best first.
+            "all": `{id, text}`, in the corpus's own order.
+    """
 
     rows: list[dict]
     capped: bool = False  # a backend cap may have hidden hits above the floor
@@ -108,24 +171,83 @@ class Candidates:
             )
 
     def above(self, t: float) -> "Candidates":
+        """Keep only the candidates whose similarity is at least `t`.
+
+        This candidate list is unchanged; nothing is written to a file.
+
+        Args:
+            t: The lowest `max_similarity` to keep.
+
+        Returns:
+            Candidates: A new, shorter list.
+
+        Raises:
+            ValueError: The list was not built from seeds, so it has no similarity scores.
+        """
         self._need_seeds("above")
         return replace(self, rows=[r for r in self.rows if r["max_similarity"] >= t])
 
     def bands(self) -> list[int]:
+        """Count the candidates in each similarity band.
+
+        The bands start at 0.60 and rise in steps of 0.025; the last one, 0.75+, is open-ended.
+        This is what the bar chart shown for a candidate list is drawn from.
+
+        Returns:
+            list[int]: One count per band, lowest first.
+
+        Raises:
+            ValueError: The list was not built from seeds, so it has no similarity scores.
+        """
         self._need_seeds("bands")
         return band_counts(self.rows)
 
     def sample(self, n: int, seed=None, exclude: Collection[str] = ()) -> "Candidates":
-        """`n` rows without replacement (all that remain if fewer), deterministic for a seed."""
+        """Pick `n` random candidates without repeats.
+
+        Gives every remaining candidate if fewer than `n` are left. The same `seed` always gives
+        the same pick. This list is unchanged; nothing is written to a file.
+
+        Args:
+            n: How many to pick.
+            seed: Seeds the random choice; None for a different pick each time.
+            exclude: Ids to leave out of the pool.
+
+        Returns:
+            Candidates: A new list of the picked rows.
+        """
         pool = [r for r in self.rows if r["id"] not in set(exclude)]
         return replace(self, rows=random.Random(seed).sample(pool, min(n, len(pool))))
 
     def top_seeds(self, threshold: float, n: int = 10) -> list[tuple[str, int]]:
+        """Show which seed phrases found the most candidates.
+
+        Each candidate counts for the one seed it is most similar to.
+
+        Args:
+            threshold: Only candidates with a `max_similarity` at or above this count.
+            n: How many seeds to return.
+
+        Returns:
+            list[tuple[str, int]]: `(seed, number of candidates)` pairs, most first.
+
+        Raises:
+            ValueError: The list was not built from seeds, so it has no similarity scores.
+        """
         self._need_seeds("top_seeds")
         return top_seeds(self.rows, threshold, n)
 
     @classmethod
     def read(cls, path) -> "Candidates":
+        """Load a candidate list saved by `write` (or by `get_candidates`).
+
+        Args:
+            path: The `.jsonl` file. Its settings (floor, seed fingerprint and so on) are read
+                from the `.meta.json` file beside it when there is one.
+
+        Returns:
+            Candidates: The saved rows and settings.
+        """
         path = Path(path)
         rows = [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
         meta_path = path.with_suffix(".meta.json")
@@ -140,6 +262,15 @@ class Candidates:
         )
 
     def write(self, path) -> None:
+        """Save the candidates so they can be reloaded with `Candidates.read`.
+
+        Writes the rows as one JSON object per line to `path`, and the settings to a
+        `.meta.json` file beside it. Existing files of those names are overwritten and missing
+        folders are created. This is only the candidate list; it never touches a gold file.
+
+        Args:
+            path: The `.jsonl` file to write.
+        """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("".join(json.dumps(r) + "\n" for r in self.rows))
@@ -154,9 +285,19 @@ class Candidates:
         path.with_suffix(".meta.json").write_text(json.dumps(meta))
 
     def to_polars(self):
+        """Return the rows as a polars DataFrame.
+
+        Returns:
+            polars.DataFrame: One row per candidate.
+        """
         return _frame.to_polars(self.rows)
 
     def to_pandas(self):
+        """Return the rows as a pandas DataFrame.
+
+        Returns:
+            pandas.DataFrame: One row per candidate.
+        """
         return _frame.to_pandas(self.rows)
 
     def _headline(self) -> str:
@@ -211,7 +352,14 @@ def _model_name(embedder: Embedder) -> str:
 async def embed_seeds(
     seeds: list[str], embedder: Embedder, model: str, cache=None
 ) -> list[list[float]]:
-    """Query embeddings, one per seed. Cache hits cost nothing; live calls are recorded."""
+    """Turn each seed phrase into an embedding vector, for comparing with the corpus.
+
+    Seeds already in the cache cost nothing; the others are sent to the embedding model and their
+    cost is recorded.
+
+    Returns:
+        list[list[float]]: One vector per seed, in order.
+    """
     vectors = []
     for seed in seeds:
         key = cache_key(model, "embed_query", seed)
@@ -228,7 +376,11 @@ async def embed_seeds(
 
 
 def _items(corpus, guard: bool = False, limit: int | None = None, match=None):
-    """(id, text) of every item in the corpus's own order, as a generator to close."""
+    """Read every item of the corpus in its own order, as a generator to close.
+
+    Returns:
+        Iterator[tuple]: `(id, text)` pairs.
+    """
     if isinstance(corpus, Table):
         return ((r["id"], r["text"]) for r in table_rows(corpus))
     if isinstance(corpus, PgCorpus):
@@ -237,8 +389,19 @@ def _items(corpus, guard: bool = False, limit: int | None = None, match=None):
 
 
 def _compile(keywords, regex: bool, uncompiled: list | None = None) -> list[re.Pattern]:
-    """Terms as patterns. With `uncompiled`, a string Python cannot compile is added to it and
-    skipped instead of raising (server-side regexes are in the database's syntax)."""
+    """Turn keyword terms into compiled patterns.
+
+    With `uncompiled`, a string Python cannot compile is added to it and skipped instead of
+    raising (server-side regexes are in the database's syntax).
+
+    Returns:
+        list[re.Pattern]: One pattern per term.
+
+    Raises:
+        ValueError: A term is blank or would match the empty string.
+        TypeError: A term is neither a string nor a compiled pattern.
+        re.error: A string is not a valid regular expression and `uncompiled` is None.
+    """
     patterns = []
     for term in keywords:
         if isinstance(term, re.Pattern):
@@ -276,9 +439,15 @@ def _compile(keywords, regex: bool, uncompiled: list | None = None) -> list[re.P
 def _rank(
     items, patterns: list[re.Pattern], limit: int | None, keep_zero: bool = False
 ) -> list[dict]:
-    """Items matching any pattern, best first: distinct patterns matched, then total matches, then
-    corpus order. With a limit only that many are held at a time. `keep_zero` also keeps items
-    that match none (the database said they match), last."""
+    """Rank the items matching any pattern, best first.
+
+    Order: distinct patterns matched, then total matches, then corpus order. With a limit only
+    that many are held at a time. `keep_zero` also keeps items that match none (the database
+    said they match), last.
+
+    Returns:
+        list[dict]: `{id, text, terms_matched, matches}` rows.
+    """
 
     def hits():
         for index, (id, text) in enumerate(items):
@@ -324,20 +493,44 @@ async def aget_candidates(
     out=None,
     cache=None,
 ) -> Candidates:
-    """The corpus's candidate items, filtered by at most one of `seeds` or `keywords`.
+    """Choose the items of a corpus to classify (async).
 
-    No filter: every item in the corpus's order. `seeds`: the items whose maximum similarity to
-    any seed is at least `floor` (None: 0.60), best first; ties go to the earlier seed.
-    `keywords`: the items containing any term, best first (distinct terms matched, then total
-    matches, then corpus order). A term is a plain string (literal, case-insensitive) or a
-    compiled `re.Pattern` that keeps its own flags; `regex=True` makes strings patterns, as written.
-    `server_side=True` (a PgCorpus only) lets the database do the matching: plain terms with ILIKE,
-    regex strings with `~` in Postgres syntax (so no compiled patterns); ranking stays here.
+    Use at most one filter. With none, every item is returned in the corpus's own order. With
+    `seeds`, the items similar to your example phrases are returned, most similar first (this
+    calls an embedding model for seeds not in the cache, which costs money). With `keywords`,
+    the items containing any of the terms are returned, best match first (distinct terms
+    matched, then total matches, then corpus order). Nothing is written to the corpus.
 
-    `embedder` (a pydantic-ai model string or an `Embedder`), `floor` and `cache` (a directory,
-    None for `<settings.root>/cache`, False for none) belong to `seeds`. `limit` keeps the first N
-    items, or the best N. `out`: a path writes the list there (+ `.meta.json`), False writes
-    nothing, None writes `<settings.root>/candidates.jsonl` for seeds only.
+    Args:
+        corpus: A `Table`, `S3Corpus` or `PgCorpus`; `where=` on it has already limited what is seen.
+        seeds: Example phrases. Keep items whose highest similarity to any seed is at least
+            `floor`; on a tie the earlier seed gets the credit.
+        embedder: With `seeds`, the model that embeds them: a "provider:model" string or an
+            `Embedder`. Required with `seeds`; must match how the corpus was embedded.
+        floor: With `seeds`, the lowest similarity kept; None means 0.60.
+        keywords: Terms to look for. A string is matched literally, ignoring case; a compiled
+            `re.Pattern` keeps its own flags.
+        regex: With `keywords`, treat each string as a regular expression, as written.
+        server_side: With `keywords` on a `PgCorpus`, let the database do the matching (plain
+            terms with ILIKE, regular-expression strings with `~` in Postgres syntax, no compiled
+            patterns). Ranking is still done here, so it can differ slightly; a warning says when.
+        limit: Keep only the first N items, or the best N when ranked. At least 1.
+        out: Where to save the list as JSONL (with a `.meta.json` beside it). False saves
+            nothing. None saves to `<settings.root>/candidates.jsonl` for seeds only, and
+            nothing for keywords or the whole corpus.
+        cache: With `seeds`, where seed embeddings are remembered: a directory, None for
+            `<settings.root>/cache`, or False for none.
+
+    Returns:
+        Candidates: The chosen items and how they were chosen.
+
+    Raises:
+        TypeError: `corpus` is not a corpus, or `seeds` or `keywords` is a single string, or a
+            keyword is neither a string nor a pattern.
+        ValueError: Both `seeds` and `keywords` were given, a list is empty, an option is used
+            without the filter it belongs to, `server_side` is used without a `PgCorpus`, a
+            keyword is blank or matches the empty string, `embedder` is missing with `seeds`,
+            or `limit` is below 1.
     """
     if not isinstance(corpus, (Table, S3Corpus, PgCorpus)):
         raise TypeError(
@@ -457,7 +650,30 @@ def get_candidates(
     out=None,
     cache=None,
 ) -> Candidates:
-    """`aget_candidates` for scripts and notebooks; also works inside a running event loop."""
+    """Choose the items of a corpus to classify, for scripts and notebooks.
+
+    The same as `aget_candidates` (see it for what each argument means and for the cost of
+    using `seeds`), and also works inside a running event loop.
+
+    Args:
+        corpus: A `Table`, `S3Corpus` or `PgCorpus`.
+        seeds: Example phrases to find similar items for.
+        embedder: The model that embeds the seeds; required with `seeds`.
+        floor: The lowest similarity kept; None means 0.60.
+        keywords: Terms to look for.
+        regex: Treat keyword strings as regular expressions.
+        server_side: Let a Postgres database do the keyword matching.
+        limit: Keep only the first or best N items.
+        out: Where to save the list; False for nowhere.
+        cache: Where seed embeddings are remembered.
+
+    Returns:
+        Candidates: The chosen items and how they were chosen.
+
+    Raises:
+        TypeError: As `aget_candidates`.
+        ValueError: As `aget_candidates`.
+    """
     return run(
         aget_candidates(
             corpus,

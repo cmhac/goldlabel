@@ -1,3 +1,5 @@
+"""The corpora goldlabel reads: a `Table` of rows, an S3 Vectors index, or a pgvector table. Nothing here writes to them."""
+
 import operator
 import os
 import re
@@ -25,12 +27,28 @@ MB = 1024 * 1024
 
 @dataclass(frozen=True, eq=False)
 class Table:
-    """Items in a table: a `.csv`, `.parquet` or `.jsonl` path, a list of row dicts, or a pandas or
-    polars DataFrame. `id_column` None means the row's position. Seed search also needs
-    `vector_column` (a list of numbers per row; not in a CSV) and `embedding_model`, the model
-    that made them; keyword search and the whole corpus need neither. `where` is a polars
-    expression on the source's columns: only rows where it is true are read (a CSV's values are
-    all text, so cast a number: `pl.col("year").cast(pl.Int64) >= 2024`)."""
+    """A corpus held in a file or in memory: the items to analyse, one per row.
+
+    Read-only: the source is never changed. Use it with `get_candidates`.
+
+    Args:
+        source: A `.csv`, `.parquet` or `.jsonl` path, a list of row dicts, or a pandas or
+            polars DataFrame.
+        text_column: The column holding each item's text (a non-empty string).
+        id_column: The column holding each item's id (unique, not empty); None uses the row's
+            position, counting from 0.
+        vector_column: The column of embeddings (a list of numbers per row). Needed only to
+            search by seeds; a CSV cannot hold one.
+        embedding_model: The model that made those embeddings ("provider:model"). Needed only
+            to search by seeds, and it must be the embedder you give `get_candidates`.
+        where: A polars expression on the source's columns: only rows where it is true are
+            read. A CSV's values are all text, so cast numbers first, for example
+            `pl.col("year").cast(pl.Int64) >= 2024`.
+
+    Raises:
+        ValueError: `text_column` is empty, or a CSV is given a `vector_column`.
+        TypeError: `where` is not a polars expression.
+    """
 
     source: Any
     text_column: str = "text"
@@ -63,10 +81,18 @@ class Table:
 
 
 def table_rows(table: Table, with_vectors: bool = False) -> list[dict]:
-    """The table as `{id, text}` rows in table order (plus `vector` when asked for), checked.
+    """Read the table as `{id, text}` rows in table order (plus `vector` when asked for), checked.
 
-    Every source is read with polars. Raises ValueError naming the column or the first offending
-    row (counting from 0); rows are never dropped, repaired or invented."""
+    Every source is read with polars. Rows are never dropped, repaired or invented.
+
+    Returns:
+        list[dict]: One dict per row, with string ids.
+
+    Raises:
+        ValueError: The source cannot be read, the `where` filter fails, or a row has a missing
+            column, an empty text or id, or a repeated id. The message names the column or the
+            first offending row (counting from 0).
+    """
     import polars as pl
 
     src = table.source
@@ -130,8 +156,14 @@ def table_rows(table: Table, with_vectors: bool = False) -> list[dict]:
 
 
 def check_table_for_seeds(table: Table, embedding_model: str) -> None:
-    """Refuse a table that cannot answer a seed search. Cheap, so callers run it before they
-    spend money embedding the seeds."""
+    """Refuse a table that cannot answer a seed search.
+
+    Cheap, so callers run it before they spend money embedding the seeds.
+
+    Raises:
+        ValueError: The table has no `vector_column` or `embedding_model`, or its model differs
+            from `embedding_model`.
+    """
     if table.vector_column is None:
         raise ValueError(
             "the table has no embedding column; seed search needs Table(vector_column=...) "
@@ -151,8 +183,16 @@ def check_table_for_seeds(table: Table, embedding_model: str) -> None:
 def search_table(
     table: Table, vectors, floor: float, embedding_model: str
 ) -> tuple[list[list[tuple[str, str, float]]], bool]:
-    """One pass over the table for every seed: ([(id, text, similarity) per seed], False), best
-    first, all with similarity >= floor. Never capped."""
+    """Compare every seed with the table in one pass.
+
+    Returns:
+        tuple: `([(id, text, similarity) per seed], False)`, best first, all with similarity at
+        least `floor`. A table is never capped, so the second value is always False.
+
+    Raises:
+        ValueError: The table cannot answer a seed search, or a row's vector is not a list of
+            numbers of the same length as the others and as the seeds' vectors.
+    """
     check_table_for_seeds(table, embedding_model)
     rows = table_rows(table, with_vectors=True)
     if not rows:
@@ -200,8 +240,21 @@ def search_table(
 
 @dataclass(frozen=True)
 class S3Corpus:
-    """An S3 Vectors index. `where` is the service's metadata filter document, sent with every
-    similarity query and applied here to each listed vector (listing has no filter)."""
+    """A corpus held in an Amazon S3 Vectors index. Read-only; use it with `get_candidates`.
+
+    Reading needs the `s3` extra (boto3) and AWS credentials.
+
+    Args:
+        bucket: The vector bucket's name.
+        index: The index's name.
+        region: The AWS region; None lets boto3 choose.
+        where: A metadata filter document in the S3 Vectors service's own form, for example
+            `{"section": "politics"}`. It is sent with every similarity query, and applied
+            here to each vector when the corpus is listed (listing has no filter of its own).
+
+    Raises:
+        ValueError: `bucket` or `index` is empty, or `where` is not a filter the service accepts.
+    """
 
     bucket: str
     index: str
@@ -256,7 +309,12 @@ def _s3_operand_ok(op: str, operand) -> bool:
 
 def _s3_check(where, path: str = "where", listing: bool = False) -> None:
     """Refuse a filter document S3 Vectors would not accept, naming the path to the problem.
-    `listing`: also refuse `$startsWith`, which only some index modes support."""
+
+    `listing`: also refuse `$startsWith`, which only some index modes support.
+
+    Raises:
+        ValueError: The document is not a valid filter.
+    """
     if not (isinstance(where, dict) and where):
         raise ValueError(
             f"S3Corpus: {path} must be a non-empty filter document (a dict)"
@@ -303,7 +361,11 @@ def _same(a, b) -> bool:
 # $nin/$ne if none does), unverified against the service; fix it when a real index disagrees
 # (specs/010-corpus-filter/quickstart.md section 4).
 def _s3_match(where: dict, metadata: dict) -> bool:
-    """The filter document applied to one vector's metadata, as the service applies it."""
+    """Apply a filter document to one vector's metadata, as the service applies it.
+
+    Returns:
+        bool: True when the vector passes the filter.
+    """
     for key, value in where.items():
         if key == "$and":
             ok = all(_s3_match(part, metadata) for part in value)
@@ -340,11 +402,37 @@ def _s3_op(op: str, operand, present: bool, values: list) -> bool:
 
 @dataclass(frozen=True)
 class PgCorpus:
-    """A pgvector table. The database URL is read from the environment variable `url_env`,
-    never stored. With `text_table` the text lives in a second table joined on
-    `text_id_column` (default: `id_column`) = `id_column`. `where` is a Postgres condition with
-    its values written in (`"section = 'politics'"`), run on the database in every mode; in the
-    two-table layout its columns must be in the text table."""
+    """A corpus held in a Postgres table with the pgvector extension. Read-only; use it with `get_candidates`.
+
+    Everything runs in one read-only transaction. The database URL is read from an environment
+    variable, never stored in the object. Needs the `pg` extra (psycopg); `auth="rds_iam"` also
+    needs `rds` (boto3).
+
+    Args:
+        table: The table (or `schema.table`) holding the ids and embeddings.
+        id_column: The id column.
+        text_column: The column holding each item's text.
+        vector_column: The column of embeddings (`vector` or `halfvec`).
+        text_table: A second table holding the text, when it is not in `table`.
+        text_id_column: The id column of `text_table` (default: `id_column`).
+        url_env: The environment variable holding the database URL.
+        search: "exact" compares every row with every seed (reliable, can be slow on a large
+            table); "index" uses a pgvector index (fast, may miss hits; needs pgvector 0.8 or newer).
+        statement_timeout_s: A time limit in seconds for each statement; None keeps the
+            server's own, 0 means no limit.
+        auth: "url" signs in with the URL as given; "rds_iam" with an Amazon RDS IAM token.
+        aws_region: The AWS region for `rds_iam`; None lets boto3 choose.
+        aws_profile: The AWS profile for `rds_iam`; None for the default.
+        max_result_mb: The most data one search may download, in megabytes; larger is refused
+            or stopped. 0 means no limit.
+        where: A Postgres condition with its values written in, for example
+            `"section = 'politics'"`. It is your own SQL, run in the read-only transaction
+            in every mode; with `text_table` its columns must be in the text table.
+
+    Raises:
+        ValueError: `table` or `url_env` is empty, `where` is blank, or `search`, `auth`,
+            `max_result_mb` or `statement_timeout_s` is not valid.
+    """
 
     table: str
     id_column: str = "id"
@@ -380,7 +468,21 @@ class PgCorpus:
             raise ValueError("PgCorpus: statement_timeout_s must be 0 or more")
 
     def check(self, seeds: int | None = None) -> dict:
-        """Read-only report on the table (see _check); does not raise."""
+        """Report on the table and the connection, without changing anything.
+
+        Use it before a long search to see whether the extension, the column type, the index and
+        the text table are as expected. It never raises: a problem is reported in the result.
+
+        Args:
+            seeds: How many seed phrases you plan to search with, to estimate the worst case of
+                an exact search; None skips that note.
+
+        Returns:
+            dict: `version` and `schema` of the vector extension, `encrypted` (is the connection
+            encrypted), `type` and `dimension` of the vector column, `rows` (the planner's
+            estimate), `indexes`, a `sample` row, and the lists `warnings` and `notes` and the
+            dict `errors` (keyed by what failed; passwords and tokens are masked).
+        """
         return _check(self, seeds)
 
 
@@ -389,14 +491,18 @@ class SearchCancelled(Exception):
 
 
 class Stop:
-    """Handle for stopping a search from another thread: pass it to search_pg_exact and call
-    stop(). Cancelling the calling thread alone would leave the driver blocked in the query."""
+    """A handle for stopping a search from another thread.
+
+    Pass it to `search_pg_exact` and call `stop()`. Cancelling the calling thread alone would
+    leave the driver blocked in the query.
+    """
 
     def __init__(self):
         self.conn = None
         self.stopped = False
 
     def stop(self):
+        """Ask the running search to stop; it then raises `SearchCancelled`."""
         self.stopped = True
         if self.conn is not None:
             _cancel(self.conn)
@@ -424,7 +530,11 @@ IAM_CHECK = (
 
 
 def pg_message(e: Exception, corpus: PgCorpus, token: str | None = None) -> str:
-    """An exception's text with the URL, password and IAM token replaced by ***, plus a hint."""
+    """Make a database error safe to show: the URL, password and IAM token replaced by ***, plus a hint.
+
+    Returns:
+        str: The error text, with a "Fix:" line added when the cause is recognised.
+    """
     text = str(e)
     url = os.environ.get(corpus.url_env) or ""
     password = urlsplit(url).password or ""
@@ -461,7 +571,16 @@ def pg_message(e: Exception, corpus: PgCorpus, token: str | None = None) -> str:
 
 
 def pg_connect(corpus: PgCorpus):
-    """Open a read-only connection; the caller owns it and the one transaction it starts."""
+    """Open a read-only connection; the caller owns it and the one transaction it starts.
+
+    Returns:
+        psycopg.Connection: The open connection.
+
+    Raises:
+        ImportError: psycopg is not installed (the `pg` extra).
+        ValueError: The URL environment variable is not set.
+        RuntimeError: The connection failed; the message has the secrets masked.
+    """
     try:
         import psycopg
     except ImportError as e:
@@ -522,25 +641,39 @@ def _iam_token(corpus: PgCorpus, url: str) -> str:
 
 
 def _regclass(table: str) -> str:
-    """`schema.table` or `table` as a quoted name for a `%s::regclass` parameter."""
+    """Quote `schema.table` or `table` for a `%s::regclass` parameter.
+
+    Returns:
+        str: The quoted name.
+    """
     schema, dot, name = table.partition(".")
     parts = [schema, name] if dot else [schema]
     return ".".join('"' + p.replace('"', '""') + '"' for p in parts)
 
 
 def text_source(corpus: PgCorpus) -> tuple[str, str]:
-    """(table, id column) the text is read from: text_table in the two-table layout."""
+    """Say where the text is read from: `text_table` in the two-table layout.
+
+    Returns:
+        tuple[str, str]: The table and its id column.
+    """
     if corpus.text_table:
         return corpus.text_table, corpus.text_id_column or corpus.id_column
     return corpus.table, corpus.id_column
 
 
 def _pg_where(corpus: PgCorpus):
-    """The filter as a CTE, `goldlabel_where AS (SELECT <id> AS id FROM <text table, or table>
-    WHERE (<where>))`, for a query's WITH. A CTE cannot see the main query's tables, so the
-    condition sees that one table's columns only (a sub-query would fall back to the outer
-    query's). Rows are kept with `<id> IN (SELECT id FROM goldlabel_where)`. `%` is doubled for the
-    driver, so every query carrying this must be sent with parameters (an empty tuple at least)."""
+    """Build the filter as a CTE, for a query's WITH.
+
+    The CTE is `goldlabel_where AS (SELECT <id> AS id FROM <text table, or table> WHERE (<where>))`.
+    A CTE cannot see the main query's tables, so the condition sees that one table's columns
+    only (a sub-query would fall back to the outer query's). Rows are kept with
+    `<id> IN (SELECT id FROM goldlabel_where)`. `%` is doubled for the driver, so every query
+    carrying this must be sent with parameters (an empty tuple at least).
+
+    Returns:
+        psycopg.sql.Composed: The CTE.
+    """
     from psycopg import sql
 
     table, key = text_source(corpus)
@@ -556,7 +689,11 @@ def _pg_where(corpus: PgCorpus):
 
 
 def _texts_query(corpus: PgCorpus):
-    """SELECT id, text for a list of ids (the one parameter), from the text table."""
+    """Build `SELECT id, text` for a list of ids (the one parameter), from the text table.
+
+    Returns:
+        psycopg.sql.Composed: The query.
+    """
     from psycopg import sql
 
     table, id_column = text_source(corpus)
@@ -568,7 +705,14 @@ def _texts_query(corpus: PgCorpus):
 
 
 def extension_version(conn) -> tuple[tuple[int, int, int], str]:
-    """((major, minor, patch), schema) of the vector extension."""
+    """Read the version and schema of the vector extension.
+
+    Returns:
+        tuple: `((major, minor, patch), schema)`.
+
+    Raises:
+        RuntimeError: The extension is not installed in this database.
+    """
     with conn.cursor() as cur:
         cur.execute(
             "SELECT e.extversion, n.nspname FROM pg_extension e "
@@ -587,6 +731,11 @@ def extension_version(conn) -> tuple[tuple[int, int, int], str]:
 
 
 def require_index_mode_version(version: tuple[int, int, int], mode: str) -> None:
+    """Refuse `search="index"` on a pgvector older than 0.8.0.
+
+    Raises:
+        RuntimeError: The mode is "index" and the extension is older than 0.8.0.
+    """
     if mode == "index" and version < (0, 8, 0):
         raise RuntimeError(
             f'search="index" needs pgvector 0.8.0 or newer (found '
@@ -596,7 +745,14 @@ def require_index_mode_version(version: tuple[int, int, int], mode: str) -> None
 
 
 def column_type(conn, table: str, column: str) -> tuple[str, str, int | None]:
-    """(type name, type schema, dimension or None) of a vector or halfvec column."""
+    """Read the type of a vector or halfvec column.
+
+    Returns:
+        tuple[str, str, int | None]: The type name, its schema, and the dimension (None if none is declared).
+
+    Raises:
+        RuntimeError: The column does not exist or is not a `vector` or `halfvec`.
+    """
     with conn.cursor() as cur:
         cur.execute(
             "SELECT t.typname, tn.nspname, a.atttypmod FROM pg_attribute a "
@@ -619,7 +775,12 @@ def column_type(conn, table: str, column: str) -> tuple[str, str, int | None]:
 def table_estimates(
     conn, table: str, text_column: str
 ) -> tuple[int | None, int | None]:
-    """(planner row estimate, average text width in bytes); None where there are no statistics."""
+    """Read the planner's statistics for a table, without counting its rows.
+
+    Returns:
+        tuple[int | None, int | None]: The estimated row count and the average text width in
+        bytes; None where there are no statistics.
+    """
     with conn.cursor() as cur:
         cur.execute(
             "SELECT reltuples FROM pg_class WHERE oid = %s::regclass",
@@ -641,15 +802,30 @@ def table_estimates(
 def search_pg_exact(
     corpus: PgCorpus, vectors, floor: float, progress=None, stop: Stop | None = None
 ) -> tuple[list[list[tuple[str, str, float]]], bool]:
-    """One pass over the table for every seed: ([hits per seed], capped), best first.
+    """Compare every seed with the whole table in one pass (exact search).
 
-    Runs in the one read-only REPEATABLE READ transaction pg_connect opened. Step 1 returns
-    ids only (a narrow sort), step 2 the text of the distinct ids. `capped` is True when some
-    seed has exactly PG_TOP_K hits. The result size is limited by corpus.max_result_mb
-    (0 = none): refused up front from the planner statistics, or aborted while streaming.
-    `progress(received, 0, "")` is called per row received (a zero total is unknown); `stop`
-    is a Stop whose stop() cancels the running query, after which SearchCancelled is raised.
-    """
+    Runs in the one read-only REPEATABLE READ transaction `pg_connect` opened. Step 1 returns
+    ids only (a narrow sort), step 2 the text of the distinct ids. The result size is limited
+    by `corpus.max_result_mb` (0 = none): refused up front from the planner statistics, or
+    aborted while streaming.
+
+    Args:
+        corpus: The `PgCorpus` to search.
+        vectors: One query vector per seed.
+        floor: The lowest similarity kept.
+        progress: Called as `progress(received, 0, "")` for each row received (a zero total
+            means unknown).
+        stop: A `Stop` whose `stop()` cancels the running query.
+
+    Returns:
+        tuple: `([hits per seed], capped)`, best first; each hit is `(id, text, similarity)`.
+        `capped` is True when some seed has exactly `PG_TOP_K` hits, so more may be hidden.
+
+    Raises:
+        SearchCancelled: `stop.stop()` was called.
+        RuntimeError: The search failed, a text row is missing, or the result would exceed
+            `max_result_mb`; secrets in the message are masked.
+    """  # noqa: DOC501  the size error is a RuntimeError built by `_too_large`
     limit_mb = corpus.max_result_mb
     limit = limit_mb * MB
     conn = pg_connect(corpus)
@@ -757,13 +933,27 @@ def pg_items(
     limit: int | None = None,
     match: tuple[list[str], bool] | None = None,
 ):
-    """Yield (id, text) of every item in ascending id order, never touching the vectors.
+    """Read every item in ascending id order, without touching the vectors.
 
-    `guard`: the caller keeps everything it reads, so refuse up front from the planner statistics
-    (rows, or `limit` if smaller) and abort while streaming past corpus.max_result_mb (0 = none).
-    `match` = (terms, regex): only rows whose text matches any term, filtered by the database
-    (ILIKE for plain terms, `~` for regex strings); the terms are bound parameters only.
-    Close the generator to close the connection."""
+    Close the generator to close the connection.
+
+    Args:
+        corpus: The `PgCorpus` to read.
+        guard: True when the caller keeps everything it reads: refuse up front from the planner
+            statistics (rows, or `limit` if smaller) and abort while streaming past
+            `corpus.max_result_mb` (0 = none).
+        limit: How many items the caller will keep, for the size check.
+        match: `(terms, regex)`: only rows whose text matches any term, filtered by the
+            database (ILIKE for plain terms, `~` for regex strings); the terms are bound
+            parameters only.
+
+    Yields:
+        tuple[str, str]: `(id, text)`.
+
+    Raises:
+        RuntimeError: The read failed, a text row is missing, or the result would exceed
+            `max_result_mb`; secrets in the message are masked.
+    """  # noqa: DOC501  the size error is a RuntimeError built by `_too_large`
     limit_mb = corpus.max_result_mb
     hint = "Use a keyword filter, a limit, or raise the limit"
     conn = pg_connect(corpus)
@@ -859,14 +1049,25 @@ def pg_items(
 
 
 def is_approximate(corpus) -> bool:
-    """True when the pgvector search may hide hits above the floor (index mode)."""
+    """Say whether a corpus's search may hide hits above the floor.
+
+    Returns:
+        bool: True for a `PgCorpus` in index mode.
+    """
     return isinstance(corpus, PgCorpus) and corpus.search == "index"
 
 
 def _search_pg_index(
     corpus: PgCorpus, query_vector: list[float], floor: float
 ) -> tuple[list[tuple[str, str, float]], bool]:
-    """One ANN-index query for one seed; the caller (search) has checked the mode."""
+    """Run one ANN-index query for one seed; the caller has checked the mode.
+
+    Returns:
+        tuple: `([(id, text, similarity)], capped)`, best first.
+
+    Raises:
+        RuntimeError: The query failed; secrets in the message are masked.
+    """
     conn = pg_connect(corpus)
     try:
         from psycopg import sql
@@ -935,11 +1136,25 @@ def search_vectors(
     *,
     embedding_model: str,
 ) -> tuple[list[tuple[str, str, float]], bool]:
-    """Return ([(id, text, similarity)], capped), best first, all with similarity >= floor.
+    """Search for one seed in an S3 Vectors index or a pgvector index-mode table.
 
-    `capped` is True when the S3 per-query topK limit may have hidden hits above the floor
-    (the highest-scoring hits are returned); show a warning. pgvector `exact` search answers
-    every seed at once: use search_pg_exact; a Table: use search_table.
+    A pgvector `exact` search answers every seed at once: use `search_pg_exact`; for a
+    `Table` use `search_table`.
+
+    Args:
+        corpus: An `S3Corpus` or a `PgCorpus` with `search="index"`.
+        vector: The seed's embedding.
+        floor: The lowest similarity kept.
+        embedding_model: The model that made `vector`.
+
+    Returns:
+        tuple: `([(id, text, similarity)], capped)`, best first, all with similarity at least
+        `floor`. `capped` is True when the per-query top-K limit may have hidden hits above the
+        floor (the highest-scoring hits are returned); show a warning.
+
+    Raises:
+        RuntimeError: A `PgCorpus` is not in index mode, or the query failed.
+        ImportError: boto3 is not installed (the `s3` extra).
     """
     if isinstance(corpus, PgCorpus):
         if corpus.search != "index":
@@ -984,8 +1199,18 @@ def search_vectors(
 
 
 def s3_items(corpus: S3Corpus):
-    """Yield (key, text) of every vector in the index, in the service's own order, with the
-    vectors themselves never requested."""
+    """Read every item of an S3 Vectors index, in the service's own order, never requesting the vectors.
+
+    Yields:
+        tuple[str, str]: `(key, text)`.
+
+    Raises:
+        ImportError: boto3 is not installed (the `s3` extra).
+        ValueError: The `where` filter uses `$startsWith`, which listing cannot apply.
+        RuntimeError: Access was denied; the message names the permissions needed
+            (`s3vectors:ListVectors` and `s3vectors:GetVectors`).
+        botocore.exceptions.ClientError: Any other error from the service.
+    """
     try:
         import boto3
         from botocore.exceptions import ClientError
@@ -1027,10 +1252,14 @@ POOLER_HINT = (
 
 
 def _check(corpus: PgCorpus, seeds: int | None = None) -> dict:
-    """Read-only report on the table (PgCorpus.check); does not raise.
+    """Report on the table (`PgCorpus.check`); does not raise.
 
     Each piece runs in its own savepoint, so a failing query (its scrubbed text goes in
-    "errors" under the piece's name) does not hide the others. No count(*)."""
+    "errors" under the piece's name) does not hide the others. No count(*).
+
+    Returns:
+        dict: See `PgCorpus.check`.
+    """
     from psycopg import sql
 
     out: dict = {
