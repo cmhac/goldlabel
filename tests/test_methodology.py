@@ -290,9 +290,9 @@ CLASSIFIER_SECTION = (
 EVAL_SECTION = (
     "### Evaluation\n\nThe classifier was scored against the gold labels:\n\n"
     "- **dev**: accuracy 1.00 on 2 labelled rows (1 pending row not scored), "
-    "target 0.9, met. Latest evaluation 2026-11-05. Evaluated 2 times with 2 different prompts.\n"
+    "target 0.9, met. Latest evaluation 2026-11-05 UTC. Evaluated 2 times with 2 different prompts.\n"
     "- **test**: accuracy 0.50 on 2 labelled rows (0 pending rows not scored), "
-    "target 0.9, not met. Latest evaluation 2026-11-06. Evaluated 1 time with 1 different prompt.\n\n"
+    "target 0.9, not met. Latest evaluation 2026-11-06 UTC. Evaluated 1 time with 1 different prompt.\n\n"
     "Evaluation calls cost $1.00 in total."
 )
 
@@ -317,7 +317,7 @@ def test_a_classifier_gets_the_evaluation_that_was_run_with_its_own_prompt():
     # dev: the older prompt's own evaluation, though a later one exists; test: none, so the latest
     assert (
         "- **dev**: accuracy 0.80 on 2 labelled rows (1 pending row not scored), "
-        "target 0.9, not met. Latest evaluation 2026-11-04. Evaluated 2 times with 2 different prompts."
+        "target 0.9, not met. Latest evaluation 2026-11-04 UTC. Evaluated 2 times with 2 different prompts."
     ) in text
     assert "- **test**: accuracy 0.50" in text
 
@@ -348,7 +348,7 @@ def test_a_classifier_loaded_from_a_bundle_brings_its_own_evaluation():
         LABELS_SECTION,
         "### Classifier\n\nThe classifier uses the model `openai:gpt-x`.",
         "### Evaluation\n\nThe classifier was scored against the gold labels:\n\n"
-        "- **test**: accuracy 0.90 on 50 labelled rows, evaluated 2026-11-06 "
+        "- **test**: accuracy 0.90 on 50 labelled rows, evaluated 2026-11-06 UTC "
         "(read from the classifier's saved bundle).",
         appendix_head("Pick one."),
     )
@@ -385,7 +385,7 @@ RUN_ROWS = [
 
 def run_section(tail):
     return (
-        "### Run\n\n3 items were classified by `m1` between 2026-11-06 and 2026-11-07: "
+        "### Run\n\n3 items were classified by `m1` between 2026-11-06 and 2026-11-07 UTC: "
         "2 by live model calls, 0 from the cache, 1 resumed from an earlier run, 1 failed. "
         + tail
     )
@@ -425,7 +425,7 @@ def test_one_day_one_item_and_no_similarity_scores_and_an_unknown_price():
     ]
     p = Predictions(rows, live=1, cost=None)
     assert str(gl.get_methodology(results=p)) == doc(
-        "### Run\n\n1 item was classified by `m1` on 2026-11-07: 1 by live model calls, "
+        "### Run\n\n1 item was classified by `m1` on 2026-11-07 UTC: 1 by live model calls, "
         "0 from the cache, 0 resumed from an earlier run, 0 failed. "
         "The live model calls cost ? (a price is unknown)."
     )
@@ -439,7 +439,7 @@ def test_result_rows_without_the_model_and_time_say_how_many_lack_them():
     stamped = {**bare, "run_model": "m1", "run_at": "2026-11-07T10:00:00+00:00"}
     p = Predictions([bare, {**bare, "id": "b"}, stamped], live=3, cost=0.25)
     assert str(gl.get_methodology(results=p)) == doc(
-        "### Run\n\n3 items were classified by `m1` on 2026-11-07: 3 by live model calls, "
+        "### Run\n\n3 items were classified by `m1` on 2026-11-07 UTC: 3 by live model calls, "
         "0 from the cache, 0 resumed from an earlier run, 0 failed. "
         "The live model calls cost $0.25. The model and time were not recorded on 2 of the 3 rows."
     )
@@ -527,7 +527,7 @@ def test_a_label_revised_after_the_evaluation_ran_is_flagged_as_stale():
     ]
     m = gl.get_methodology(**{**clean_inputs(), "gold": write_gold(rows=rows)})
     stale = (
-        "The dev evaluation of 2026-11-05 predates a revision of 1 gold label; "
+        "The dev evaluation of 2026-11-05 UTC predates a revision of 1 gold label; "
         "its score may no longer match the labels."
     )
     assert m.warnings == (stale,)
@@ -659,3 +659,22 @@ def test_results_from_another_classifier_withhold_the_prompt():
         "**Prompt**: not given, because the results were produced by a different "
         "classifier from the one passed in, so its prompt is not the prompt of the run."
     ) in text
+
+
+def test_a_bundle_saved_before_samples_existed_names_its_split():
+    old = replace(clf())
+    object.__setattr__(
+        old,
+        "evaluation",  # the shape `Classifier.save` wrote before it recorded `samples`
+        {
+            "split": "test",
+            "n": 50,
+            "score": 0.9,
+            "metric": "accuracy",
+            "digest": old.digest,
+            "date": "2026-11-06T10:00:00+00:00",
+        },
+    )
+    assert "- **test**: accuracy 0.90 on 50 labelled rows" in str(
+        gl.get_methodology(classifier=old)
+    )

@@ -20,7 +20,7 @@ gl.get_methodology(
 
 ## Text skeleton
 
-Markdown, first person plural. A section is written only when its input is given. Sentences below are the fixed templates (`{}` are values from the sources); the tests match them by hand-written strings.
+Markdown, first person plural. A section is written only when its input is given. Every date is a UTC date and is written with " UTC" after it. Sentences below are the fixed templates (`{}` are values from the sources); the tests match them by hand-written strings.
 
 ```markdown
 ## Methodology

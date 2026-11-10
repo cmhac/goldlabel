@@ -181,10 +181,12 @@ def _evaluation(history: list[dict], classifier: Classifier | None) -> str | Non
         saved = classifier.evaluation if classifier else None
         if not saved:
             return None
+        # a bundle saved before samples were recorded names one `split` instead
+        names = saved.get("samples") or [saved.get("split", "unknown")]
         return (
-            f"{intro}- **{' + '.join(saved['samples'])}**: {saved['metric']} "
+            f"{intro}- **{' + '.join(names)}**: {saved['metric']} "
             f"{saved['score']:.2f} on {_count(saved['n'], 'labelled row')}, evaluated "
-            f"{saved['date'][:10]} (read from the classifier's saved bundle)."
+            f"{saved['date'][:10]} UTC (read from the classifier's saved bundle)."
         )
     bullets = []
     for names, lines, x, _ in _pick(history, classifier):
@@ -198,7 +200,7 @@ def _evaluation(history: list[dict], classifier: Classifier | None) -> str | Non
             f"- **{' + '.join(names)}**: {x['metric']} {x['score']:.2f} on "
             f"{_count(x['n'], 'labelled row')} "
             f"({_count(x.get('skipped_pending', 0), 'pending row')} not scored), {goal}. "
-            f"Latest evaluation {str(x['time'])[:10]}. Evaluated {_count(len(lines), 'time')} "
+            f"Latest evaluation {str(x['time'])[:10]} UTC. Evaluated {_count(len(lines), 'time')} "
             f"with {_count(prompts, 'different prompt')}."
         )
     prices = [x.get("dollars") for x in history]
@@ -225,9 +227,9 @@ def _run(results: Predictions, cutoff: float | None) -> str:
     when = ""
     if times:
         when = (
-            f" on {times[0]}"
+            f" on {times[0]} UTC"
             if times[0] == times[-1]
-            else f" between {times[0]} and {times[-1]}"
+            else f" between {times[0]} and {times[-1]} UTC"
         )
     cost = "? (a price is unknown)" if results.cost is None else _dollars(results.cost)
     text = (
@@ -346,7 +348,7 @@ def _warnings(
         revised = sum(1 for r in rows if r.sample in names and _revised_after(r, when))
         if revised:
             found.append(
-                f"The {' + '.join(names)} evaluation of {str(x['time'])[:10]} predates a "
+                f"The {' + '.join(names)} evaluation of {str(x['time'])[:10]} UTC predates a "
                 f"revision of {_count(revised, 'gold label')}; its score may no longer match "
                 "the labels."
             )
@@ -410,6 +412,7 @@ def get_methodology(
     Raises:
         ValueError: None of `candidates`, `gold`, `classifier` and `results` was given.
         TypeError: One of them is not the kind of object named above.
+        GoldError: The gold file is not a gold file.
     """
     given = {
         "candidates": (candidates, Candidates),
