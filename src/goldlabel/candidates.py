@@ -27,6 +27,7 @@ from goldlabel.search import (
     S3Corpus,
     Table,
     check_table_for_seeds,
+    describe,
     pg_items,
     s3_items,
     search_pg_exact,
@@ -154,6 +155,15 @@ class Candidates:
         source: Where the items came from. "seeds": `{id, text, max_similarity, best_seed}`,
             most similar first. "keywords": `{id, text, terms_matched, matches}`, best first.
             "all": `{id, text}`, in the corpus's own order.
+        seeds: The seed phrases the search used, in order; None unless the source is "seeds",
+            and None for a file saved before this was recorded.
+        keywords: The terms the search used (a compiled pattern as its pattern text); None unless
+            the source is "keywords", and None for a file saved before this was recorded.
+        regex: True when the keywords are regular expressions.
+        corpus: A plain description of the corpus searched, with no folder, login or connection
+            detail; None for a file saved before this was recorded.
+        filter: The corpus's `where=` filter as written; None when it had none.
+        cutoff: The lowest similarity kept by `above`; None until `above` has been applied.
     """
 
     rows: list[dict]
@@ -162,6 +172,12 @@ class Candidates:
     seeds_digest: str | None = None
     embedding_model: str | None = None
     source: str = "seeds"
+    seeds: list[str] | None = None
+    keywords: list[str] | None = None
+    regex: bool = False
+    corpus: str | None = None
+    filter: str | None = None
+    cutoff: float | None = None
 
     def _need_seeds(self, name: str) -> None:
         if self.source != "seeds":
@@ -173,19 +189,22 @@ class Candidates:
     def above(self, t: float) -> "Candidates":
         """Keep only the candidates whose similarity is at least `t`.
 
-        This candidate list is unchanged; nothing is written to a file.
+        This candidate list is unchanged; nothing is written to a file. The new list remembers
+        `t` as its `cutoff`, so a methodology can say what cutoff you chose.
 
         Args:
             t: The lowest `max_similarity` to keep.
 
         Returns:
-            Candidates: A new, shorter list.
+            Candidates: A new, shorter list whose `cutoff` is `t`.
 
         Raises:
             ValueError: The list was not built from seeds, so it has no similarity scores.
         """
         self._need_seeds("above")
-        return replace(self, rows=[r for r in self.rows if r["max_similarity"] >= t])
+        return replace(
+            self, rows=[r for r in self.rows if r["max_similarity"] >= t], cutoff=t
+        )
 
     def bands(self) -> list[int]:
         """Count the candidates in each similarity band.
@@ -259,6 +278,12 @@ class Candidates:
             seeds_digest=meta.get("seeds_digest"),
             embedding_model=meta.get("embedding_model"),
             source=meta.get("source", "seeds"),
+            seeds=meta.get("seeds"),
+            keywords=meta.get("keywords"),
+            regex=meta.get("regex", False),
+            corpus=meta.get("corpus"),
+            filter=meta.get("filter"),
+            cutoff=meta.get("cutoff"),
         )
 
     def write(self, path) -> None:
@@ -281,6 +306,12 @@ class Candidates:
             "embedding_model": self.embedding_model,
             "capped": self.capped,
             "source": self.source,
+            "seeds": self.seeds,
+            "keywords": self.keywords,
+            "regex": self.regex,
+            "corpus": self.corpus,
+            "filter": self.filter,
+            "cutoff": self.cutoff,
         }
         path.with_suffix(".meta.json").write_text(json.dumps(meta))
 
@@ -570,6 +601,7 @@ async def aget_candidates(
             raise ValueError("seeds is empty; give at least one seed phrase")
     if limit is not None and limit < 1:
         raise ValueError("limit must be 1 or more")
+    where_corpus = describe(corpus)
     if seeds is None:
         uncompiled: list[str] = []
         patterns = (
@@ -588,8 +620,16 @@ async def aget_candidates(
         rows = await asyncio.to_thread(read)
         if server_side:
             _warn_if_recount_differs(rows, uncompiled)
+        # shortcut: a compiled pattern's flags are not recorded, upgrade if a reader needs them
+        terms = [k.pattern if isinstance(k, re.Pattern) else k for k in keywords or ()]
         result = Candidates(
-            rows, floor=None, source="all" if patterns is None else "keywords"
+            rows,
+            floor=None,
+            source="all" if patterns is None else "keywords",
+            keywords=terms or None,
+            regex=regex or any(isinstance(k, re.Pattern) for k in keywords or ()),
+            corpus=where_corpus[0],
+            filter=where_corpus[1],
         )
         if out is not None and out is not False:
             result.write(resolve(out, "candidates.jsonl"))
@@ -631,7 +671,16 @@ async def aget_candidates(
                     "best_seed": seed,
                 }
     rows = sorted(best.values(), key=lambda r: (-r["max_similarity"], r["id"]))[:limit]
-    result = Candidates(rows, capped, floor, seeds_digest(seeds), model)
+    result = Candidates(
+        rows,
+        capped,
+        floor,
+        seeds_digest(seeds),
+        model,
+        seeds=seeds,
+        corpus=where_corpus[0],
+        filter=where_corpus[1],
+    )
     if out is not False:
         result.write(resolve(out, "candidates.jsonl"))
     return result
