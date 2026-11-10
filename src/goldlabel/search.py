@@ -1,5 +1,6 @@
 """The corpora goldlabel reads: a `Table` of rows, an S3 Vectors index, or a pgvector table. Nothing here writes to them."""
 
+import json
 import operator
 import os
 import re
@@ -78,6 +79,44 @@ class Table:
                 "Table: a CSV file cannot hold vectors, so vector_column cannot be used; "
                 "use a .parquet or .jsonl file or a DataFrame"
             )
+
+
+def describe(corpus) -> tuple[str, str | None]:
+    """Describe a corpus and its `where=` filter in plain words, for a methodology.
+
+    Names where the items come from and nothing that could identify a person or a login: a file
+    is named without its folder, and a database's connection URL, the name of its environment
+    variable, its AWS profile and its login method are never mentioned.
+
+    Args:
+        corpus: A `Table`, `S3Corpus` or `PgCorpus`.
+
+    Returns:
+        tuple[str, str | None]: The source in words, and its filter as written (a polars
+        expression's text, a JSON document or a SQL condition), or None when there is no filter.
+    """
+    if isinstance(corpus, Table):
+        src = corpus.source
+        if isinstance(src, (str, Path)):
+            kind = f"the table file {Path(src).name}"
+        else:
+            kind = f"an in-memory table ({'list of rows' if isinstance(src, list) else type(src).__name__})"
+        ids = f"id column {corpus.id_column}" if corpus.id_column else "ids by position"
+        source = f"{kind} (text column {corpus.text_column}, {ids})"
+        where = None if corpus.where is None else str(corpus.where)
+    elif isinstance(corpus, S3Corpus):
+        region = f" ({corpus.region})" if corpus.region else ""
+        source = (
+            f"the S3 Vectors index {corpus.index} in bucket {corpus.bucket}{region}"
+        )
+        where = (
+            None if corpus.where is None else json.dumps(corpus.where, sort_keys=True)
+        )
+    else:
+        texts = f" with texts in {corpus.text_table}" if corpus.text_table else ""
+        source = f"the Postgres table {corpus.table}{texts} ({corpus.search} search)"
+        where = corpus.where
+    return source, where
 
 
 def table_rows(table: Table, with_vectors: bool = False) -> list[dict]:
