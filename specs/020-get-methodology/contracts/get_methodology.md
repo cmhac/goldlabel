@@ -48,7 +48,7 @@ Metric: {metric}; target {target | none}.
 Evaluation calls cost {$x.xx | ?, a price is unknown}.
 
 ### Run
-{n} items were classified by `{model}` between {first_at} and {last_at}: {live} by live model calls, {cached} from the cache, {resumed} resumed, {failed} failed. The run cost {$x.xx | ?, a price is unknown}. The similarity cutoff was {cutoff}; the lowest similarity among the items was {s}.
+{n} item(s) {was|were} classified by `{model}` {on {date} | between {first_at} and {last_at}}: {live} by live model calls, {cached} from the cache, {resumed} resumed from an earlier run, {failed} failed. The live model calls cost {$x.xx | ?, a price is unknown}. The similarity cutoff was {cutoff}; the lowest similarity among the items was {s}.
   (rows without model or time) The model and time were not recorded on {k} of the rows.
   (no cutoff) The similarity cutoff was not recorded.
   (digest differs from the classifier passed in) These results were produced by a different classifier from the one passed in, so its prompt is not given as the prompt of the run.

@@ -6,7 +6,7 @@ import pytest
 
 import goldlabel as gl
 from goldlabel.candidates import Candidates
-from goldlabel.classifier import Classifier
+from goldlabel.classifier import Classifier, Predictions
 from goldlabel.taxonomy import Taxonomy
 
 CORPUS = "the table file corpus.jsonl (text column text, id column id)"
@@ -346,3 +346,73 @@ def test_an_evaluation_cost_that_includes_an_unknown_price_is_a_question_mark():
     log = [{**x, "dollars": None} if x["samples"] == ["dev"] else x for x in LOG]
     text = str(gl.get_methodology(gold=write_gold(log=log), classifier=NEW))
     assert "Evaluation calls cost ? (a price is unknown)." in text and "$1" not in text
+
+
+# --- the run: a Predictions built by hand ------------------------------------------------------
+
+
+def run_row(id, at, sim, error=None):
+    row = {
+        "id": id,
+        "text": f"text {id}",
+        "labels": None if error else ["layoff"],
+        "run": "d",
+        "run_model": "m1",
+        "run_at": at,
+        "max_similarity": sim,
+    }
+    return {**row, "error": error} if error else row
+
+
+RUN_ROWS = [
+    run_row("a", "2026-11-07T10:00:00+00:00", 0.8),
+    run_row("b", "2026-11-06T09:00:00+00:00", 0.72),
+    run_row("c", "2026-11-07T11:00:00+00:00", 0.75, error="boom"),
+]
+
+
+def run_section(tail):
+    return (
+        "### Run\n\n3 items were classified by `m1` between 2026-11-06 and 2026-11-07: "
+        "2 by live model calls, 0 from the cache, 1 resumed from an earlier run, 1 failed. "
+        + tail
+    )
+
+
+def test_the_run_section_counts_items_names_model_and_dates_and_the_lowest_similarity():
+    p = Predictions(RUN_ROWS, live=2, cached=0, resumed=1, cost=0.25)
+    assert str(gl.get_methodology(results=p)) == doc(
+        run_section(
+            "The live model calls cost $0.25. The lowest similarity among the items was 0.72."
+        )
+    )
+
+
+def test_the_run_section_states_the_cutoff_the_candidates_carry():
+    p = Predictions(RUN_ROWS, live=2, cached=0, resumed=1, cost=0.25)
+    text = str(gl.get_methodology(results=p, candidates=seeds_list().above(0.7)))
+    assert text.endswith(
+        run_section(
+            "The live model calls cost $0.25. The similarity cutoff was 0.7; "
+            "the lowest similarity among the items was 0.72."
+        )
+    )
+
+
+def test_one_day_one_item_and_no_similarity_scores_and_an_unknown_price():
+    rows = [
+        {
+            "id": "a",
+            "text": "x",
+            "labels": ["a"],
+            "run": "d",
+            "run_model": "m1",
+            "run_at": "2026-11-07T10:00:00+00:00",
+        }
+    ]
+    p = Predictions(rows, live=1, cost=None)
+    assert str(gl.get_methodology(results=p)) == doc(
+        "### Run\n\n1 item was classified by `m1` on 2026-11-07: 1 by live model calls, "
+        "0 from the cache, 0 resumed from an earlier run, 0 failed. "
+        "The live model calls cost ? (a price is unknown)."
+    )

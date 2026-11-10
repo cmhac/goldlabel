@@ -195,6 +195,43 @@ def _evaluation(history: list[dict], classifier: Classifier | None) -> str | Non
     return f"{intro}" + "\n".join(bullets) + f"\n\nEvaluation calls cost {cost}."
 
 
+def _run(results: Predictions, cutoff: float | None) -> str:
+    """Write the paragraph on the classification run, from the result rows.
+
+    Returns:
+        str: The section text. The model and times come from the stamps `classify` puts on
+        each row.
+    """
+    n = len(results.rows)
+    models = sorted({r["run_model"] for r in results.rows if r.get("run_model")})
+    times = sorted(r["run_at"][:10] for r in results.rows if r.get("run_at"))
+    by = f" by {', '.join(f'`{m}`' for m in models)}" if models else ""
+    when = ""
+    if times:
+        when = (
+            f" on {times[0]}"
+            if times[0] == times[-1]
+            else f" between {times[0]} and {times[-1]}"
+        )
+    cost = "? (a price is unknown)" if results.cost is None else _dollars(results.cost)
+    text = (
+        f"{_count(n, 'item')} {'was' if n == 1 else 'were'} classified{by}{when}: "
+        f"{results.live} by live model calls, {results.cached} from the cache, "
+        f"{results.resumed} resumed from an earlier run, {len(results.errors)} failed. "
+        f"The live model calls cost {cost}."
+    )
+    scores = [r["max_similarity"] for r in results.rows if "max_similarity" in r]
+    lowest = (
+        f"lowest similarity among the items was {min(scores):g}" if scores else None
+    )
+    if cutoff is not None:
+        text += f" The similarity cutoff was {cutoff:g}"
+        text += f"; the {lowest}." if lowest else "."
+    elif lowest:
+        text += f" The {lowest}."
+    return text
+
+
 def get_methodology(
     *,
     candidates: Candidates | None = None,
@@ -260,5 +297,7 @@ def get_methodology(
     evaluation = _evaluation(history, classifier)
     if evaluation:
         sections.append(("Evaluation", evaluation))
+    if results is not None:
+        sections.append(("Run", _run(results, chosen.cutoff if chosen else None)))
     body = "\n\n".join(f"### {title}\n\n{text}" for title, text in sections)
     return Methodology(f"## Methodology\n\n{body}", ())
