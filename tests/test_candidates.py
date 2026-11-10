@@ -6,6 +6,7 @@ import shutil
 import threading
 from pathlib import Path
 
+import polars as pl
 import pytest
 from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingResult, TestEmbeddingModel
@@ -173,13 +174,30 @@ def test_round_trip_and_meta_beside_the_file(tmp_path):
         "embedding_model",
         "capped",
         "source",
+        "seeds",
+        "keywords",
+        "regex",
+        "corpus",
+        "filter",
+        "cutoff",
     }
+    assert meta["seeds"] == ["alpha", "beta"]
+    assert (meta["keywords"], meta["regex"], meta["filter"], meta["cutoff"]) == (
+        None,
+        False,
+        None,
+        None,
+    )
+    assert meta["corpus"] == (
+        "an in-memory table (list of rows) (text column text, id column id)"
+    )
     assert meta["seeds_digest"] == candidates.seeds_digest(["alpha", "beta"])
     assert meta["floor"] == 0.6 and meta["embedding_model"] == "m"
     assert meta["capped"] is False
     assert meta["written_at"].endswith("+00:00")
     back = Candidates.read(path)
     assert back.rows == c.rows and back.capped is False and back.floor == 0.6
+    assert back.seeds == ["alpha", "beta"] and back.corpus == meta["corpus"]
 
 
 def test_capped_survives_the_round_trip(tmp_path):
@@ -197,6 +215,45 @@ def test_the_pre006_candidates_file_loads():
     assert c.rows[1]["max_similarity"] == pytest.approx(0.8)
     assert c.floor == 0.6 and c.capped is False  # from its meta, which has no `capped`
     assert c.embedding_model == "fake-embed"
+    # a file saved before the search was recorded reads with no seeds, keywords, corpus or cutoff
+    assert (c.seeds, c.keywords, c.regex) == (None, None, False)
+    assert (c.corpus, c.filter, c.cutoff) == (None, None, None)
+
+
+def test_above_records_the_cutoff_and_a_later_above_replaces_it(tmp_path):
+    full = get_candidates(
+        local(), seeds=["alpha", "beta"], embedder=StubEmbedder(SEEDS), out=False
+    )
+    chosen = full.above(0.7)
+    assert full.cutoff is None  # the original is unchanged
+    assert chosen.cutoff == 0.7 and chosen.seeds == ["alpha", "beta"]
+    assert chosen.above(0.9).cutoff == 0.9
+    chosen.write(tmp_path / "chosen.jsonl")
+    back = Candidates.read(tmp_path / "chosen.jsonl")
+    assert back.cutoff == 0.7 and back.seeds == ["alpha", "beta"]
+
+
+def test_a_keyword_search_records_its_terms_and_a_compiled_pattern_as_a_regex():
+    rows = [{"id": "1", "text": "alpha beta"}, {"id": "2", "text": "gamma"}]
+    table = Table(rows, id_column="id")
+    literal = get_candidates(table, keywords=["alpha", "gamma"], out=False)
+    assert literal.keywords == ["alpha", "gamma"] and literal.regex is False
+    assert literal.seeds is None and literal.cutoff is None
+    mixed = get_candidates(table, keywords=["alpha", re.compile("g+amma")], out=False)
+    assert mixed.keywords == ["alpha", "g+amma"] and mixed.regex is True
+    pattern = get_candidates(table, keywords=["al+pha"], regex=True, out=False)
+    assert pattern.keywords == ["al+pha"] and pattern.regex is True
+
+
+def test_a_whole_corpus_search_records_the_corpus_and_its_filter():
+    rows = [{"id": "1", "text": "a"}, {"id": "2", "text": "b"}]
+    expr = pl.col("id") != "2"
+    got = get_candidates(Table(rows, id_column="id", where=expr), out=False)
+    assert got.source == "all" and (got.seeds, got.keywords) == (None, None)
+    assert got.corpus == (
+        "an in-memory table (list of rows) (text column text, id column id)"
+    )
+    assert got.filter == str(expr)
 
 
 def test_read_without_a_meta_file_uses_the_default_floor(tmp_path):

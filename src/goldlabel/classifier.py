@@ -653,11 +653,13 @@ class Classifier:
             items: Strings (their id is their position), dicts with `id` and `text`, or an object
                 with `.rows`, such as `Candidates`.
             out: A JSONL file to save the answers to, or None. Each finished item is appended
-                as `{id, text, labels, reasoning, run, ...other input fields}`, one line at a
-                time; failed items are not written. Running again with the same file skips ids
-                already there under this classifier's `digest`. Rows written under a different
-                prompt or taxonomy are classified again and the old row stays in the file, so
-                when reading the file take the last row of each id.
+                as `{id, text, labels, reasoning, run, run_model, run_at, ...other input fields}`,
+                one line at a time; failed items are not written. `run` is this classifier's
+                `digest`, `run_model` the model's name and `run_at` the UTC time the item was
+                finished. Running again with the same file skips ids already there under this
+                classifier's `digest`. Rows written under a different prompt or taxonomy are
+                classified again and the old row stays in the file, so when reading the file take
+                the last row of each id.
             max_cost: A dollar limit, or None for none. The run is refused before it starts if
                 the estimate is over it or the model's price is unknown, and stops part-way if
                 the spend crosses it; rows finished by then are kept.
@@ -728,6 +730,8 @@ class Classifier:
                         else {"reasoning": prediction.reasoning}
                     ),
                     "run": run,
+                    "run_model": _model_name(self.model),
+                    "run_at": datetime.now(UTC).isoformat(),
                     **{k: v for k, v in item.items() if k not in ("id", "text")},
                 }
                 results[i] = row

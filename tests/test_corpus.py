@@ -1,8 +1,9 @@
 import dataclasses
 
+import polars as pl
 import pytest
 
-from goldlabel.search import PgCorpus, S3Corpus
+from goldlabel.search import PgCorpus, S3Corpus, Table, describe
 
 
 def test_pg_defaults_are_the_old_pg_defaults():
@@ -70,3 +71,66 @@ def test_the_url_is_never_a_field():
         assert not any(
             "url" in f.name and f.name != "url_env" for f in dataclasses.fields(corpus)
         )
+
+
+def test_describe_a_table_file_gives_the_file_name_only_never_the_folder():
+    t = Table("/home/someone/private/corpus.jsonl", id_column="id")
+    assert describe(t) == (
+        "the table file corpus.jsonl (text column text, id column id)",
+        None,
+    )
+
+
+def test_describe_an_in_memory_table_and_its_filter():
+    rows = [{"id": "a", "body": "x"}]
+    assert describe(Table(rows, text_column="body")) == (
+        "an in-memory table (list of rows) (text column body, ids by position)",
+        None,
+    )
+    expr = pl.col("year") >= 2024
+    source, filter_ = describe(
+        Table(pl.DataFrame(rows), text_column="body", where=expr)
+    )
+    assert (
+        source == "an in-memory table (DataFrame) (text column body, ids by position)"
+    )
+    assert filter_ == str(expr)  # polars' own text of the expression
+    assert "year" in filter_
+
+
+def test_describe_an_s3_index_with_and_without_region_and_filter():
+    assert describe(S3Corpus("my-bucket", "posts")) == (
+        "the S3 Vectors index posts in bucket my-bucket",
+        None,
+    )
+    assert describe(
+        S3Corpus(
+            "my-bucket", "posts", region="us-east-1", where={"section": "politics"}
+        )
+    ) == (
+        "the S3 Vectors index posts in bucket my-bucket (us-east-1)",
+        '{"section": "politics"}',
+    )
+
+
+def test_describe_a_postgres_table_with_and_without_a_text_table():
+    assert describe(PgCorpus("public.docs", where="year >= 2024")) == (
+        "the Postgres table public.docs (exact search)",
+        "year >= 2024",
+    )
+    two = PgCorpus("public.docs", text_table="public.texts", search="index")
+    assert describe(two) == (
+        "the Postgres table public.docs with texts in public.texts (index search)",
+        None,
+    )
+
+
+def test_describe_a_postgres_corpus_never_leaks_a_connection_setting(monkeypatch):
+    monkeypatch.setenv("MY_DB_URL", "postgresql://user:s3cret@host/db")
+    c = PgCorpus(
+        "public.docs", url_env="MY_DB_URL", aws_profile="secret-profile", auth="rds_iam"
+    )
+    source, filter_ = describe(c)
+    for leaked in ("s3cret", "postgresql://", "MY_DB_URL", "secret-profile", "rds_iam"):
+        assert leaked not in source
+    assert filter_ is None
