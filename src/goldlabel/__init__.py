@@ -22,6 +22,7 @@ from goldlabel.classifier import Classifier, CostLimit, Estimate, Predictions
 from goldlabel.cost import Cost, cost
 from goldlabel.evaluation import BandReport, Evaluation
 from goldlabel.gold import Gold, GoldSet, Sample
+from goldlabel.methodology import Methodology, get_methodology
 from goldlabel.search import PgCorpus, S3Corpus, Table
 from goldlabel.settings import settings
 from goldlabel.taxonomy import Taxonomy
@@ -44,6 +45,7 @@ __all__ = [
     "Gold",
     "GoldError",
     "GoldSet",
+    "Methodology",
     "PgCorpus",
     "Predictions",
     "S3Corpus",
@@ -54,6 +56,7 @@ __all__ = [
     "aget_candidates",
     "cost",
     "get_candidates",
+    "get_methodology",
     "label",
     "read_seeds",
     "settings",

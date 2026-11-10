@@ -26,11 +26,11 @@ Markdown, first person plural. A section is written only when its input is given
 ## Methodology
 
 ### Corpus and candidates
-We searched {corpus} for posts similar to {n_seeds} example phrases ("{seed}"; "{seed}"; ...). Each phrase was embedded with {embedding_model}, and we kept every item whose highest similarity to any phrase was at least {floor}. This produced {n} candidates. {capped_sentence}
-  (cutoff set) We then kept the items with similarity of at least {cutoff}, which left {n}.
+We searched {corpus} for items similar to {n_seeds} example phrases ("{seed}"; "{seed}"; ...). Each phrase was embedded with {embedding_model}, and we kept every item whose highest similarity to any phrase was at least {floor}. This produced {n} candidates. {capped_sentence}
+  (cutoff set) replaces "This produced {n} candidates." with: We then kept the items with similarity of at least {cutoff}, which left {n}.
   (keywords)  We selected items containing any of {n_terms} terms ("{term}"; ...), matched as {literal text | regular expressions}. This produced {n} candidates.
-  (all)       We used every item of {corpus}, {n} in all.
-  filter:     The corpus was filtered with: {filter}.
+  (all)       We used every item of {corpus}. This produced {n} candidates.
+  filter:     The corpus was filtered with: {filter}.   (placed before the "This produced" / cutoff sentence)
   not recorded: The seed phrases were not recorded in the candidates file.   |   The keywords were not recorded...   |   The corpus and filter were not recorded...
 
 ### Labels
