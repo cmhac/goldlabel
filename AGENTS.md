@@ -76,7 +76,7 @@ Python 3.12+, `uv`, `pydantic-ai-slim` (Agent, Embedder; anthropic and openai ex
 ## Commands
 
 ```
-scripts/dev-setup.sh           # what every Claude Code session runs first (SessionStart hook): uv sync (s3, pg, rds extras; not "local", which pulls ~6 GB of torch), pre-commit install
+scripts/dev-setup.sh           # the dev setup, run by hand (no session hook): uv sync (s3, pg, rds extras; not "local", which pulls ~6 GB of torch), pre-commit install
 uv sync --all-extras
 uv run ruff check
 uv run ruff format --check
@@ -85,6 +85,8 @@ uv run pytest                  # everything, parallel via pytest-xdist
 uv run pytest tests/test_x.py -n0   # one file, in-process (easier to debug)
 uv build                       # wheel must contain goldlabel/web/* and goldlabel/gold_rule.md
 ```
+
+**Nothing runs the setup for you** (the `SessionStart` hook was removed: it hung cloud sessions). If `uv`, `ruff`, `ty`, `pytest` or `pre-commit` is missing, or `.venv` does not exist, run `scripts/dev-setup.sh` first. It is safe to rerun and does only what is missing.
 
 Ruff, ty and pytest must pass before every commit (pre-commit enforces it). The `goldlabel` commands are `goldlabel install` and `goldlabel label` (`cli.py`, which imports the server only when `label` runs). CI (`.github/workflows/ci.yml`) runs the four checks; its optional `pgvector` job runs `tests/test_pg_integration.py` against a real pgvector and is skipped locally unless `GOLDLABEL_TEST_PG_URL` is set. `.github/workflows/publish.yml` runs on every push to `main`: when the `pyproject.toml` version is above every `v*` tag it runs the checks, creates the tag and GitHub release `v<version>`, and publishes to PyPI (trusted publishing, environment `pypi`). `pyproject.toml` is the only place a version is set: the `sync-versions` pre-commit hook (`scripts/sync_versions.py`) copies it into `plugin.json` and `.claude-plugin/{plugin,marketplace}.json`, and `tests/test_versions.py` fails when they differ, which stops a release before its tag.
 

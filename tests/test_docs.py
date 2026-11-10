@@ -166,15 +166,18 @@ def test_agents_md_holds_the_rule_and_claude_md_is_its_symlink():
     )
 
 
-def test_every_session_starts_with_the_dev_setup_script():
-    settings = json.loads((ROOT / ".claude" / "settings.json").read_text())
-    [hook] = [h for entry in settings["hooks"]["SessionStart"] for h in entry["hooks"]]
-    assert hook["command"] == '"$CLAUDE_PROJECT_DIR"/scripts/dev-setup.sh'
+def test_no_session_hook_runs_the_dev_setup_and_agents_md_says_to_run_it_by_hand():
+    settings = (
+        ROOT / ".claude" / "settings.json"
+    )  # a SessionStart hook hung cloud sessions
+    assert not settings.exists() or "SessionStart" not in settings.read_text()
     script = ROOT / "scripts" / "dev-setup.sh"
     assert os.access(script, os.X_OK)
-    assert "uv sync --extra s3 --extra pg --extra rds" in script.read_text()
-    assert "--all-extras" not in script.read_text().replace("Not --all-extras", "")
-    assert "pre-commit install" in script.read_text()
+    text = script.read_text()
+    assert "uv sync --extra s3 --extra pg --extra rds" in text
+    assert "--all-extras" not in text.replace("Not --all-extras", "")
+    assert "pre-commit install" in text
+    assert "scripts/dev-setup.sh" in (ROOT / "AGENTS.md").read_text()
 
 
 def test_the_docs_teach_goldlabel_label_for_reviewing_and_revising_labels():

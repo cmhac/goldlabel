@@ -1,6 +1,6 @@
 #!/bin/bash
-# The one dev environment setup for goldlabel. Claude Code runs it at every session start (the
-# SessionStart hook in .claude/settings.json), locally and in the cloud; people can run it by hand.
+# The one dev environment setup for goldlabel. Nothing runs it automatically (a SessionStart hook
+# hung cloud sessions): agents and people run it by hand, or a cloud environment's setup script calls it.
 # Safe to rerun: it does only what is missing. Its stdout reaches Claude, so tools write to stderr.
 set -euo pipefail
 cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/..}"
