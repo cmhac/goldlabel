@@ -17,7 +17,7 @@ Not everything is recorded today. Measured against the code on this branch (`can
 - `Predictions` and its `out` file record neither the cutoff chosen, nor the model, prompt or date of the run; `Predictions` itself carries counts and cost.
 - `evals.jsonl` does record model, prompt, taxonomy, score, cost and samples, so evaluation and tuning are fully recoverable.
 
-This spec decides what the function says when a fact is not recorded (it says so, in words) and leaves open whether to start recording the missing ones (see Clarifications).
+Decision (Clarifications, 2026-11-10): the candidates file starts recording how the search was run (seed phrases, keywords, regex flag, a description of the corpus and filter), so the methodology can state them. Nothing about a classification run is recorded: the cutoff is not even known to `classify` (`Candidates.above` leaves `floor` unchanged), so the *Run* section states the lowest similarity among the items classified instead. Where a fact is still not recorded (older candidates files, the run's own settings), the function says so in words.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -49,7 +49,7 @@ The reader of the methodology must be able to trust it. Anything the library doe
 
 1. **Given** only candidates, **When** called, **Then** only *Corpus and candidates* is written, and the text says nothing about labels, accuracy or cost (not "unknown": simply no claim).
 2. **Given** a results object whose price is unknown, **When** called, **Then** the cost is written as unknown (`?`) with the reason, never `$0`.
-3. **Given** candidates saved before this feature (no seed list), **When** called, **Then** the text says how many seeds were used only if that is recorded, and otherwise says the seed list was not recorded.
+3. **Given** candidates saved before this feature (no seed list), **When** called, **Then** the text says the seed list was not recorded; for candidates saved after this feature it gives the seed phrases verbatim.
 4. **Given** gold rows imported from a file, **When** called, **Then** the text says they were imported and labelled elsewhere, and does not say they were labelled in the labelling page; rows labelled in the page are described as labelled by people there. The number of people is never stated (it is not recorded).
 5. **Given** no argument at all, **When** called, **Then** it raises an error that says which arguments it takes.
 
@@ -109,13 +109,14 @@ A methodology that says "an LLM classified the posts" is not reproducible. The e
 - **FR-002**: The text MUST be built only from the arguments and the files they point at (the candidates file and `.meta.json`, the gold file, `evals.jsonl` beside it, a classifier bundle, the cost ledger); it MUST NOT call a model, an embedding service, a database, the network or a browser, and MUST cost nothing.
 - **FR-003**: Every fact in the text (count, name, score, date, price) MUST be traceable to one of those sources; a fact that is not recorded MUST be said to be not recorded, never estimated or filled in.
 - **FR-004**: The text MUST be deterministic: the same files and arguments give the same text.
-- **FR-005**: *Corpus and candidates* MUST say how the candidates were chosen (seeds with the embedding model and floor, keywords, or the whole corpus), how many there are, and whether a backend cap may have hidden items.
+- **FR-005**: *Corpus and candidates* MUST say how the candidates were chosen (the seed phrases verbatim with the embedding model and floor, the keywords and whether they were regular expressions, or the whole corpus), how many there are, what corpus and filter they came from, and whether a backend cap may have hidden items. Each of these is stated only when the candidates file records it.
+- **FR-005a**: A candidate search MUST save, in the candidates file's `.meta.json`, the seed phrases, the keywords and regex flag, and a plain-text description of the corpus (its file, table or index name) and of its `where=` filter. It MUST NEVER save a connection string, URL with credentials, key or token. Files saved before this feature MUST still be read unchanged, with those facts reported as not recorded.
 - **FR-006**: *Labels* MUST give the mode (one label per item, or every label that applies) and the labels, and say that `off_topic` is built in.
 - **FR-007**: *Gold labels* MUST say how many rows each named sample holds, how many are labelled and pending, how rows were labelled (in the labelling page, imported, or unstamped), how many were revised and how many carry a note, and that labels are human judgements. It MUST NOT state a number of labellers, and MUST NOT copy any note's text anywhere in the output (notes are a person's private remarks).
 - **FR-007a**: The *Appendix* MUST include the full gold dataset as a Markdown table, one row per gold row, with the columns `sample`, `id`, `text`, `label` and `labelled by` (labelling page, imported, or unstamped), in the order samples and rows appear in the gold file. A pending row shows `(pending)` as its label; a multi-label row lists its labels separated by commas. Text is shown exactly as stored, with `|` and line breaks escaped so the table stays one row per item. Notes and past revisions are not in the table. The table MUST be left out when the caller asks (a single `include_gold_table=False`), because it copies the corpus's own text and can be large; the other sections do not change.
 - **FR-008**: *Classifier* MUST name the model and say how many prompts were tried, from the evaluation history.
 - **FR-009**: *Evaluation* MUST report, for each evaluated sample, the headline metric and score, the target and whether it was met, the rows scored and skipped as pending, the date of the latest evaluation, how often the sample was evaluated and with how many prompts, and its cost; it MUST flag an evaluation that predates a label revision (STALE), and any sample evaluated more than once.
-- **FR-010**: *Run* MUST report how many items were classified (live, cached, resumed, failed) and the cost, written as unknown (`?`) when any price is unknown, never as `$0`.
+- **FR-010**: *Run* MUST report how many items were classified (live, cached, resumed, failed), the cost (written as unknown, `?`, when any price is unknown, never `$0`) and, when the items carry similarity scores, the lowest similarity among them. It MUST NOT state a cutoff, a run date or the model and prompt of the run unless they are given by a source (the classifier passed in, the evaluation log); a run's own settings are not recorded.
 - **FR-011**: The text MUST name each inconsistency between the pieces it was given (classifier differs from the evaluated one, taxonomy differs from the gold file's, candidates differ from the ones the gold rows came from) instead of describing them as one analysis.
 - **FR-012**: The closing *Appendix* MUST give the classifier's model, prompt and labels verbatim.
 - **FR-013**: The function MUST be read-only: it MUST NOT create, change or delete any file, and MUST NOT offer or contain any way to set a gold label.
@@ -141,13 +142,17 @@ A methodology that says "an LLM classified the posts" is not reproducible. The e
 - **SC-007**: With each input missing in turn, the function still returns text and the text claims nothing about the missing step.
 - **SC-008**: The text contains no note text from the gold file (checked by a gold file whose notes contain a marker string), in either the default output or with the table off.
 - **SC-009**: The appendix table has exactly one line per gold row (header excluded), including rows whose text holds `|` or line breaks, and with `include_gold_table=False` it has none.
+- **SC-010**: A candidate list saved by a search and read back gives the same seed phrases, keywords, regex flag, and corpus and filter description (100% of the cases built for seeds, keywords and whole-corpus searches), contains no string from the corpus's connection settings, and a candidates file saved before this feature still reads.
 
 ## Clarifications
 
-Two questions the user must answer before planning (the defaults are the smallest version):
+### Session 2026-11-10
 
-1. **[NEEDS CLARIFICATION: start recording the facts that are lost today?]** The seed list, keywords, regex flag and `where=` filter of a candidate search, the cutoff chosen, and the model, prompt and date of a classification run are not saved. Default (smallest): record nothing new; the text says "seed list not recorded" and so on. Alternative: add the seed list, keywords and a one-line description of the corpus and filter to the candidates `.meta.json`, and write a small meta file beside a run's `out` file (model, prompt digest, cutoff, date), so those sentences can be written. That changes two file formats (additively; old files still read) and is the larger feature.
-2. **[NEEDS CLARIFICATION: where does it find the gold file and the evaluation log?]** Default: from the `Gold` object passed in (its file, and `evals.jsonl` beside it), the same rule the rest of the library uses. Alternative: with no arguments, also look in the storage folder (`GOLDLABEL_DIR`, then `.goldlabel/`) for the default gold file, candidates and log. The alternative is more convenient and reads files the caller did not name; Principle V says every object carries what it needs.
+- Q: Should candidate searches start saving how they were run (seeds, keywords, corpus and filter description)? → A: Yes, option B: the candidates file records the seed phrases, the keywords and regex flag, and a description of the corpus and its filter. Nothing about a classification run is recorded; `classify`, its output file and `Predictions` are unchanged.
+
+### Open
+
+1. **[NEEDS CLARIFICATION: where does it find the gold file and the evaluation log?]** Default: from the `Gold` object passed in (its file, and `evals.jsonl` beside it), the same rule the rest of the library uses. Alternative: with no arguments, also look in the storage folder (`GOLDLABEL_DIR`, then `.goldlabel/`) for the default gold file, candidates and log. The alternative is more convenient and reads files the caller did not name; Principle V says every object carries what it needs.
 
 ## Assumptions
 
@@ -171,4 +176,5 @@ Two questions the user must answer before planning (the defaults are the smalles
 - Any other option: `include_gold_table` is the only switch, because the table copies corpus text and can be long.
 - Any change to the skills, README or agent docs (offered as a follow-up).
 - A command-line form (`goldlabel methodology`); the console has two commands and stays that way.
-- Recording new facts (unless the user chooses it in Clarification 1).
+- Recording anything about a classification run (cutoff, model, prompt, date): `classify`, its output file and `Predictions` are unchanged.
+- Recording the corpus's contents or a connection string; only a plain description of the source and filter is saved.
