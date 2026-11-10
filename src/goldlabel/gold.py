@@ -1,3 +1,5 @@
+"""Gold datasets: the rows people labelled by hand, kept in one file in the storage folder, in named samples."""
+
 import json
 import os
 import re
@@ -33,7 +35,20 @@ def _check_size(n, what: str) -> int:
 
 
 class GoldRow(BaseModel):
-    """One gold item. `labels` is `None` while pending. `sample` is the name of its sample."""
+    """One row of a gold dataset: a text and the labels a person gave it.
+
+    Attributes:
+        id: The row's id, a string, taken from the candidate it was drawn from.
+        text: The text a person labels.
+        labels: The labels a person chose, or None while the row is pending (not yet labelled).
+        sample: The name of the sample the row belongs to.
+        labelled_by: "goldlabel-ui" (labelled in the labelling page), "imported" (brought in
+            with `Gold.import_rows`) or None.
+        labelled_at: When the labels were saved, as an ISO date and time.
+        note: A comment a person wrote on the row in the labelling page; it is never sent to a model.
+        revisions: The earlier labels, notes and stamps of the row, oldest first, kept when a
+            person changes an already labelled row in the labelling page.
+    """
 
     model_config = ConfigDict(extra="allow")  # a hand-edited file keeps its other keys
 
@@ -58,6 +73,12 @@ class GoldRow(BaseModel):
         return value
 
     def dump(self) -> dict:
+        """Return the row as a plain dict for the gold file, leaving out fields that are empty.
+
+        Returns:
+            dict: The row's fields; `labelled_by`, `labelled_at`, `note` and `revisions` are
+            left out when they are empty.
+        """
         d = self.model_dump()
         for key in ("labelled_by", "labelled_at", "note"):
             if d[key] is None:
@@ -88,17 +109,37 @@ def _rows_table(rows: list[GoldRow]) -> str:
 
 @dataclass(frozen=True)
 class GoldSet:
-    """A read-only snapshot of gold rows."""
+    """A read-only snapshot of gold rows, as they were when it was taken.
+
+    It does not follow later changes to the gold file (a `Sample` does). Get one from
+    `Gold.pending`, `Gold.all`, `Gold.orphaned`, `Gold.remove` or `Gold.import_rows`.
+
+    Attributes:
+        rows: The `GoldRow`s.
+        name: What the snapshot holds, such as "all" or "pending".
+        path: The gold file the rows came from, or None.
+    """
 
     rows: list[GoldRow]
     name: str = "all"
     path: Path | None = None  # the gold file a view of `Gold` came from
 
     def __len__(self) -> int:
+        """Return the number of rows, labelled and pending."""
         return len(self.rows)
 
     def counts(self, taxonomy: Taxonomy) -> dict[str, int]:
-        """Rows per label, `off_topic` included; a multi-label row counts once per label."""
+        """Count how many rows carry each label.
+
+        `off_topic` is included, and a row with several labels is counted once for each. Pending
+        rows count for nothing.
+
+        Args:
+            taxonomy: The labels to count; labels not in it are ignored.
+
+        Returns:
+            dict[str, int]: Each label in the taxonomy, with its row count.
+        """
         counts = dict.fromkeys(taxonomy.names, 0)
         for r in self.rows:
             for label in r.labels or []:
@@ -107,9 +148,19 @@ class GoldSet:
         return counts
 
     def to_polars(self):
+        """Return the rows as a polars DataFrame.
+
+        Returns:
+            polars.DataFrame: One row per gold row.
+        """
         return _frame.to_polars([r.model_dump() for r in self.rows])
 
     def to_pandas(self):
+        """Return the rows as a pandas DataFrame.
+
+        Returns:
+            pandas.DataFrame: One row per gold row.
+        """
         return _frame.to_pandas([r.model_dump() for r in self.rows])
 
     def _summary(self) -> str:
@@ -127,9 +178,16 @@ class GoldSet:
 
 
 class Sample:
-    """A live, read-only view of one named sample of a gold dataset, or of several added with `+`.
+    """A live, read-only view of one named sample of a gold dataset, or of several joined with `+`.
 
-    It reads the gold file every time it is used, so it never shows stale rows.
+    It reads the gold file every time it is used, so it never shows stale rows, and it cannot
+    change a label: people label in the labelling page (`goldlabel.label`). Get one from
+    `Gold.draw_sample` or `gold["name"]`.
+
+    Attributes:
+        gold: The `Gold` dataset it reads.
+        names: The sample names it covers (more than one after `+`).
+        drawn: How many rows `Gold.draw_sample` added when it made this view (0 if none).
     """
 
     def __init__(self, gold: "Gold", names: tuple[str, ...], drawn: int = 0):
@@ -137,28 +195,64 @@ class Sample:
 
     @property
     def path(self) -> Path:
+        """The gold file this sample is read from."""
         return self.gold.path
 
     @property
     def rows(self) -> list[GoldRow]:
+        """The rows of this sample as they are in the file now, labelled and pending."""
         return [r for r in self.gold._read() if r.sample in self.names]
 
     def _set(self) -> GoldSet:
         return GoldSet(self.rows, " + ".join(self.names), self.path)
 
     def __len__(self) -> int:
+        """Return the number of rows in the sample now, labelled and pending."""
         return len(self.rows)
 
     def counts(self, taxonomy: Taxonomy) -> dict[str, int]:
+        """Count how many rows of the sample carry each label.
+
+        Args:
+            taxonomy: The labels to count; `off_topic` is included.
+
+        Returns:
+            dict[str, int]: Each label in the taxonomy, with its row count (a row with several
+            labels counts once for each; pending rows count for nothing).
+        """
         return self._set().counts(taxonomy)
 
     def to_polars(self):
+        """Return the rows as a polars DataFrame.
+
+        Returns:
+            polars.DataFrame: One row per gold row.
+        """
         return self._set().to_polars()
 
     def to_pandas(self):
+        """Return the rows as a pandas DataFrame.
+
+        Returns:
+            pandas.DataFrame: One row per gold row.
+        """
         return self._set().to_pandas()
 
     def __add__(self, other):
+        """Join two samples of the same gold dataset into one view (`dev + test`).
+
+        This is how a test sample that has been used up is added to the samples you tune on.
+        Nothing is written; no row is copied or moved.
+
+        Args:
+            other: Another `Sample` of the same gold file.
+
+        Returns:
+            Sample: A view of the rows of both.
+
+        Raises:
+            GoldError: `other` is a sample of a different gold file.
+        """
         if not isinstance(other, Sample):
             return NotImplemented
         if other.path.resolve() != self.path.resolve():
@@ -196,9 +290,29 @@ class Sample:
 
 
 class Gold:
-    """A gold dataset: one file in the storage folder, holding named samples.
+    """A gold dataset: one file in the storage folder, holding named samples of rows to label.
 
-    Every property and Sample reads the file again, so nothing shows stale rows.
+    The file is `gold.json` or, with a `name`, `gold-<name>.json`, in the storage folder
+    (`goldlabel.settings.root`). Rows are drawn from your candidates with `draw_sample` and are
+    labelled only by people, in the labelling page (`goldlabel.label`); this class has no way to
+    set a label (see `GOLD_RULE_SHORT`). Every property and `Sample` reads the file again, so
+    nothing shows stale rows.
+
+    Args:
+        candidates: The `Candidates` to draw rows from; None to open an existing file only.
+        name: A name for the dataset (lowercase letters, digits, `-` and `_`), so one folder can
+            hold several; None for the default file.
+        sample_size: How many rows `draw_sample` makes a sample hold when not told (default 50).
+
+    Attributes:
+        candidates: The candidates rows are drawn from.
+        name: The dataset's name, or None.
+        sample_size: The default sample size.
+        path: The gold file.
+
+    Raises:
+        GoldError: `name` has characters outside the allowed ones, or `sample_size` is not a
+            whole number of at least 1.
     """
 
     def __init__(self, candidates=None, *, name=None, sample_size=50):
@@ -210,6 +324,10 @@ class Gold:
 
     @property
     def label(self) -> str:
+        """The dataset's display name: its `name`, or "default" for the unnamed one.
+
+        This is a name for messages and page titles; it does not label anything.
+        """
         return self.name or "default"
 
     def _samples(self, rows: list[GoldRow]) -> dict[str, list[GoldRow]]:
@@ -239,7 +357,14 @@ class Gold:
         )
 
     def _doc(self) -> dict:
-        """The file as `{"taxonomy": dict | None, "rows": [raw rows]}`."""
+        """Read the gold file.
+
+        Returns:
+            dict: `{"taxonomy": dict | None, "rows": [raw rows]}`; empty when the file does not exist.
+
+        Raises:
+            GoldError: The file is not JSON, or is not an object with a `rows` list.
+        """
         if not self.path.exists():
             return {"taxonomy": None, "rows": []}
         try:
@@ -284,13 +409,34 @@ class Gold:
 
     @property
     def pending(self) -> GoldSet:
+        """The rows in the file that nobody has labelled yet, in every sample.
+
+        Returns:
+            GoldSet: A snapshot taken now; for one sample use `gold[name]`.
+        """
         return GoldSet([r for r in self._read() if not r.labels], "pending", self.path)
 
     @property
     def all(self) -> GoldSet:
+        """Every row in the file, labelled and pending, in every sample.
+
+        Returns:
+            GoldSet: A snapshot taken now; for one sample use `gold[name]`.
+        """
         return GoldSet(self._read(), "all", self.path)
 
     def __getitem__(self, name: str) -> Sample:
+        """Get the sample called `name` (`gold["dev"]`) as a live, read-only view.
+
+        Args:
+            name: The sample's name.
+
+        Returns:
+            Sample: A view of that sample's rows.
+
+        Raises:
+            KeyError: The file has no sample of that name; the message lists the ones it has.
+        """
         names = list(self._samples(self._read()))
         if name not in names:
             raise KeyError(
@@ -299,11 +445,24 @@ class Gold:
         return Sample(self, (name,))
 
     def draw_sample(self, name: str, n: int | None = None) -> Sample:
-        """Make the sample `name` hold at least `n` rows (default `sample_size`), drawing only the
-        shortfall as pending rows, in an order fixed by each candidate's id and this dataset's name.
+        """Top a sample up to `n` rows, drawing new pending rows from the candidates.
 
-        Rerunning draws nothing once the sample is full. Never removes rows; never draws an id that
-        is already in the file or was removed from it.
+        Only the shortfall is drawn, in an order fixed by each candidate's id and this dataset's
+        name, so there is no random seed and rerunning draws nothing once the sample is full.
+        Rows are added to the gold file as pending, for a person to label; existing rows are
+        never removed, and an id that is already in the file, or was removed from it, is never
+        drawn again.
+
+        Args:
+            name: The sample's name, such as "dev" or "test" (lowercase letters, digits, `-`, `_`).
+            n: How many rows the sample should hold; None uses `sample_size`.
+
+        Returns:
+            Sample: A live view of the sample (its `drawn` says how many rows were added now).
+
+        Raises:
+            GoldError: `name` or `n` is invalid, rows are needed but this `Gold` was made
+                without candidates, or too few candidates are left to draw from.
         """
         _check_name(name)
         n = self.sample_size if n is None else _check_size(n, "n")
@@ -341,8 +500,22 @@ class Gold:
         return Sample(self, (name,), drawn=need)
 
     def import_rows(self, rows, name: str) -> GoldSet:
-        """Add rows people already labelled (dicts with `id`, `text`, `labels`) to the sample
-        `name`, stamped `imported`. Labels are not checked against a taxonomy here; evaluation does that.
+        """Bring in rows that people have already labelled, unchanged, into a sample.
+
+        Only for labels that people wrote; never labels from a model or written by code (see
+        `GOLD_RULE_SHORT`). The rows are added to the gold file and stamped "imported". Labels
+        are not checked against a taxonomy here; `evaluate` does that.
+
+        Args:
+            rows: Dicts with `id`, `text` and a non-empty `labels` list (any other keys are kept).
+            name: The sample to add them to (lowercase letters, digits, `-`, `_`).
+
+        Returns:
+            GoldSet: The rows that were added.
+
+        Raises:
+            GoldError: `name` is invalid, a row lacks `id`, `text` or labels, or an id is
+                already in the file.
         """
         _check_name(name)
         existing = self._read()
@@ -366,7 +539,16 @@ class Gold:
         return GoldSet(new, "imported")
 
     def orphaned(self, taxonomy: Taxonomy) -> GoldSet:
-        """Labelled rows with a label that is no longer in the taxonomy."""
+        """Find labelled rows that use a label the taxonomy no longer has.
+
+        Useful after renaming or removing a label: `evaluate` refuses such rows.
+
+        Args:
+            taxonomy: The current taxonomy.
+
+        Returns:
+            GoldSet: A snapshot of those rows.
+        """
         names = set(taxonomy.names)
         return GoldSet(
             [r for r in self._read() if r.labels and not set(r.labels) <= names],
@@ -374,9 +556,20 @@ class Gold:
         )
 
     def remove(self, ids) -> GoldSet:
-        """Move rows to `<gold>.removed.jsonl` (appended) and rewrite the file without them.
+        """Take rows out of the gold file by id, keeping a copy of them.
 
-        A removed id is never drawn again.
+        The rows are appended to `<gold file>.removed.jsonl` and the gold file is rewritten
+        without them. A removed id is never drawn again.
+
+        Args:
+            ids: The ids to remove, as a list (not a single string).
+
+        Returns:
+            GoldSet: The rows that were removed.
+
+        Raises:
+            GoldTypeError: `ids` is a single string.
+            GoldError: An id is not in the file; nothing is removed.
         """
         if isinstance(ids, str):
             raise GoldTypeError("ids must be a list of ids, not a string")
