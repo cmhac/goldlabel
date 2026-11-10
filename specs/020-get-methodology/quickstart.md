@@ -5,7 +5,7 @@ Prerequisite: `scripts/dev-setup.sh` has run. No key, network or browser is need
 ## 1. Automated
 
 ```bash
-uv run pytest tests/test_methodology.py tests/test_candidates.py tests/test_corpus.py tests/test_public_api.py tests/test_docstrings.py -n0
+uv run pytest tests/test_methodology.py tests/test_candidates.py tests/test_classifier.py tests/test_corpus.py tests/test_public_api.py tests/test_docstrings.py -n0
 uv run ruff check && uv run ruff format --check && uv run ty check && uv run pytest
 ```
 
@@ -26,9 +26,10 @@ Expect: green; `tests/test_methodology.py` builds a gold file and an `evals.json
 
 3. Check, against `.goldlabel/candidates.meta.json`, `.goldlabel/gold.json` and `.goldlabel/evals.jsonl`: every number and name in the text appears in one of them (SC-002).
 4. Run the cell again: identical text (SC-003). Run with `include_gold_table=False`: no table, nothing else changes.
-5. Evaluate `test` a second time under a new prompt: the text now says the test sample was evaluated 2 times with 2 prompts (SC-005).
-6. In `goldlabel label`, revise one `dev` label: the text flags the `dev` evaluation as predating a revision.
-7. `git status` shows no gold or log file touched by the call (SC-006).
+5. Open `results.jsonl`: every line has `run`, `model` and `at`. The text's *Run* section gives the same model, the first and last `at`, and the cutoff you passed to `above`.
+6. Evaluate `test` a second time under a new prompt: the text now says the test sample was evaluated 2 times with 2 prompts (SC-005).
+7. In `goldlabel label`, revise one `dev` label: the text flags the `dev` evaluation as predating a revision.
+8. `git status` shows no gold or log file touched by the call (SC-006).
 
 ## 3. Needs a human
 

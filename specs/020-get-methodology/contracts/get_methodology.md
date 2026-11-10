@@ -14,7 +14,7 @@ gl.get_methodology(
 ```
 
 - Keyword-only. At least one of the first four is required: `ValueError("give at least one of candidates, gold, classifier or results")`.
-- `candidates` wins over `gold.candidates`; when both are given and differ, the text warns.
+- `candidates` wins over `gold.candidates`. Pass the list you classified (the one `above` returned) to get the cutoff; the gold file's own candidates are the uncut list.
 - Evaluations are read from `evals.jsonl` beside `gold.path`, never from anywhere else.
 - Reads files, writes none, calls no model, no network, no browser. Costs nothing.
 
@@ -27,6 +27,7 @@ Markdown, first person plural. A section is written only when its input is given
 
 ### Corpus and candidates
 We searched {corpus} for posts similar to {n_seeds} example phrases ("{seed}"; "{seed}"; ...). Each phrase was embedded with {embedding_model}, and we kept every item whose highest similarity to any phrase was at least {floor}. This produced {n} candidates. {capped_sentence}
+  (cutoff set) We then kept the items with similarity of at least {cutoff}, which left {n}.
   (keywords)  We selected items containing any of {n_terms} terms ("{term}"; ...), matched as {literal text | regular expressions}. This produced {n} candidates.
   (all)       We used every item of {corpus}, {n} in all.
   filter:     The corpus was filtered with: {filter}.
@@ -47,14 +48,17 @@ Metric: {metric}; target {target | none}.
 Evaluation calls cost {$x.xx | ?, a price is unknown}.
 
 ### Run
-{n} items were classified: {live} by live model calls, {cached} from the cache, {resumed} resumed, {failed} failed. The run cost {$x.xx | ?, a price is unknown}. The lowest similarity among the items was {s}. The cutoff, the date of the run, and the model and prompt that produced these results are not recorded.
+{n} items were classified by `{model}` between {first_at} and {last_at}: {live} by live model calls, {cached} from the cache, {resumed} resumed, {failed} failed. The run cost {$x.xx | ?, a price is unknown}. The similarity cutoff was {cutoff}; the lowest similarity among the items was {s}.
+  (rows without model or time) The model and time were not recorded on {k} of the rows.
+  (no cutoff) The similarity cutoff was not recorded.
+  (digest differs from the classifier passed in) These results were produced by a different classifier from the one passed in, so its prompt is not given as the prompt of the run.
 
 ### Warnings
 - The {samples} sample was evaluated {k} times with {p} prompts.
 - The {samples} evaluation of {date} predates a revision of {r} gold label(s); its score may no longer match the labels.
-- The classifier passed in is not the one that was evaluated ({what differs}).
+- The classifier passed in is not the one that was evaluated ({what differs}), or not the one that produced the results.
 - The classifier's taxonomy differs from the gold file's.
-- {r} gold rows are not among the candidates passed in.
+- {r} gold rows are not among the candidates passed in. (checked only when the candidates have no cutoff)
 (none: the section is omitted)
 
 ### Appendix

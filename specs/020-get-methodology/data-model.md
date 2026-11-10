@@ -23,19 +23,31 @@ New fields, all optional with these defaults, so existing constructions and old 
 | `regex` | `False` | keywords are regular expressions (a compiled pattern sets it) |
 | `corpus` | `None` | always by `get_candidates`: a plain description of the source (no secrets) |
 | `filter` | `None` | the corpus has a `where=` |
+| `cutoff` | `None` | set by `above(t)`; a later `above` replaces it |
 
-`write` adds `seeds`, `keywords`, `regex`, `corpus`, `filter` to `.meta.json`; `read` uses `meta.get` for each. `above`, `sample` (via `replace`) carry them. Not recorded: `limit`, `server_side`, the cache, the cutoff.
+`write` adds `seeds`, `keywords`, `regex`, `corpus`, `filter`, `cutoff` to `.meta.json`; `read` uses `meta.get` for each. `above`, `sample` (via `replace`) carry them. Not recorded: `limit`, `server_side`, the cache.
+
+## Result rows (changed, additive)
+
+Every row `classify` writes, in memory and in the `out` file, gains two keys beside `run`:
+
+| Key | Value |
+|---|---|
+| `model` | the model name as `_model_name(model)` gives it |
+| `at` | UTC ISO time the row was finished |
+
+Resume keys on `run` only, so files written before this feature still resume; their rows have neither key and are reported as not recorded. Not stored: the prompt or taxonomy (the `run` digest ties the rows to a classifier).
 
 ## Inputs read (never changed)
 
 - Gold dataset: `Gold.path` file (taxonomy dict, rows) and `evals.jsonl` beside it.
 - Evaluation line fields used: `time`, `samples`, `digest`, `model`, `prompt`, `metric`, `target`, `score`, `n`, `skipped_pending`, `dollars`.
 - Classifier: `model`, `prompt`, `taxonomy`, `digest`, `evaluation`.
-- Predictions: `rows` (`max_similarity` when present, `error` when failed), `live`, `cached`, `resumed`, `cost`.
+- Predictions: `rows` (`run`, `model`, `at`, `max_similarity` when present, `error` when failed), `live`, `cached`, `resumed`, `cost`.
 
 ## Validation rules
 
-- No argument: `ValueError` naming the five arguments.
+- No argument: `ValueError` naming the four objects.
 - An argument of the wrong type: `TypeError` naming it (a corpus is not accepted; only the four objects).
 - `gold` with no file yet: its sections say there are no samples, no error.
 - `evals.jsonl` absent or damaged lines: skipped by `_history`, so no evaluation claims.
